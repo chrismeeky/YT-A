@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: { id: string; scriptId: string; sceneId: string } }
 ) {
   const script = getScript(params.id, params.scriptId);
-  const scene = script?.scenes.find(s => s.id === params.sceneId);
+  const scene  = script?.scenes.find(s => s.id === params.sceneId);
   const audioFile = scene?.audioFile ?? null;
   if (!audioFile) return NextResponse.json({ audioFile: null, absolutePath: null });
   const absolutePath = path.join(getSceneAudioPath(params.id, params.scriptId, params.sceneId), audioFile);
@@ -16,12 +16,30 @@ export async function GET(
 }
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string; scriptId: string; sceneId: string } }
 ) {
+  // Body is optional — all fields fall back to server settings.json for local dev
+  const body = await request.json().catch(() => ({} as Record<string, unknown>)) as {
+    elevenLabsApiKey?:    string;
+    elevenLabsVoiceId?:   string;
+    elevenLabsSpeed?:     number;
+    elevenLabsStability?: number;
+    elevenLabsSimilarity?: number;
+    elevenLabsStyle?:     number;
+  };
+
   const settings = getSettings();
-  if (!settings.elevenLabsApiKey) {
-    return NextResponse.json({ error: 'ElevenLabs API key not configured. Go to Settings.' }, { status: 400 });
+
+  const elevenLabsApiKey   = (body.elevenLabsApiKey   as string  | undefined)?.trim() || settings.elevenLabsApiKey;
+  const elevenLabsVoiceId  = (body.elevenLabsVoiceId  as string  | undefined)?.trim() || settings.elevenLabsVoiceId;
+  const elevenLabsSpeed    = (body.elevenLabsSpeed    as number  | undefined) ?? settings.elevenLabsSpeed;
+  const elevenLabsStability   = (body.elevenLabsStability   as number | undefined) ?? settings.elevenLabsStability;
+  const elevenLabsSimilarity  = (body.elevenLabsSimilarity  as number | undefined) ?? settings.elevenLabsSimilarity;
+  const elevenLabsStyle       = (body.elevenLabsStyle       as number | undefined) ?? settings.elevenLabsStyle;
+
+  if (!elevenLabsApiKey) {
+    return NextResponse.json({ error: 'ElevenLabs API key not configured. Add it in Settings.' }, { status: 400 });
   }
 
   const script = getScript(params.id, params.scriptId);
@@ -37,25 +55,23 @@ export async function POST(
   try {
     const audioBuffer = await generateSpeech(
       scene.narration,
-      settings.elevenLabsApiKey,
-      settings.elevenLabsVoiceId,
+      elevenLabsApiKey,
+      elevenLabsVoiceId,
       {
-        speed: settings.elevenLabsSpeed,
-        stability: settings.elevenLabsStability,
-        similarity: settings.elevenLabsSimilarity,
-        style: settings.elevenLabsStyle,
-      }
+        speed:      elevenLabsSpeed,
+        stability:  elevenLabsStability,
+        similarity: elevenLabsSimilarity,
+        style:      elevenLabsStyle,
+      },
     );
 
     const filename = `audio_scene_${String(scene.number).padStart(3, '0')}.mp3`;
     saveAudioFile(params.id, params.scriptId, params.sceneId, filename, audioBuffer);
 
-    // Update scene audioFile reference
     const updatedScenes = script.scenes.map(s =>
-      s.id === params.sceneId ? { ...s, audioFile: filename } : s
+      s.id === params.sceneId ? { ...s, audioFile: filename } : s,
     );
-    const updated = { ...script, scenes: updatedScenes, updatedAt: new Date().toISOString() };
-    saveScript(params.id, updated);
+    saveScript(params.id, { ...script, scenes: updatedScenes, updatedAt: new Date().toISOString() });
 
     return NextResponse.json({ ok: true, filename });
   } catch (err: unknown) {

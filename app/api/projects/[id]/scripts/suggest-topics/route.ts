@@ -6,11 +6,15 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const body = (await request.json()) as { analysisId: string };
+  const body = (await request.json()) as {
+    analysisId: string;
+    // Client-provided key; falls back to server settings.json for local dev
+    anthropicApiKey?: string;
+  };
 
-  const settings = getSettings();
-  if (!settings.anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured.' }, { status: 400 });
+  const anthropicApiKey = body.anthropicApiKey?.trim() || getSettings().anthropicApiKey;
+  if (!anthropicApiKey) {
+    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
   }
 
   const analysis = getAnalysis(params.id, body.analysisId);
@@ -18,7 +22,7 @@ export async function POST(
     return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
   }
 
-  const ai = new Anthropic({ apiKey: settings.anthropicApiKey });
+  const ai = new Anthropic({ apiKey: anthropicApiKey });
 
   const insights = analysis.channelInsights;
   const prompt = `You are a YouTube video strategist. Based on the following channel analysis, suggest 5 compelling video topic ideas that would perform well on this channel.
@@ -44,11 +48,7 @@ Respond with a raw JSON array only. No markdown, no code fences, no explanation.
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
-
-  // Strip markdown code fences if present
   const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-
-  // Extract JSON array
   const arrayMatch = stripped.match(/\[[\s\S]*\]/);
   const raw = arrayMatch ? arrayMatch[0] : stripped;
 
@@ -59,7 +59,7 @@ Respond with a raw JSON array only. No markdown, no code fences, no explanation.
     console.error('[suggest-topics] Parse failed. Raw response:', text);
     return NextResponse.json(
       { error: `Failed to parse suggestions. Model returned: ${text.slice(0, 200)}` },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

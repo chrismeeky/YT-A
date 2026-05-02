@@ -205,6 +205,17 @@ export default function SettingsPage() {
             />,
             'Required for Stock Photos per scene. Free at pexels.com/api — 200 requests/hour.'
           )}
+          {field(
+            'YouTube Data API Key',
+            <SecretInput
+              value={form.youtubeApiKey ?? ''}
+              onChange={v => set('youtubeApiKey', v)}
+              className={inputClass}
+              style={inputStyle}
+              placeholder="AIza…"
+            />,
+            'Required for fetching channel videos. Get a free key at console.cloud.google.com → YouTube Data API v3.'
+          )}
         </>)}
 
         {section('ElevenLabs Voice Settings', (
@@ -260,19 +271,6 @@ export default function SettingsPage() {
           </p>
         </>)}
 
-        {section('Storage', <>
-          {field(
-            'Projects Storage Path',
-            <input
-              value={form.storagePath ?? ''}
-              onChange={e => set('storagePath', e.target.value)}
-              className={inputClass}
-              style={inputStyle}
-              placeholder="~/Documents/YoutubeAnalyzer"
-            />,
-            'Leave blank to use the default: ~/Documents/YoutubeAnalyzer'
-          )}
-        </>)}
 
         <div className="flex items-center gap-4">
           <button
@@ -299,8 +297,9 @@ export default function SettingsPage() {
           <li className="flex items-start gap-2">
             <span className="text-green-500 mt-0.5">▶</span>
             <span>
-              <strong className="text-[#a1a1aa]">yt-dlp</strong> must be installed for channel video fetching.{' '}
-              <code className="text-xs bg-[#1a1a1a] px-1.5 py-0.5 rounded">brew install yt-dlp</code>
+              <strong className="text-[#a1a1aa]">YouTube Data API key</strong> needed for fetching channel videos.{' '}
+              Enable the YouTube Data API v3 at{' '}
+              <span className="font-mono text-xs bg-[#1a1a1a] px-1.5 py-0.5 rounded">console.cloud.google.com</span>
             </span>
           </li>
           <li className="flex items-start gap-2">

@@ -370,6 +370,7 @@ export interface AppSettings {
   elevenLabsSimilarity: number;
   elevenLabsStyle: number;
   pexelsApiKey: string;
+  youtubeApiKey: string;
   defaultVideoLength: number;
   defaultWpm: number;
   storagePath: string;
@@ -384,6 +385,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   elevenLabsSimilarity: 0.75,
   elevenLabsStyle: 0.0,
   pexelsApiKey: '',
+  youtubeApiKey: '',
   defaultVideoLength: 5,
   defaultWpm: 150,
   storagePath: '',

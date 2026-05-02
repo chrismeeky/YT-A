@@ -8,9 +8,22 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string; scriptId: string; sceneId: string } }
 ) {
+  const body = (await request.json()) as {
+    image?: boolean;
+    video?: boolean;
+    stock?: boolean;
+    stockPhotos?: boolean;
+    realImages?: boolean;
+    stockVideos?: boolean;
+    // Client-provided keys; fall back to server settings.json for local dev
+    anthropicApiKey?: string;
+    pexelsApiKey?: string;
+  };
+
   const settings = getSettings();
-  if (!settings.anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured.' }, { status: 400 });
+  const anthropicApiKey = body.anthropicApiKey?.trim() || settings.anthropicApiKey;
+  if (!anthropicApiKey) {
+    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
   }
 
   const script = getScript(params.id, params.scriptId);
@@ -22,48 +35,40 @@ export async function POST(
   const analysis = getAnalysis(params.id, script.analysisId);
   if (!analysis) return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
 
-  const body = (await request.json()) as {
-    image?: boolean;
-    video?: boolean;
-    stock?: boolean;
-    stockPhotos?: boolean;
-    realImages?: boolean;
-    stockVideos?: boolean;
-  };
-
   try {
     const assets = await generateSceneAssets(
-      settings.anthropicApiKey,
+      anthropicApiKey,
       scene,
       analysis.channelInsights,
       {
-        image: body.image ?? scene.includeImagePrompt,
-        video: body.video ?? scene.includeVideoPrompt,
-        stock: body.stock ?? scene.includeStockUrl,
+        image:       body.image       ?? scene.includeImagePrompt,
+        video:       body.video       ?? scene.includeVideoPrompt,
+        stock:       body.stock       ?? scene.includeStockUrl,
         stockPhotos: body.stockPhotos ?? scene.includeStockPhotos,
-        realImages: body.realImages ?? scene.includeRealImages,
+        realImages:  body.realImages  ?? scene.includeRealImages,
         stockVideos: body.stockVideos ?? scene.includeStockVideos,
       },
       analysis,
-      scene.assetGranularity ?? 2
+      scene.assetGranularity ?? 2,
     );
 
-    // Fetch stock photos for each query in parallel
+    // Stock photos
     let stockPhotoSegments: StockPhotoSegment[] | undefined;
     if (assets.stockPhotoQueries?.length) {
-      if (!settings.pexelsApiKey) {
+      const pexelsApiKey = body.pexelsApiKey?.trim() || settings.pexelsApiKey;
+      if (!pexelsApiKey) {
         return NextResponse.json({ error: 'Pexels API key not configured. Add it in Settings.' }, { status: 400 });
       }
       stockPhotoSegments = await Promise.all(
         assets.stockPhotoQueries.map(async ({ query, excerpt }) => ({
           query,
           narrationExcerpt: excerpt,
-          photos: await searchPexels(query, settings.pexelsApiKey, 6),
-        }))
+          photos: await searchPexels(query, pexelsApiKey, 6),
+        })),
       );
     }
 
-    // Fetch real images for each query in parallel (DuckDuckGo scraping)
+    // Real images (DuckDuckGo — no key needed)
     let realImageSegments: RealImageSegment[] | undefined;
     if (assets.realImageQueries?.length) {
       realImageSegments = await Promise.all(
@@ -71,22 +76,23 @@ export async function POST(
           query,
           narrationExcerpt: excerpt,
           images: await searchDuckDuckGo(query, 6),
-        }))
+        })),
       );
     }
 
-    // Fetch Pexels stock videos
+    // Stock videos
     let stockVideoSegments: StockVideoSegment[] | undefined;
     if (assets.stockVideoQueries?.length) {
-      if (!settings.pexelsApiKey) {
+      const pexelsApiKey = body.pexelsApiKey?.trim() || settings.pexelsApiKey;
+      if (!pexelsApiKey) {
         return NextResponse.json({ error: 'Pexels API key not configured. Add it in Settings.' }, { status: 400 });
       }
       stockVideoSegments = await Promise.all(
         assets.stockVideoQueries.map(async ({ query, excerpt }) => ({
           query,
           narrationExcerpt: excerpt,
-          videos: await searchPexelsVideos(query, settings.pexelsApiKey, 4),
-        }))
+          videos: await searchPexelsVideos(query, pexelsApiKey, 4),
+        })),
       );
     }
 
@@ -94,16 +100,16 @@ export async function POST(
       s.id === params.sceneId
         ? {
             ...s,
-            imagePrompts: assets.imagePrompts ?? s.imagePrompts,
+            imagePrompts:        assets.imagePrompts        ?? s.imagePrompts,
             imagePromptExcerpts: assets.imagePromptExcerpts ?? s.imagePromptExcerpts,
-            videoPrompts: assets.videoPrompts ?? s.videoPrompts,
+            videoPrompts:        assets.videoPrompts        ?? s.videoPrompts,
             videoPromptExcerpts: assets.videoPromptExcerpts ?? s.videoPromptExcerpts,
-            stockUrl: assets.stockUrl ?? s.stockUrl,
+            stockUrl:            assets.stockUrl            ?? s.stockUrl,
             ...(stockPhotoSegments !== undefined && { stockPhotoSegments }),
-            ...(realImageSegments !== undefined && { realImageSegments }),
+            ...(realImageSegments  !== undefined && { realImageSegments }),
             ...(stockVideoSegments !== undefined && { stockVideoSegments }),
           }
-        : s
+        : s,
     );
 
     const updated = { ...script, scenes: updatedScenes, updatedAt: new Date().toISOString() };

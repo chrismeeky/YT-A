@@ -1,52 +1,38 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import type { ChannelVideo } from './types';
 
-const execFileAsync = promisify(execFile);
+const YT = 'https://www.googleapis.com/youtube/v3';
 
-async function ytdlp(args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync('yt-dlp', args, { maxBuffer: 50 * 1024 * 1024 });
-    return stdout;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('not found') || msg.includes('ENOENT')) {
-      throw new Error('yt-dlp is not installed. Install it with: brew install yt-dlp');
-    }
-    throw err;
-  }
-}
+// ─── Public API ────────────────────────────────────────────────────────────
 
-export async function getChannelVideos(channelUrl: string, maxVideos = 20): Promise<ChannelVideo[]> {
-  const stdout = await ytdlp([
-    '--flat-playlist',
-    '--dump-json',
-    '--playlist-end', String(maxVideos),
-    '--no-warnings',
-    channelUrl,
-  ]);
+export async function getChannelVideos(
+  channelUrl: string,
+  maxVideos = 20,
+  apiKey?: string,
+): Promise<ChannelVideo[]> {
+  if (!apiKey) throw new Error('YouTube API key is required. Add it in Settings.');
 
-  const lines = stdout.trim().split('\n').filter(Boolean);
-  return lines.map(line => {
-    const d = JSON.parse(line);
-    const videoId = d.id as string;
-    const thumbnail =
-      `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+  const channelId = await resolveChannelId(channelUrl.trim(), apiKey);
+  const uploadsId = await getUploadsPlaylistId(channelId, apiKey);
+  const items     = await fetchPlaylistItems(uploadsId, maxVideos, apiKey);
+  const details   = await fetchVideoDetails(items.map(i => i.videoId), apiKey);
 
+  return items.map(item => {
+    const d = details.find(x => x.id === item.videoId);
     return {
-      id: videoId,
-      title: (d.title as string) || 'Untitled',
-      url: `https://www.youtube.com/watch?v=${videoId}`,
-      thumbnail,
-      duration: formatDuration(d.duration as number | null),
-      viewCount: (d.view_count as number) || 0,
-      uploadDate: formatDate(d.upload_date as string | null),
-      description: (d.description as string) || '',
-      channelName: (d.channel as string) || (d.uploader as string) || '',
+      id:          item.videoId,
+      title:       item.title,
+      url:         `https://www.youtube.com/watch?v=${item.videoId}`,
+      thumbnail:   `https://img.youtube.com/vi/${item.videoId}/maxresdefault.jpg`,
+      duration:    d?.duration  ?? 'N/A',
+      viewCount:   d?.viewCount ?? 0,
+      uploadDate:  item.publishedAt.slice(0, 10),
+      description: item.description,
+      channelName: item.channelTitle,
     } satisfies ChannelVideo;
   });
 }
 
+// Transcript and thumbnail fetches are plain HTTP — no API key needed.
 export async function getVideoTranscript(videoId: string): Promise<string> {
   try {
     const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
@@ -87,20 +73,18 @@ export async function getVideoTranscript(videoId: string): Promise<string> {
 }
 
 export async function getThumbnailBase64(
-  videoId: string
+  videoId: string,
 ): Promise<{ data: string; mediaType: 'image/jpeg' | 'image/webp' }> {
   const urls = [
     `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
     `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
   ];
-
   for (const url of urls) {
     try {
       const res = await fetch(url);
       if (!res.ok) continue;
       const buffer = await res.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString('base64');
-      return { data: base64, mediaType: 'image/jpeg' };
+      return { data: Buffer.from(buffer).toString('base64'), mediaType: 'image/jpeg' };
     } catch {
       continue;
     }
@@ -108,14 +92,143 @@ export async function getThumbnailBase64(
   return { data: '', mediaType: 'image/jpeg' };
 }
 
-function formatDuration(seconds: number | null): string {
-  if (!seconds) return 'N/A';
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+// ─── Channel resolution ────────────────────────────────────────────────────
+
+async function resolveChannelId(url: string, apiKey: string): Promise<string> {
+  // /channel/UCxxxxxxx  — ID is in the URL
+  const byId = url.match(/\/channel\/(UC[\w-]+)/);
+  if (byId) return byId[1];
+
+  // /@handle
+  const byHandle = url.match(/\/@([\w.-]+)/);
+  if (byHandle) {
+    return ytChannelsQuery(`forHandle=@${byHandle[1]}`, apiKey);
+  }
+
+  // /user/name  (legacy)
+  const byUser = url.match(/\/user\/([\w-]+)/);
+  if (byUser) {
+    return ytChannelsQuery(`forUsername=${byUser[1]}`, apiKey);
+  }
+
+  // /c/name or bare channel name — try forHandle as last resort
+  const byCustom = url.match(/\/c\/([\w.-]+)/);
+  if (byCustom) {
+    return ytChannelsQuery(`forHandle=@${byCustom[1]}`, apiKey);
+  }
+
+  throw new Error(
+    'Could not parse channel URL. Use https://www.youtube.com/@channelname',
+  );
 }
 
-function formatDate(uploadDate: string | null): string {
-  if (!uploadDate || uploadDate.length !== 8) return '';
-  return `${uploadDate.slice(0, 4)}-${uploadDate.slice(4, 6)}-${uploadDate.slice(6, 8)}`;
+async function ytChannelsQuery(queryParam: string, apiKey: string): Promise<string> {
+  const res  = await fetch(`${YT}/channels?part=id&${queryParam}&key=${apiKey}`);
+  const data = await res.json() as { error?: { message: string }; items?: { id: string }[] };
+  if (!res.ok) throw new Error(data.error?.message ?? 'Failed to resolve channel');
+  const id = data.items?.[0]?.id;
+  if (!id) throw new Error('Channel not found. Check the URL and that your YouTube API key is valid.');
+  return id;
+}
+
+// ─── Playlist helpers ──────────────────────────────────────────────────────
+
+async function getUploadsPlaylistId(channelId: string, apiKey: string): Promise<string> {
+  const res  = await fetch(`${YT}/channels?part=contentDetails&id=${channelId}&key=${apiKey}`);
+  const data = await res.json() as {
+    error?: { message: string };
+    items?: { contentDetails: { relatedPlaylists: { uploads: string } } }[];
+  };
+  if (!res.ok) throw new Error(data.error?.message ?? 'Failed to get channel details');
+  const id = data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!id) throw new Error('Could not find uploads playlist for this channel');
+  return id;
+}
+
+interface PlaylistItem {
+  videoId:      string;
+  title:        string;
+  description:  string;
+  channelTitle: string;
+  publishedAt:  string;
+}
+
+async function fetchPlaylistItems(
+  playlistId: string,
+  maxResults: number,
+  apiKey: string,
+): Promise<PlaylistItem[]> {
+  const items: PlaylistItem[] = [];
+  let pageToken: string | undefined;
+
+  while (items.length < maxResults) {
+    const batch = Math.min(50, maxResults - items.length);
+    let url = `${YT}/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=${batch}&key=${apiKey}`;
+    if (pageToken) url += `&pageToken=${pageToken}`;
+
+    const res  = await fetch(url);
+    const data = await res.json() as {
+      error?: { message: string };
+      nextPageToken?: string;
+      items?: { snippet: { resourceId: { videoId: string }; title: string; description: string; channelTitle: string; publishedAt: string } }[];
+    };
+    if (!res.ok) throw new Error(data.error?.message ?? 'Failed to get playlist items');
+
+    for (const item of data.items ?? []) {
+      const s = item.snippet;
+      if (s?.resourceId?.videoId) {
+        items.push({
+          videoId:      s.resourceId.videoId,
+          title:        s.title        ?? 'Untitled',
+          description:  s.description  ?? '',
+          channelTitle: s.channelTitle ?? '',
+          publishedAt:  s.publishedAt  ?? new Date().toISOString(),
+        });
+      }
+    }
+
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+
+  return items;
+}
+
+// ─── Video details (duration + view count) ────────────────────────────────
+
+interface VideoDetail {
+  id:        string;
+  duration:  string;
+  viewCount: number;
+}
+
+async function fetchVideoDetails(videoIds: string[], apiKey: string): Promise<VideoDetail[]> {
+  const details: VideoDetail[] = [];
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const ids = videoIds.slice(i, i + 50).join(',');
+    const res  = await fetch(`${YT}/videos?part=contentDetails,statistics&id=${ids}&key=${apiKey}`);
+    const data = await res.json() as {
+      error?: { message: string };
+      items?: { id: string; contentDetails: { duration: string }; statistics: { viewCount: string } }[];
+    };
+    if (!res.ok) throw new Error(data.error?.message ?? 'Failed to get video details');
+    for (const item of data.items ?? []) {
+      details.push({
+        id:        item.id,
+        duration:  parseIsoDuration(item.contentDetails?.duration ?? ''),
+        viewCount: parseInt(item.statistics?.viewCount ?? '0', 10),
+      });
+    }
+  }
+  return details;
+}
+
+function parseIsoDuration(iso: string): string {
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return 'N/A';
+  const h = parseInt(m[1] ?? '0', 10);
+  const min = parseInt(m[2] ?? '0', 10);
+  const s   = parseInt(m[3] ?? '0', 10);
+  if (h > 0) return `${h}:${String(min).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${min}:${String(s).padStart(2, '0')}`;
 }

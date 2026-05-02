@@ -9,19 +9,23 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { videos, channelUrl, analysisName } = (await request.json()) as {
+  const body = (await request.json()) as {
     videos: ChannelVideo[];
     channelUrl: string;
     analysisName: string;
+    // Client-provided key; falls back to server settings.json for local dev
+    anthropicApiKey?: string;
   };
+
+  const { videos, channelUrl, analysisName } = body;
 
   if (!videos?.length || videos.length > 3) {
     return NextResponse.json({ error: 'Select between 1 and 3 videos' }, { status: 400 });
   }
 
-  const settings = getSettings();
-  if (!settings.anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured. Go to Settings.' }, { status: 400 });
+  const anthropicApiKey = body.anthropicApiKey?.trim() || getSettings().anthropicApiKey;
+  if (!anthropicApiKey) {
+    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
   }
 
   const videoAnalyses = [];
@@ -32,16 +36,11 @@ export async function POST(
       getThumbnailBase64(video.id),
     ]);
 
-    const analysis = await analyzeVideo(
-      settings.anthropicApiKey,
-      video,
-      transcript,
-      thumbnail.data
-    );
+    const analysis = await analyzeVideo(anthropicApiKey, video, transcript, thumbnail.data);
     videoAnalyses.push(analysis);
   }
 
-  const channelInsights = await synthesizeChannelInsights(settings.anthropicApiKey, videoAnalyses);
+  const channelInsights = await synthesizeChannelInsights(anthropicApiKey, videoAnalyses);
 
   const analysis: Analysis = {
     id: uuid(),

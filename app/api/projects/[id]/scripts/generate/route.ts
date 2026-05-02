@@ -15,11 +15,16 @@ export async function POST(
     additionalInstructions?: string;
     videoLength?: number;
     wpm?: number;
+    // Client-provided keys; fall back to server settings.json for local dev
+    anthropicApiKey?: string;
+    defaultVideoLength?: number;
+    defaultWpm?: number;
   };
 
   const settings = getSettings();
-  if (!settings.anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured. Go to Settings.' }, { status: 400 });
+  const anthropicApiKey = body.anthropicApiKey?.trim() || settings.anthropicApiKey;
+  if (!anthropicApiKey) {
+    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
   }
 
   const analysis = getAnalysis(params.id, body.analysisId);
@@ -27,19 +32,18 @@ export async function POST(
     return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
   }
 
-  const videoLength = body.videoLength ?? settings.defaultVideoLength;
-  const wpm = body.wpm ?? settings.defaultWpm;
+  const videoLength = body.videoLength ?? body.defaultVideoLength ?? settings.defaultVideoLength;
+  const wpm        = body.wpm        ?? body.defaultWpm        ?? settings.defaultWpm;
   const targetWordCount = Math.round(videoLength * wpm);
-
   const scriptSettings: ScriptSettings = { videoLength, wpm, targetWordCount };
 
   const generated = await generateScript(
-    settings.anthropicApiKey,
+    anthropicApiKey,
     analysis,
     scriptSettings,
     body.topic,
-    body.targetAudience ?? '',
-    body.additionalInstructions ?? ''
+    body.targetAudience        ?? '',
+    body.additionalInstructions ?? '',
   );
 
   const scenes: Scene[] = generated.scenes.map(s => ({
@@ -65,12 +69,12 @@ export async function POST(
     analysisId: body.analysisId,
     title: generated.title,
     topic: body.topic,
-    targetAudience: body.targetAudience ?? '',
+    targetAudience:         body.targetAudience         ?? '',
     additionalInstructions: body.additionalInstructions ?? '',
     thumbnailConcept: generated.thumbnailConcept,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    settings: scriptSettings,
+    createdAt:  new Date().toISOString(),
+    updatedAt:  new Date().toISOString(),
+    settings:   scriptSettings,
     scenes,
     savedToDisk: false,
   };
