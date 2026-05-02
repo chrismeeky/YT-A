@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/mac/.youtube-analyzer/**)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
