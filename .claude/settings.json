@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Read(//Users/mac/.youtube-analyzer/**)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(python3 -c ' *)",
+      "Bash(rm \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/route.ts\")",
+      "Bash(rm \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/analyses/route.ts\")",
+      "Bash(rm \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/analyses/[analysisId]/route.ts\")",
+      "Bash(rm \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/scripts/route.ts\")",
+      "Bash(rm \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/scripts/[scriptId]/route.ts\")",
+      "Bash(rmdir \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/scripts/[scriptId]/save\")",
+      "Bash(rmdir \"/Users/mac/Desktop/youtube automation/app/api/projects/[id]/analyses/[analysisId]\")"
     ]
   }
 }

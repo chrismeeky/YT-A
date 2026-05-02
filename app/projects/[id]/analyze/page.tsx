@@ -1,16 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import type { ChannelVideo } from '@/lib/types';
+import type { ChannelVideo, Analysis } from '@/lib/types';
+import { useStorage } from '@/components/StorageProvider';
+import { readSSE } from '@/lib/sse';
 
 type Step = 'input' | 'select' | 'analyzing' | 'done';
 
 export default function AnalyzePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const storage = useStorage();
 
   const [step, setStep] = useState<Step>('input');
   const [channelUrl, setChannelUrl] = useState('');
@@ -18,29 +21,80 @@ export default function AnalyzePage() {
   const [videos, setVideos] = useState<ChannelVideo[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [fetching, setFetching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const [analyzeError, setAnalyzeError] = useState('');
   const [progress, setProgress] = useState('');
+  const [nextPageToken, setNextPageToken] = useState<string | undefined>();
+  const [uploadsPlaylistId, setUploadsPlaylistId] = useState<string | undefined>();
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const fetchVideos = async () => {
     setFetching(true);
     setFetchError('');
     try {
+      const settings = await storage.getSettings();
       const res = await fetch(`/api/projects/${id}/channel-videos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelUrl }),
+        body: JSON.stringify({ channelUrl, youtubeApiKey: settings.youtubeApiKey }),
       });
       const data = await res.json();
       if (!res.ok) { setFetchError(data.error); return; }
-      setVideos(data);
+      setVideos(data.videos);
+      setNextPageToken(data.nextPageToken);
+      setUploadsPlaylistId(data.uploadsPlaylistId);
+      const channelName = data.videos[0]?.channelName;
+      if (channelName) setAnalysisName(`${channelName} Analysis`);
       setStep('select');
     } catch {
-      setFetchError('Failed to fetch videos. Make sure yt-dlp is installed.');
+      setFetchError('Failed to fetch videos.');
     } finally {
       setFetching(false);
     }
   };
+
+  const loadMore = useCallback(async () => {
+    if (!nextPageToken || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const settings = await storage.getSettings();
+      const res = await fetch(`/api/projects/${id}/channel-videos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelUrl,
+          youtubeApiKey: settings.youtubeApiKey,
+          pageToken: nextPageToken,
+          uploadsPlaylistId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setFetchError(data.error); return; }
+      setVideos(prev => [...prev, ...data.videos]);
+      setNextPageToken(data.nextPageToken);
+    } catch {
+      setFetchError('Failed to load more videos.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextPageToken, loadingMore, channelUrl, uploadsPlaylistId, storage, id]);
+
+  // Auto-load next page when sentinel scrolls into view inside the card
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = scrollRef.current;
+    if (!sentinel || !container || !nextPageToken) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) loadMore(); },
+      { root: container, rootMargin: '120px', threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore, nextPageToken]);
 
   const toggleVideo = (videoId: string) => {
     setSelected(prev => {
@@ -61,11 +115,8 @@ export default function AnalyzePage() {
 
     const selectedVideos = videos.filter(v => selected.has(v.id));
 
-    setTimeout(() => setProgress(`Fetching transcripts and thumbnails for ${selectedVideos.length} videos…`), 500);
-    setTimeout(() => setProgress('Analysing with Claude AI…'), 3000);
-    setTimeout(() => setProgress('Synthesising channel insights…'), 8000);
-
     try {
+      const settings = await storage.getSettings();
       const res = await fetch(`/api/projects/${id}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,13 +124,20 @@ export default function AnalyzePage() {
           videos: selectedVideos,
           channelUrl,
           analysisName: analysisName || `${selectedVideos[0]?.channelName || 'Channel'} Analysis`,
+          anthropicApiKey: settings.anthropicApiKey,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) { setAnalyzeError(data.error); setStep('select'); return; }
-      setStep('done');
-    } catch {
-      setAnalyzeError('Analysis failed. Check your API key in Settings.');
+      if (!res.ok) {
+        const data = await res.json();
+        setAnalyzeError(data.error);
+        setStep('select');
+        return;
+      }
+      const data = await readSSE<Analysis>(res, setProgress);
+      await storage.saveAnalysis(id, data);
+      router.push(`/projects/${id}`);
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed. Check your API key in Settings.');
       setStep('select');
     }
   };
@@ -128,82 +186,96 @@ export default function AnalyzePage() {
       {/* Step 2 — Video selection */}
       {step === 'select' && videos.length > 0 && (
         <div
-          className="rounded-xl border p-6 mb-6"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+          className="rounded-xl border flex flex-col mb-6"
+          style={{ background: 'var(--surface)', borderColor: 'var(--border)', maxHeight: '72vh' }}
         >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-medium text-sm">
-              Step 2 — Select Videos{' '}
-              <span className="text-[#52525b]">({selected.size}/3 selected)</span>
-            </h2>
-            {selected.size === 3 && (
-              <span className="text-xs text-yellow-500">Maximum 3 videos reached</span>
+          {/* Fixed header + CTA */}
+          <div
+            className="px-6 pt-5 pb-4 flex-shrink-0 border-b space-y-3"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-medium text-sm">
+                Step 2 — Select Videos{' '}
+                <span className="text-[#52525b]">({selected.size}/3 selected)</span>
+              </h2>
+              {selected.size === 3 && (
+                <span className="text-xs text-yellow-500">Maximum reached</span>
+              )}
+            </div>
+            <div className="flex gap-3 items-center">
+              <input
+                value={analysisName}
+                onChange={e => setAnalysisName(e.target.value)}
+                className="flex-1 rounded-lg px-3 py-2 text-sm border focus:border-indigo-400"
+                style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                placeholder="Analysis name…"
+              />
+              <button
+                onClick={runAnalysis}
+                disabled={selected.size === 0}
+                className="px-5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-30 disabled:cursor-not-allowed text-sm font-medium transition-colors flex-shrink-0"
+              >
+                Analyse {selected.size > 0 ? `${selected.size} Video${selected.size !== 1 ? 's' : ''}` : 'Videos'} →
+              </button>
+            </div>
+            {analyzeError && <p className="text-xs text-red-400">{analyzeError}</p>}
+          </div>
+
+          {/* Scrollable video grid */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-2">
+              {videos.map(video => {
+                const isSelected = selected.has(video.id);
+                const isDisabled = !isSelected && selected.size >= 3;
+                return (
+                  <button
+                    key={video.id}
+                    onClick={() => !isDisabled && toggleVideo(video.id)}
+                    className={`relative rounded-lg border text-left overflow-hidden transition-all ${
+                      isSelected
+                        ? 'border-indigo-400 ring-2 ring-indigo-400/30'
+                        : isDisabled
+                          ? 'border-[#222] opacity-40 cursor-not-allowed'
+                          : 'border-[#222] hover:border-[#444]'
+                    }`}
+                    style={{ background: 'var(--surface-2)' }}
+                  >
+                    <div className="relative aspect-video">
+                      <Image
+                        src={video.thumbnail}
+                        alt={video.title}
+                        fill
+                        className="object-cover"
+                        unoptimized
+                      />
+                      {isSelected && (
+                        <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs">
+                          ✓
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <p className="text-xs font-medium line-clamp-2 leading-tight">{video.title}</p>
+                      <p className="text-[10px] text-[#52525b] mt-1">
+                        {video.duration} · {video.viewCount.toLocaleString()} views
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Sentinel + status */}
+            <div ref={sentinelRef} className="h-px" />
+            {loadingMore && (
+              <p className="text-center text-[#52525b] text-xs py-4">Loading more videos…</p>
+            )}
+            {!nextPageToken && !loadingMore && (
+              <p className="text-center text-[#52525b] text-xs py-4">{videos.length} videos loaded</p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-            {videos.map(video => {
-              const isSelected = selected.has(video.id);
-              const isDisabled = !isSelected && selected.size >= 3;
-              return (
-                <button
-                  key={video.id}
-                  onClick={() => !isDisabled && toggleVideo(video.id)}
-                  className={`relative rounded-lg border text-left overflow-hidden transition-all ${
-                    isSelected
-                      ? 'border-indigo-400 ring-2 ring-indigo-400/30'
-                      : isDisabled
-                        ? 'border-[#222] opacity-40 cursor-not-allowed'
-                        : 'border-[#222] hover:border-[#444]'
-                  }`}
-                  style={{ background: 'var(--surface-2)' }}
-                >
-                  <div className="relative aspect-video">
-                    <Image
-                      src={video.thumbnail}
-                      alt={video.title}
-                      fill
-                      className="object-cover"
-                      unoptimized
-                    />
-                    {isSelected && (
-                      <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs">
-                        ✓
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-2">
-                    <p className="text-xs font-medium line-clamp-2 leading-tight">{video.title}</p>
-                    <p className="text-[10px] text-[#52525b] mt-1">
-                      {video.duration} · {video.viewCount.toLocaleString()} views
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {selected.size > 0 && (
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-[#71717a] mb-1">Analysis Name (optional)</label>
-                <input
-                  value={analysisName}
-                  onChange={e => setAnalysisName(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 text-sm border focus:border-indigo-400"
-                  style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                  placeholder={`${videos.find(v => selected.has(v.id))?.channelName || 'Channel'} Analysis`}
-                />
-              </div>
-              {analyzeError && <p className="text-xs text-red-400">{analyzeError}</p>}
-              <button
-                onClick={runAnalysis}
-                className="w-full py-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
-              >
-                Analyse {selected.size} Selected Video{selected.size !== 1 ? 's' : ''} →
-              </button>
-            </div>
-          )}
         </div>
       )}
 

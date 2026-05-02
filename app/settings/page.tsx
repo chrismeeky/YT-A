@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useStorage } from '@/components/StorageProvider';
 import type { AppSettings } from '@/lib/types';
 
 function SecretInput({
@@ -53,36 +54,23 @@ function SecretInput({
 }
 
 export default function SettingsPage() {
+  const storage = useStorage();
   const [form, setForm] = useState<Partial<AppSettings>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(data => { setForm(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
-
+    storage.getSettings().then(s => { setForm(s); setLoading(false); });
+  }, [storage]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMsg('');
     try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) {
-        const r = await fetch('/api/settings');
-        if (r.ok) setForm(await r.json());
-        setMsg('Settings saved ✓');
-      } else {
-        setMsg('Save failed');
-      }
+      await storage.saveSettings(form as AppSettings);
+      setMsg('Settings saved ✓');
     } catch {
       setMsg('Save failed');
     } finally {
@@ -270,7 +258,6 @@ export default function SettingsPage() {
             These are used as defaults when generating new scripts. You can override them per script.
           </p>
         </>)}
-
 
         <div className="flex items-center gap-4">
           <button

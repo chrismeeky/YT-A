@@ -1,27 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { getSettings, getAnalysis } from '@/lib/storage';
+import type { Analysis } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  void params;
   const body = (await request.json()) as {
-    analysisId: string;
-    // Client-provided key; falls back to server settings.json for local dev
+    analysis: Analysis;
     anthropicApiKey?: string;
   };
 
-  const anthropicApiKey = body.anthropicApiKey?.trim() || getSettings().anthropicApiKey;
+  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
   if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
+    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }
 
-  const analysis = getAnalysis(params.id, body.analysisId);
-  if (!analysis) {
-    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  if (!body.analysis?.id) {
+    return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
   }
 
+  const analysis = body.analysis;
   const ai = new Anthropic({ apiKey: anthropicApiKey });
 
   const insights = analysis.channelInsights;

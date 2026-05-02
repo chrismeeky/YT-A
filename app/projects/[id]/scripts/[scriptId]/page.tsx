@@ -4,56 +4,56 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { v4 as uuid } from 'uuid';
-import type { Script, Scene } from '@/lib/types';
+import type { Script, Scene, Analysis } from '@/lib/types';
 import SceneEditor from '@/components/SceneEditor';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useStorage } from '@/components/StorageProvider';
 
 export default function ScriptEditorPage() {
   const { id, scriptId } = useParams<{ id: string; scriptId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const storage = useStorage();
   const [script, setScript] = useState<Script | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [savedToDisk, setSavedToDisk] = useState(false);
-  const [diskPath, setDiskPath] = useState('');
+  const [exportFolder, setExportFolder] = useState('');
   const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    fetch(`/api/projects/${id}/scripts/${scriptId}`)
-      .then(r => r.json())
-      .then(data => {
-        setScript(data);
-        // Restore scene from URL; fall back to scene 1 if param is missing or stale
-        const fromUrl = searchParams.get('scene');
-        const exists = fromUrl && data.scenes?.some((s: Scene) => s.id === fromUrl);
-        setActiveSceneId(exists ? fromUrl : (data.scenes?.[0]?.id ?? null));
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [id, scriptId]); // eslint-disable-line react-hooks/exhaustive-deps
+    storage.getScript(id, scriptId).then(async data => {
+      if (!data) { setLoading(false); return; }
+      setScript(data);
+      setSavedToDisk(data.savedToDisk ?? false);
+      const fromUrl = searchParams.get('scene');
+      const exists = fromUrl && data.scenes?.some((s: Scene) => s.id === fromUrl);
+      setActiveSceneId(exists ? fromUrl : (data.scenes?.[0]?.id ?? null));
 
-  // Keep URL in sync with the active scene
+      if (data.analysisId) {
+        const a = await storage.getAnalysis(id, data.analysisId);
+        setAnalysis(a);
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [id, scriptId, storage]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!activeSceneId) return;
     router.replace(`?scene=${activeSceneId}`, { scroll: false });
   }, [activeSceneId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save with debounce
   const debouncedSave = useCallback(
     (updated: Script) => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(async () => {
         setSaving(true);
         try {
-          await fetch(`/api/projects/${id}/scripts/${scriptId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updated),
-          });
+          await storage.saveScript(id, { ...updated, updatedAt: new Date().toISOString() });
           setSaveMsg('Saved');
           setTimeout(() => setSaveMsg(''), 2000);
         } catch {
@@ -63,7 +63,7 @@ export default function ScriptEditorPage() {
         }
       }, 1200);
     },
-    [id, scriptId]
+    [id, storage]
   );
 
   const handleScriptChange = useCallback(
@@ -79,11 +79,9 @@ export default function ScriptEditorPage() {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     setSaving(true);
     try {
-      await fetch(`/api/projects/${id}/scripts/${scriptId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(script),
-      });
+      const updated = { ...script, updatedAt: new Date().toISOString() };
+      await storage.saveScript(id, updated);
+      setScript(updated);
       setSaveMsg('Saved ✓');
       setTimeout(() => setSaveMsg(''), 2000);
     } catch {
@@ -94,20 +92,21 @@ export default function ScriptEditorPage() {
   };
 
   const saveToDisk = async () => {
+    if (!script) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/save`, { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setSavedToDisk(true);
-        setDiskPath(data.outputDir);
-        setSaveMsg('Organised to disk ✓');
-        setTimeout(() => setSaveMsg(''), 3000);
-      } else {
-        setSaveMsg(data.error || 'Save failed');
-      }
-    } catch {
-      setSaveMsg('Save failed');
+      const project = await storage.getProject(id);
+      const folder = await storage.saveScriptToDisk(id, script, project?.name ?? 'Project');
+      const updated = { ...script, savedToDisk: true, updatedAt: new Date().toISOString() };
+      await storage.saveScript(id, updated);
+      setScript(updated);
+      setSavedToDisk(true);
+      setExportFolder(folder);
+      setSaveMsg('Exported ✓');
+      setTimeout(() => setSaveMsg(''), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Export failed';
+      setSaveMsg(msg);
     } finally {
       setSaving(false);
     }
@@ -148,15 +147,6 @@ export default function ScriptEditorPage() {
     handleScriptChange({ ...script, scenes: renumbered });
     if (activeSceneId === confirmDeleteSceneId) setActiveSceneId(renumbered[0]?.id ?? null);
     setConfirmDeleteSceneId(null);
-  };
-
-  const revealDiskPath = async () => {
-    if (!diskPath) return;
-    await fetch('/api/reveal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath: diskPath }),
-    });
   };
 
   if (loading) {
@@ -211,34 +201,26 @@ export default function ScriptEditorPage() {
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button
-            onClick={saveToDisk}
-            disabled={saving}
-            className="px-3 py-1.5 rounded-md text-xs bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 transition-colors font-medium"
-          >
-            📦 Save to Disk
-          </button>
-          {savedToDisk && (
+          {storage.canSaveToDisk && (
             <button
-              onClick={revealDiskPath}
-              className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
-              style={{ borderColor: 'var(--border)' }}
-              title="Reveal in Finder"
+              onClick={saveToDisk}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-md text-xs bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 transition-colors font-medium"
             >
-              📂 Finder
+              📦 Export
             </button>
           )}
         </div>
       </div>
 
-      {/* Disk path notice */}
-      {savedToDisk && diskPath && (
+      {/* Export notice */}
+      {savedToDisk && exportFolder && (
         <div
           className="px-6 py-2 text-xs border-b flex items-center gap-2"
           style={{ borderColor: 'var(--border)', background: '#0f1d0f', color: '#4ade80' }}
         >
           <span>✓</span>
-          <span className="font-mono truncate">{diskPath}</span>
+          <span>Exported to <span className="font-mono">{exportFolder}</span> in your data folder</span>
         </div>
       )}
 
@@ -307,6 +289,7 @@ export default function ScriptEditorPage() {
         <SceneEditor
           projectId={id}
           script={script}
+          analysis={analysis}
           activeSceneId={activeSceneId}
           onScriptChange={handleScriptChange}
         />

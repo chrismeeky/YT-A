@@ -472,9 +472,8 @@ export async function generateSceneAssets(
   const ai = client(apiKey);
 
   const estimatedSeconds = scene.estimatedDurationSeconds || Math.round((scene.wordCount || 0) / 2.5);
-  // Seconds per chunk per granularity level: 1=Minimal, 2=Balanced, 3=Detailed, 4=Cinematic
-  const imgSecs = [20, 10, 5, 3][Math.max(0, Math.min(3, granularity - 1))];
-  const vidSecs = [18, 8,  4, 3][Math.max(0, Math.min(3, granularity - 1))];
+  // Seconds per segment per granularity level: 1=Minimal, 2=Balanced, 3=Detailed, 4=Cinematic
+  const secsPerChunk = [20, 10, 5, 3][Math.max(0, Math.min(3, granularity - 1))];
 
   // Split narration into complete sentences first so we can cap chunk counts.
   const narrationSentences = (scene.narration || '')
@@ -484,52 +483,45 @@ export async function generateSceneAssets(
     .filter(s => s.length > 0);
   if (narrationSentences.length === 0) narrationSentences.push((scene.narration || '').trim());
 
-  // Cap chunk counts to sentence count — this eliminates padding that duplicates
-  // the last sentence across multiple segments.
+  // Cap chunk count to sentence count — eliminates padding that duplicates the last sentence.
   const sentCount = Math.max(1, narrationSentences.length);
-  const imageChunks = Math.min(sentCount, Math.min(20, Math.max(1, Math.ceil(estimatedSeconds / imgSecs))));
-  const videoChunks = Math.min(sentCount, Math.min(15, Math.max(1, Math.ceil(estimatedSeconds / vidSecs))));
+  const chunks = Math.min(sentCount, Math.min(20, Math.max(1, Math.ceil(estimatedSeconds / secsPerChunk))));
 
-  // Index-based distribution: slice sentence array evenly, no accumulation bugs,
-  // no padding needed since n <= sentCount by construction.
-  const makeChunks = (n: number): string[] =>
-    Array.from({ length: n }, (_, i) => {
-      const m = narrationSentences.length;
-      const start = Math.floor((i * m) / n);
-      const end = Math.floor(((i + 1) * m) / n);
-      return narrationSentences.slice(start, end).join(' ');
-    });
-
-  const imgNarrationChunks = makeChunks(imageChunks);
-  const vidNarrationChunks = makeChunks(videoChunks);
+  // Index-based distribution: slice sentence array evenly, no accumulation bugs.
+  const narrationChunks: string[] = Array.from({ length: chunks }, (_, i) => {
+    const m = narrationSentences.length;
+    const start = Math.floor((i * m) / chunks);
+    const end = Math.floor(((i + 1) * m) / chunks);
+    return narrationSentences.slice(start, end).join(' ');
+  });
 
   const segObj = `{ "query": "search term", "excerpt": "verbatim narration sentence(s) this segment covers" }`;
   const promptObj = `{ "prompt": "detailed prompt text", "excerpt": "verbatim narration this segment covers" }`;
 
   const wantedParts = [
-    options.image && `imagePrompts (${imageChunks} objects with prompt + excerpt, one per ~10s segment, prompts --ar 16:9)`,
-    options.video && `videoPrompts (${videoChunks} objects with prompt + excerpt, one per ~8s segment)`,
+    options.image && `imagePrompts (${chunks} objects with prompt + excerpt, one per ~${secsPerChunk}s segment, prompts --ar 16:9)`,
+    options.video && `videoPrompts (${chunks} objects with prompt + excerpt, one per ~${secsPerChunk}s segment)`,
     options.stock && 'stockUrl (Pexels search URL)',
     options.stockPhotos &&
-      `stockPhotoQueries (${imageChunks} objects: query = short Pexels photo search term matching that segment visually — no real person names; excerpt = verbatim narration text this segment covers)`,
+      `stockPhotoQueries (${chunks} objects: query = short Pexels photo search term matching that segment visually — no real person names; excerpt = verbatim narration text this segment covers)`,
     options.realImages &&
-      `realImageQueries (${imageChunks} objects: query = specific factual search to find REAL photographs of subjects/events in that segment, must name real people/places; excerpt = verbatim narration text this segment covers)`,
+      `realImageQueries (${chunks} objects: query = specific factual search to find REAL photographs of subjects/events in that segment, must name real people/places; excerpt = verbatim narration text this segment covers)`,
     options.stockVideos &&
-      `stockVideoQueries (${imageChunks} objects: query = short Pexels video search term for that segment — no real person names; excerpt = verbatim narration text this segment covers)`,
+      `stockVideoQueries (${chunks} objects: query = short Pexels video search term for that segment — no real person names; excerpt = verbatim narration text this segment covers)`,
   ].filter(Boolean);
 
   const jsonTemplate = [
     options.image &&
-      `"imagePrompts": [${Array.from({ length: imageChunks }, () => promptObj).join(', ')}]`,
+      `"imagePrompts": [${Array.from({ length: chunks }, () => promptObj).join(', ')}]`,
     options.video &&
-      `"videoPrompts": [${Array.from({ length: videoChunks }, () => promptObj).join(', ')}]`,
+      `"videoPrompts": [${Array.from({ length: chunks }, () => promptObj).join(', ')}]`,
     options.stock && `"stockUrl": "https://www.pexels.com/search/videos/keywords+here/"`,
     options.stockPhotos &&
-      `"stockPhotoQueries": [${Array.from({ length: imageChunks }, () => segObj).join(', ')}]`,
+      `"stockPhotoQueries": [${Array.from({ length: chunks }, () => segObj).join(', ')}]`,
     options.realImages &&
-      `"realImageQueries": [${Array.from({ length: imageChunks }, () => segObj).join(', ')}]`,
+      `"realImageQueries": [${Array.from({ length: chunks }, () => segObj).join(', ')}]`,
     options.stockVideos &&
-      `"stockVideoQueries": [${Array.from({ length: imageChunks }, () => segObj).join(', ')}]`,
+      `"stockVideoQueries": [${Array.from({ length: chunks }, () => segObj).join(', ')}]`,
   ]
     .filter(Boolean)
     .join(',\n  ');
@@ -549,10 +541,8 @@ Full Narration: ${scene.narration}
 Visual Description: ${scene.sceneDescription}
 Duration: ~${estimatedSeconds}s
 
-NARRATION PRE-DIVIDED INTO ${imageChunks} SEQUENTIAL SEGMENTS (for imagePrompts / stockPhotoQueries / realImageQueries / stockVideoQueries):
-${imgNarrationChunks.map((c, i) => `[${i + 1}] "${c}"`).join('\n')}
-${imageChunks !== videoChunks ? `\nNARRATION PRE-DIVIDED INTO ${videoChunks} SEQUENTIAL SEGMENTS (for videoPrompts only):
-${vidNarrationChunks.map((c, i) => `[${i + 1}] "${c}"`).join('\n')}` : ''}
+NARRATION PRE-DIVIDED INTO ${chunks} SEQUENTIAL SEGMENTS (all asset types use these same segments):
+${narrationChunks.map((c, i) => `[${i + 1}] "${c}"`).join('\n')}
 
 CHANNEL VISUAL DNA (match this exactly):
 - Thumbnail style: ${channelInsights.visualBrand.thumbnailStyle}
@@ -570,9 +560,8 @@ CHANNEL VISUAL DNA (match this exactly):
 - Emotional triggers used: ${analysis.videoAnalyses[0].emotionalTriggers.primaryEmotions.join(', ')}` : ''}
 
 INSTRUCTIONS:
-- The narration is already divided into segments above — do NOT re-divide it yourself.
-- imagePrompts / stockPhotoQueries / realImageQueries / stockVideoQueries: produce EXACTLY ${imageChunks} items, one per image segment [1]–[${imageChunks}] in order.
-- videoPrompts: produce EXACTLY ${videoChunks} items, one per video segment [1]–[${videoChunks}] in order.
+- The narration is already divided into ${chunks} segments above — do NOT re-divide it yourself.
+- ALL asset types (imagePrompts, videoPrompts, stockPhotoQueries, realImageQueries, stockVideoQueries): produce EXACTLY ${chunks} items, one per segment [1]–[${chunks}] in order.
 - "excerpt" for each item MUST be copied verbatim from the corresponding pre-divided segment above (item i → segment [i+1]).
 
 CRITICAL — SUBJECT vs STYLE:
@@ -618,37 +607,33 @@ Return ONLY valid JSON:
   // regardless of how Claude assigned them.
   if (parsed.stockPhotoQueries) {
     parsed.stockPhotoQueries = parsed.stockPhotoQueries.map((q, i) => ({
-      ...q, excerpt: imgNarrationChunks[i] ?? q.excerpt,
+      ...q, excerpt: narrationChunks[i] ?? q.excerpt,
     }));
   }
   if (parsed.realImageQueries) {
     parsed.realImageQueries = parsed.realImageQueries.map((q, i) => ({
-      ...q, excerpt: imgNarrationChunks[i] ?? q.excerpt,
+      ...q, excerpt: narrationChunks[i] ?? q.excerpt,
     }));
   }
   if (parsed.stockVideoQueries) {
     parsed.stockVideoQueries = parsed.stockVideoQueries.map((q, i) => ({
-      ...q, excerpt: imgNarrationChunks[i] ?? q.excerpt,
+      ...q, excerpt: narrationChunks[i] ?? q.excerpt,
     }));
   }
 
   // Unpack prompt objects into parallel arrays (handle legacy string[] gracefully)
-  // Also override excerpt with pre-computed chunks for the same reason.
-  const unpack = (
-    arr: Array<{ prompt: string; excerpt: string }> | string[] | undefined,
-    chunks: string[]
-  ) => {
+  const unpack = (arr: Array<{ prompt: string; excerpt: string }> | string[] | undefined) => {
     if (!arr?.length) return { prompts: undefined, excerpts: undefined };
-    if (typeof arr[0] === 'string') return { prompts: arr as string[], excerpts: chunks.length ? chunks : undefined };
+    if (typeof arr[0] === 'string') return { prompts: arr as string[], excerpts: narrationChunks.length ? narrationChunks : undefined };
     const objs = arr as Array<{ prompt: string; excerpt: string }>;
     return {
       prompts: objs.map(o => o.prompt),
-      excerpts: objs.map((o, i) => chunks[i] ?? o.excerpt),
+      excerpts: objs.map((o, i) => narrationChunks[i] ?? o.excerpt),
     };
   };
 
-  const img = unpack(parsed.imagePrompts, imgNarrationChunks);
-  const vid = unpack(parsed.videoPrompts, vidNarrationChunks);
+  const img = unpack(parsed.imagePrompts);
+  const vid = unpack(parsed.videoPrompts);
 
   return {
     imagePrompts: img.prompts,

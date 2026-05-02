@@ -31,7 +31,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
 
   if (status === 'loading') {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ background: 'var(--bg)' }}>
+      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'var(--bg)' }}>
         <p className="text-[#52525b] text-sm">Initialising storage…</p>
       </div>
     );
@@ -40,7 +40,7 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   if (status === 'needs-folder') {
     return (
       <div
-        className="flex items-center justify-center h-screen px-6"
+        className="fixed inset-0 flex items-center justify-center px-6 z-50"
         style={{ background: 'var(--bg)' }}
       >
         <div

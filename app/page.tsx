@@ -5,21 +5,22 @@ import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import type { Project } from '@/lib/types';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useStorage } from '@/components/StorageProvider';
 
 export default function Dashboard() {
+  const storage = useStorage();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
-    fetch('/api/projects')
-      .then(r => r.json())
+    storage.listProjects()
       .then(data => { setProjects(data); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [storage]);
 
   const deleteProject = async (id: string) => {
-    await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    await storage.deleteProject(id);
     setProjects(p => p.filter(x => x.id !== id));
     setConfirmDelete(null);
   };

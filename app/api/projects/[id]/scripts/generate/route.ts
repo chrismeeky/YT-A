@@ -1,84 +1,104 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
-import { getSettings, getAnalysis, saveScript } from '@/lib/storage';
 import { generateScript } from '@/lib/claude';
-import type { Script, Scene, ScriptSettings } from '@/lib/types';
+import { sseEmit } from '@/lib/sse';
+import type { Script, Scene, ScriptSettings, Analysis } from '@/lib/types';
+
+export const maxDuration = 120;
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const body = (await request.json()) as {
-    analysisId: string;
+    analysis: Analysis;
     topic: string;
     targetAudience?: string;
     additionalInstructions?: string;
     videoLength?: number;
     wpm?: number;
-    // Client-provided keys; fall back to server settings.json for local dev
     anthropicApiKey?: string;
-    defaultVideoLength?: number;
-    defaultWpm?: number;
   };
 
-  const settings = getSettings();
-  const anthropicApiKey = body.anthropicApiKey?.trim() || settings.anthropicApiKey;
+  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
   if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
+    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }
 
-  const analysis = getAnalysis(params.id, body.analysisId);
-  if (!analysis) {
-    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  if (!body.analysis?.id) {
+    return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
   }
 
-  const videoLength = body.videoLength ?? body.defaultVideoLength ?? settings.defaultVideoLength;
-  const wpm        = body.wpm        ?? body.defaultWpm        ?? settings.defaultWpm;
+  const videoLength = body.videoLength ?? 5;
+  const wpm        = body.wpm        ?? 150;
   const targetWordCount = Math.round(videoLength * wpm);
   const scriptSettings: ScriptSettings = { videoLength, wpm, targetWordCount };
 
-  const generated = await generateScript(
-    anthropicApiKey,
-    analysis,
-    scriptSettings,
-    body.topic,
-    body.targetAudience        ?? '',
-    body.additionalInstructions ?? '',
-  );
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (payload: object) => sseEmit(controller, encoder, payload);
+      try {
+        emit({ message: `Building prompt from channel analysis…` });
 
-  const scenes: Scene[] = generated.scenes.map(s => ({
-    id: uuid(),
-    number: s.number,
-    title: s.title,
-    narration: s.narration,
-    sceneDescription: s.sceneDescription,
-    estimatedDurationSeconds: s.estimatedDurationSeconds,
-    wordCount: s.wordCount,
-    includeImagePrompt: true,
-    includeVideoPrompt: true,
-    includeStockUrl: false,
-    includeStockPhotos: false,
-    includeRealImages: false,
-    includeStockVideos: false,
-    mediaFiles: [] as import('@/lib/types').MediaFile[],
-  }));
+        emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script with Claude… (this may take up to 60 seconds)` });
+        const generated = await generateScript(
+          anthropicApiKey,
+          body.analysis,
+          scriptSettings,
+          body.topic,
+          body.targetAudience        ?? '',
+          body.additionalInstructions ?? '',
+        );
 
-  const script: Script = {
-    id: uuid(),
-    projectId: params.id,
-    analysisId: body.analysisId,
-    title: generated.title,
-    topic: body.topic,
-    targetAudience:         body.targetAudience         ?? '',
-    additionalInstructions: body.additionalInstructions ?? '',
-    thumbnailConcept: generated.thumbnailConcept,
-    createdAt:  new Date().toISOString(),
-    updatedAt:  new Date().toISOString(),
-    settings:   scriptSettings,
-    scenes,
-    savedToDisk: false,
-  };
+        emit({ message: `Parsing ${generated.scenes.length} scenes…` });
+        const scenes: Scene[] = generated.scenes.map(s => ({
+          id: uuid(),
+          number: s.number,
+          title: s.title,
+          narration: s.narration,
+          sceneDescription: s.sceneDescription,
+          estimatedDurationSeconds: s.estimatedDurationSeconds,
+          wordCount: s.wordCount,
+          includeImagePrompt: true,
+          includeVideoPrompt: true,
+          includeStockUrl: false,
+          includeStockPhotos: false,
+          includeRealImages: false,
+          includeStockVideos: false,
+          mediaFiles: [] as import('@/lib/types').MediaFile[],
+        }));
 
-  saveScript(params.id, script);
-  return NextResponse.json(script, { status: 201 });
+        const script: Script = {
+          id: uuid(),
+          projectId: params.id,
+          analysisId: body.analysis.id,
+          title: generated.title,
+          topic: body.topic,
+          targetAudience:         body.targetAudience         ?? '',
+          additionalInstructions: body.additionalInstructions ?? '',
+          thumbnailConcept: generated.thumbnailConcept,
+          createdAt:  new Date().toISOString(),
+          updatedAt:  new Date().toISOString(),
+          settings:   scriptSettings,
+          scenes,
+          savedToDisk: false,
+        };
+
+        emit({ done: true, result: script });
+      } catch (err: unknown) {
+        emit({ error: err instanceof Error ? err.message : 'Script generation failed' });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
 }

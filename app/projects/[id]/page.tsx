@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import type { Project, Analysis, Script } from '@/lib/types';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useStorage } from '@/components/StorageProvider';
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
+  const storage = useStorage();
   const [project, setProject] = useState<Project | null>(null);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [scripts, setScripts] = useState<Script[]>([]);
@@ -18,25 +20,25 @@ export default function ProjectPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/projects/${id}`).then(r => r.json()),
-      fetch(`/api/projects/${id}/analyses`).then(r => r.json()),
-      fetch(`/api/projects/${id}/scripts`).then(r => r.json()),
+      storage.getProject(id),
+      storage.listAnalyses(id),
+      storage.listScripts(id),
     ]).then(([p, a, s]) => {
       setProject(p);
       setAnalyses(Array.isArray(a) ? a : []);
       setScripts(Array.isArray(s) ? s : []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [id]);
+  }, [id, storage]);
 
   const deleteAnalysis = async (analysisId: string) => {
-    await fetch(`/api/projects/${id}/analyses/${analysisId}`, { method: 'DELETE' });
+    await storage.deleteAnalysis(id, analysisId);
     setAnalyses(a => a.filter(x => x.id !== analysisId));
     setConfirmDelete(null);
   };
 
   const deleteScript = async (scriptId: string) => {
-    await fetch(`/api/projects/${id}/scripts/${scriptId}`, { method: 'DELETE' });
+    await storage.deleteScript(id, scriptId);
     setScripts(s => s.filter(x => x.id !== scriptId));
     setConfirmDelete(null);
   };

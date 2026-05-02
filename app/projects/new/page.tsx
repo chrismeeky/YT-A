@@ -3,9 +3,12 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useStorage } from '@/components/StorageProvider';
+import type { Project } from '@/lib/types';
 
 export default function NewProject() {
   const router = useRouter();
+  const storage = useStorage();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -16,13 +19,13 @@ export default function NewProject() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
-      });
-      if (!res.ok) { setError('Failed to create project'); setLoading(false); return; }
-      const project = await res.json();
+      const project: Project = {
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await storage.saveProject(project);
       router.push(`/projects/${project.id}`);
     } catch {
       setError('Something went wrong');

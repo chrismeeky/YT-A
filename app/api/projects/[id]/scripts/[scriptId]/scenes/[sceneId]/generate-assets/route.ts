@@ -1,39 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSettings, getScript, saveScript, getAnalysis } from '@/lib/storage';
 import { generateSceneAssets } from '@/lib/claude';
 import { searchPexels, searchDuckDuckGo, searchPexelsVideos } from '@/lib/image-search';
-import type { StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
+import type { Scene, Analysis, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string; scriptId: string; sceneId: string } }
 ) {
+  void params;
   const body = (await request.json()) as {
+    scene: Scene;
+    analysis: Analysis;
     image?: boolean;
     video?: boolean;
     stock?: boolean;
     stockPhotos?: boolean;
     realImages?: boolean;
     stockVideos?: boolean;
-    // Client-provided keys; fall back to server settings.json for local dev
     anthropicApiKey?: string;
     pexelsApiKey?: string;
   };
 
-  const settings = getSettings();
-  const anthropicApiKey = body.anthropicApiKey?.trim() || settings.anthropicApiKey;
+  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
   if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key not configured. Add it in Settings.' }, { status: 400 });
+    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }
 
-  const script = getScript(params.id, params.scriptId);
-  if (!script) return NextResponse.json({ error: 'Script not found' }, { status: 404 });
+  if (!body.scene?.id || !body.analysis?.id) {
+    return NextResponse.json({ error: 'Scene and analysis objects required.' }, { status: 400 });
+  }
 
-  const scene = script.scenes.find(s => s.id === params.sceneId);
-  if (!scene) return NextResponse.json({ error: 'Scene not found' }, { status: 404 });
-
-  const analysis = getAnalysis(params.id, script.analysisId);
-  if (!analysis) return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  const scene    = body.scene;
+  const analysis = body.analysis;
 
   try {
     const assets = await generateSceneAssets(
@@ -52,12 +50,11 @@ export async function POST(
       scene.assetGranularity ?? 2,
     );
 
-    // Stock photos
     let stockPhotoSegments: StockPhotoSegment[] | undefined;
     if (assets.stockPhotoQueries?.length) {
-      const pexelsApiKey = body.pexelsApiKey?.trim() || settings.pexelsApiKey;
+      const pexelsApiKey = body.pexelsApiKey?.trim() ?? '';
       if (!pexelsApiKey) {
-        return NextResponse.json({ error: 'Pexels API key not configured. Add it in Settings.' }, { status: 400 });
+        return NextResponse.json({ error: 'Pexels API key required. Add it in Settings.' }, { status: 400 });
       }
       stockPhotoSegments = await Promise.all(
         assets.stockPhotoQueries.map(async ({ query, excerpt }) => ({
@@ -68,7 +65,6 @@ export async function POST(
       );
     }
 
-    // Real images (DuckDuckGo — no key needed)
     let realImageSegments: RealImageSegment[] | undefined;
     if (assets.realImageQueries?.length) {
       realImageSegments = await Promise.all(
@@ -80,12 +76,11 @@ export async function POST(
       );
     }
 
-    // Stock videos
     let stockVideoSegments: StockVideoSegment[] | undefined;
     if (assets.stockVideoQueries?.length) {
-      const pexelsApiKey = body.pexelsApiKey?.trim() || settings.pexelsApiKey;
+      const pexelsApiKey = body.pexelsApiKey?.trim() ?? '';
       if (!pexelsApiKey) {
-        return NextResponse.json({ error: 'Pexels API key not configured. Add it in Settings.' }, { status: 400 });
+        return NextResponse.json({ error: 'Pexels API key required. Add it in Settings.' }, { status: 400 });
       }
       stockVideoSegments = await Promise.all(
         assets.stockVideoQueries.map(async ({ query, excerpt }) => ({
@@ -96,24 +91,6 @@ export async function POST(
       );
     }
 
-    const updatedScenes = script.scenes.map(s =>
-      s.id === params.sceneId
-        ? {
-            ...s,
-            imagePrompts:        assets.imagePrompts        ?? s.imagePrompts,
-            imagePromptExcerpts: assets.imagePromptExcerpts ?? s.imagePromptExcerpts,
-            videoPrompts:        assets.videoPrompts        ?? s.videoPrompts,
-            videoPromptExcerpts: assets.videoPromptExcerpts ?? s.videoPromptExcerpts,
-            stockUrl:            assets.stockUrl            ?? s.stockUrl,
-            ...(stockPhotoSegments !== undefined && { stockPhotoSegments }),
-            ...(realImageSegments  !== undefined && { realImageSegments }),
-            ...(stockVideoSegments !== undefined && { stockVideoSegments }),
-          }
-        : s,
-    );
-
-    const updated = { ...script, scenes: updatedScenes, updatedAt: new Date().toISOString() };
-    saveScript(params.id, updated);
     return NextResponse.json({ ok: true, assets: { ...assets, stockPhotoSegments, realImageSegments, stockVideoSegments } });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Asset generation failed';

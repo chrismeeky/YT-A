@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import type { Analysis } from '@/lib/types';
+import type { Analysis, Script } from '@/lib/types';
+import { useStorage } from '@/components/StorageProvider';
+import { readSSE } from '@/lib/sse';
 
 export default function NewScriptPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedAnalysisId = searchParams.get('analysisId') ?? '';
+  const storage = useStorage();
 
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [form, setForm] = useState({
@@ -21,6 +24,7 @@ export default function NewScriptPage() {
     wpm: 150,
   });
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [suggestions, setSuggestions] = useState<{ topic: string; context: string }[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(false);
@@ -43,8 +47,8 @@ export default function NewScriptPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/projects/${id}/analyses`).then(r => r.json()),
-      fetch('/api/settings').then(r => r.json()),
+      storage.listAnalyses(id),
+      storage.getSettings(),
     ]).then(([a, s]) => {
       setAnalyses(Array.isArray(a) ? a : []);
       const resolvedAnalysisId = preselectedAnalysisId || (Array.isArray(a) && a[0]?.id) || '';
@@ -56,20 +60,27 @@ export default function NewScriptPage() {
       }));
       if (resolvedAnalysisId) loadCached(resolvedAnalysisId);
     });
-  }, [id]);
+  }, [id, storage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const targetWords = Math.round(form.videoLength * form.wpm);
 
+  const getAnalysis = () => analyses.find(a => a.id === form.analysisId) ?? null;
+
   const suggestTopics = async () => {
-    if (!form.analysisId) return;
+    const analysis = getAnalysis();
+    if (!analysis) return;
     setLoadingTopics(true);
     setTopicsError('');
     setSuggestions([]);
     try {
+      const settings = await storage.getSettings();
       const res = await fetch(`/api/projects/${id}/scripts/suggest-topics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysisId: form.analysisId }),
+        body: JSON.stringify({
+          analysis,
+          anthropicApiKey: settings.anthropicApiKey,
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setTopicsError(data.error); return; }
@@ -85,20 +96,33 @@ export default function NewScriptPage() {
 
   const generate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.analysisId || !form.topic.trim()) return;
+    const analysis = getAnalysis();
+    if (!analysis || !form.topic.trim()) return;
     setLoading(true);
+    setProgress('');
     setError('');
     try {
+      const settings = await storage.getSettings();
       const res = await fetch(`/api/projects/${id}/scripts/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          analysis,
+          anthropicApiKey: settings.anthropicApiKey,
+        }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error); setLoading(false); return; }
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error);
+        setLoading(false);
+        return;
+      }
+      const data = await readSSE<Script>(res, setProgress);
+      await storage.saveScript(id, data);
       router.push(`/projects/${id}/scripts/${data.id}`);
-    } catch {
-      setError('Script generation failed. Check your API key in Settings.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Script generation failed. Check your API key in Settings.');
       setLoading(false);
     }
   };
@@ -125,7 +149,8 @@ export default function NewScriptPage() {
         >
           <div className="text-4xl mb-4 animate-pulse">✍️</div>
           <h2 className="font-semibold mb-2">Writing your script…</h2>
-          <p className="text-sm text-[#71717a]">Generating ~{targetWords} words across scenes. This takes 30–60 seconds.</p>
+          <p className="text-sm text-[#71717a]">{progress || `Generating ~${targetWords} words across scenes…`}</p>
+          <p className="text-xs text-[#52525b] mt-2">This takes 30–60 seconds</p>
         </div>
       ) : (
         <form onSubmit={generate} className="space-y-5">
@@ -183,7 +208,6 @@ export default function NewScriptPage() {
               placeholder="e.g. How to start investing with $100"
             />
 
-            {/* Topic suggestions */}
             {topicsError && <p className="text-xs text-red-400 mt-2">{topicsError}</p>}
             {suggestions.length > 0 && (
               <div className="mt-3 space-y-1.5">
@@ -230,7 +254,7 @@ export default function NewScriptPage() {
               rows={4}
               className={inputClass}
               style={inputStyle}
-              placeholder="e.g. The story is about John Doe, a 34-year-old from Atlanta who turned $500 into $50k trading options in 2023. Key events: lost his job in January, started trading in March, hit $10k by June…"
+              placeholder="e.g. The story is about John Doe, a 34-year-old from Atlanta who turned $500 into $50k trading options in 2023…"
             />
           </div>
 

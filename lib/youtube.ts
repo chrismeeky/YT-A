@@ -4,19 +4,31 @@ const YT = 'https://www.googleapis.com/youtube/v3';
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
+export interface ChannelVideosPage {
+  videos: ChannelVideo[];
+  nextPageToken?: string;
+  uploadsPlaylistId: string;
+}
+
 export async function getChannelVideos(
   channelUrl: string,
-  maxVideos = 20,
+  pageSize = 20,
   apiKey?: string,
-): Promise<ChannelVideo[]> {
+  pageToken?: string,
+  uploadsPlaylistId?: string,
+): Promise<ChannelVideosPage> {
   if (!apiKey) throw new Error('YouTube API key is required. Add it in Settings.');
 
-  const channelId = await resolveChannelId(channelUrl.trim(), apiKey);
-  const uploadsId = await getUploadsPlaylistId(channelId, apiKey);
-  const items     = await fetchPlaylistItems(uploadsId, maxVideos, apiKey);
-  const details   = await fetchVideoDetails(items.map(i => i.videoId), apiKey);
+  let uploadsId = uploadsPlaylistId;
+  if (!uploadsId) {
+    const channelId = await resolveChannelId(channelUrl.trim(), apiKey);
+    uploadsId = await getUploadsPlaylistId(channelId, apiKey);
+  }
 
-  return items.map(item => {
+  const { items, nextPageToken } = await fetchPlaylistPage(uploadsId, Math.min(pageSize, 50), apiKey, pageToken);
+  const details = await fetchVideoDetails(items.map(i => i.videoId), apiKey);
+
+  const videos = items.map(item => {
     const d = details.find(x => x.id === item.videoId);
     return {
       id:          item.videoId,
@@ -30,6 +42,8 @@ export async function getChannelVideos(
       channelName: item.channelTitle,
     } satisfies ChannelVideo;
   });
+
+  return { videos, nextPageToken, uploadsPlaylistId: uploadsId };
 }
 
 // Transcript and thumbnail fetches are plain HTTP — no API key needed.
@@ -153,45 +167,38 @@ interface PlaylistItem {
   publishedAt:  string;
 }
 
-async function fetchPlaylistItems(
+async function fetchPlaylistPage(
   playlistId: string,
-  maxResults: number,
+  pageSize: number,
   apiKey: string,
-): Promise<PlaylistItem[]> {
+  pageToken?: string,
+): Promise<{ items: PlaylistItem[]; nextPageToken?: string }> {
+  let url = `${YT}/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=${pageSize}&key=${apiKey}`;
+  if (pageToken) url += `&pageToken=${pageToken}`;
+
+  const res  = await fetch(url);
+  const data = await res.json() as {
+    error?: { message: string };
+    nextPageToken?: string;
+    items?: { snippet: { resourceId: { videoId: string }; title: string; description: string; channelTitle: string; publishedAt: string } }[];
+  };
+  if (!res.ok) throw new Error(data.error?.message ?? 'Failed to get playlist items');
+
   const items: PlaylistItem[] = [];
-  let pageToken: string | undefined;
-
-  while (items.length < maxResults) {
-    const batch = Math.min(50, maxResults - items.length);
-    let url = `${YT}/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=${batch}&key=${apiKey}`;
-    if (pageToken) url += `&pageToken=${pageToken}`;
-
-    const res  = await fetch(url);
-    const data = await res.json() as {
-      error?: { message: string };
-      nextPageToken?: string;
-      items?: { snippet: { resourceId: { videoId: string }; title: string; description: string; channelTitle: string; publishedAt: string } }[];
-    };
-    if (!res.ok) throw new Error(data.error?.message ?? 'Failed to get playlist items');
-
-    for (const item of data.items ?? []) {
-      const s = item.snippet;
-      if (s?.resourceId?.videoId) {
-        items.push({
-          videoId:      s.resourceId.videoId,
-          title:        s.title        ?? 'Untitled',
-          description:  s.description  ?? '',
-          channelTitle: s.channelTitle ?? '',
-          publishedAt:  s.publishedAt  ?? new Date().toISOString(),
-        });
-      }
+  for (const item of data.items ?? []) {
+    const s = item.snippet;
+    if (s?.resourceId?.videoId) {
+      items.push({
+        videoId:      s.resourceId.videoId,
+        title:        s.title        ?? 'Untitled',
+        description:  s.description  ?? '',
+        channelTitle: s.channelTitle ?? '',
+        publishedAt:  s.publishedAt  ?? new Date().toISOString(),
+      });
     }
-
-    pageToken = data.nextPageToken;
-    if (!pageToken) break;
   }
 
-  return items;
+  return { items, nextPageToken: data.nextPageToken };
 }
 
 // ─── Video details (duration + view count) ────────────────────────────────

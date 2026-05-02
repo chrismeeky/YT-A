@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { Analysis, VideoAnalysis } from '@/lib/types';
+import { useStorage } from '@/components/StorageProvider';
 
 // ─── Score pill ────────────────────────────────────────────────────────────
 
@@ -102,7 +103,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* 1. Topic & Positioning */}
         <Section icon="🎯" title="1. Topic & Positioning">
           <Row label="Core Idea" value={v.topicPositioning?.coreIdea} />
           <Row label="Niche Specificity" value={v.topicPositioning?.nicheSpecificity} />
@@ -110,7 +110,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           <Row label="Competitive Position" value={v.topicPositioning?.competitivePosition} />
         </Section>
 
-        {/* 2. Hook */}
         <Section icon="🪝" title="2. Hook (First 5–15s)">
           <Row label="Type" value={v.hook?.type} />
           <Row label="Opening Lines" value={v.hook?.openingLines} />
@@ -122,7 +121,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           )}
         </Section>
 
-        {/* 3. Title Structure */}
         <Section icon="📝" title="3. Title Structure">
           <Row label="Format Pattern" value={v.titleStructure?.formatPattern} />
           <Row label="Search Intent" value={v.titleStructure?.searchIntentAlignment} />
@@ -136,7 +134,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 4. Thumbnail Design */}
         <Section icon="🖼" title="4. Thumbnail Design">
           <div className="flex gap-3">
             <Image
@@ -162,7 +159,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 5. Content Structure */}
         <Section icon="🏗" title="5. Content Structure">
           <Row label="Uses Loops" value={v.contentStructure?.usesCarryForwardLoops} />
           <Row label="Loop Mechanism" value={v.contentStructure?.loopMechanism} />
@@ -179,7 +175,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           )}
         </Section>
 
-        {/* 6. Retention Mechanics */}
         <Section icon="⚙️" title="6. Retention Mechanics">
           <Row label="Visual Change Rate" value={v.retentionMechanics?.visualChangeFrequency} />
           <Row label="Story Style" value={v.retentionMechanics?.storyProgressionStyle} />
@@ -194,7 +189,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 7. Script & Language */}
         <Section icon="✍️" title="7. Script & Language">
           <Row label="Sentence Style" value={v.scriptAndLanguage?.sentenceStyle} />
           <Row label="Technical Depth" value={v.scriptAndLanguage?.technicalDepth} />
@@ -213,7 +207,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           )}
         </Section>
 
-        {/* 8. Emotional Triggers */}
         <Section icon="💥" title="8. Emotional Triggers">
           <Row label="Emotional Arc" value={v.emotionalTriggers?.emotionalArc} />
           <Row label="Intensity" value={v.emotionalTriggers?.intensityProgression} />
@@ -224,7 +217,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 9. Visual Style */}
         <Section icon="🎬" title="9. Visual Style & Editing">
           <Row label="Camera Style" value={v.visualStyleEditing?.inferredCameraStyle} />
           <Row label="B-Roll" value={v.visualStyleEditing?.brollEstimate} />
@@ -233,7 +225,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           <Row label="Branding" value={v.visualStyleEditing?.brandingConsistency} />
         </Section>
 
-        {/* 10. Audio Design */}
         <Section icon="🎵" title="10. Audio Design">
           <Row label="Voice Tone" value={v.audioDesign?.voiceToneAndClarity} />
           <Row label="Music Style" value={v.audioDesign?.backgroundMusicStyle} />
@@ -241,14 +232,12 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           <Row label="Production Level" value={v.audioDesign?.audioProductionLevel} />
         </Section>
 
-        {/* 11. Pacing */}
         <Section icon="⏱" title="11. Pacing">
           <Row label="Narrative Speed" value={v.pacing?.narrativeSpeed} />
           <Row label="Idea Density" value={v.pacing?.ideaDensity} />
           <Row label="Breathing Room" value={v.pacing?.breathingRoom} />
         </Section>
 
-        {/* 12. Call-to-Action */}
         <Section icon="📣" title="12. Call-to-Action">
           <Row label="Friction Level" value={v.callToAction?.frictionLevel} />
           <Row label="Integration" value={v.callToAction?.integrationQuality} />
@@ -262,7 +251,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 13. Audience Targeting */}
         <Section icon="👥" title="13. Audience Targeting">
           <Row label="Target Viewer" value={v.audienceTargeting?.primaryTargetViewer} />
           <Row label="Knowledge Level" value={v.audienceTargeting?.assumedKnowledgeLevel} />
@@ -276,7 +264,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 14. Engagement Signals */}
         <Section icon="💬" title="14. Engagement Signals">
           <div>
             <span className="text-xs text-[#71717a]">Predicted Comment Types</span>
@@ -292,7 +279,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 15. Algorithm Fit */}
         <Section icon="📈" title="15. Algorithm Fit">
           <Row label="Watch Time Potential" value={v.algorithmFit?.watchTimePotential} />
           <Row label="Session Continuation" value={v.algorithmFit?.sessionContinuationStrategy} />
@@ -302,7 +288,6 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 16. Monetization */}
         <Section icon="💰" title="16. Monetization Strategy">
           <Row label="Revenue Model" value={v.monetizationStrategy?.revenueModelAssessment} />
           <div>
@@ -315,14 +300,12 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
           </div>
         </Section>
 
-        {/* 17. Consistency */}
         <Section icon="🔁" title="17. Consistency & Channel Strategy">
           <Row label="Repeatability" value={v.channelConsistency?.formatRepeatability} />
           <Row label="Format Nature" value={v.channelConsistency?.seriesOrEpisodicNature} />
           <Row label="Upload Implication" value={v.channelConsistency?.uploadFrequencyImplication} />
         </Section>
 
-        {/* 18. Differentiation */}
         <Section icon="⚡" title="18. Differentiation">
           <Row label="vs Competitors" value={v.differentiation?.vsCompetitors} />
           <Row label="Voice & Personality" value={v.differentiation?.voiceAndPersonality} />
@@ -423,16 +406,16 @@ function ChannelInsightsView({ analysis }: { analysis: Analysis }) {
 
 export default function AnalysisDetailPage() {
   const { id, analysisId } = useParams<{ id: string; analysisId: string }>();
+  const storage = useStorage();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('channel');
 
   useEffect(() => {
-    fetch(`/api/projects/${id}/analyses/${analysisId}`)
-      .then(r => r.json())
+    storage.getAnalysis(id, analysisId)
       .then(data => { setAnalysis(data); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [id, analysisId]);
+  }, [id, analysisId, storage]);
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-[#52525b]">Loading…</div>;
