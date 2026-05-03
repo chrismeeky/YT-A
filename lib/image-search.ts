@@ -5,25 +5,21 @@ export async function searchPexels(
   apiKey: string,
   count = 6
 ): Promise<StockPhoto[]> {
-  try {
-    const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${count}&orientation=landscape`,
-      { headers: { Authorization: apiKey } }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (data.photos ?? []).map((p: any) => ({
-      id: String(p.id),
-      thumb: p.src.medium,
-      full: p.src.large2x,
-      pageUrl: p.url,
-      photographer: p.photographer,
-      alt: p.alt || query,
-    }));
-  } catch {
-    return [];
-  }
+  const res = await fetch(
+    `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${count}&orientation=landscape`,
+    { headers: { Authorization: apiKey } }
+  );
+  if (!res.ok) throw new Error(`Pexels photos API error ${res.status}: ${res.statusText}`);
+  const data = await res.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data.photos ?? []).map((p: any) => ({
+    id: String(p.id),
+    thumb: p.src.medium,
+    full: p.src.large2x,
+    pageUrl: p.url,
+    photographer: p.photographer,
+    alt: p.alt || query,
+  }));
 }
 
 export async function searchDuckDuckGo(
@@ -74,30 +70,27 @@ export async function searchPexelsVideos(
   apiKey: string,
   count = 4
 ): Promise<StockVideo[]> {
-  try {
-    const res = await fetch(
-      `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${count}&orientation=landscape`,
-      { headers: { Authorization: apiKey } }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
+  const res = await fetch(
+    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${count}&orientation=landscape`,
+    { headers: { Authorization: apiKey } }
+  );
+  if (!res.ok) throw new Error(`Pexels videos API error ${res.status}: ${res.statusText}`);
+  const data = await res.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data.videos ?? []).map((v: any) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (data.videos ?? []).map((v: any) => {
-      const files: any[] = v.video_files ?? [];
-      const sd = files.find((f: any) => f.quality === 'sd') ?? files[files.length - 1];
-      const hd = files.find((f: any) => f.quality === 'hd') ?? sd;
-      return {
-        id: String(v.id),
-        thumb: v.image,
-        previewUrl: sd?.link ?? '',
-        sdUrl: sd?.link ?? '',
-        pageUrl: v.url,
-        duration: v.duration ?? 0,
-        user: v.user?.name ?? '',
-      };
-    });
-  } catch {
-    return [];
-  }
+    const files: any[] = v.video_files ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sd = files.find((f: any) => f.quality === 'sd') ?? files[files.length - 1];
+    return {
+      id: String(v.id),
+      thumb: v.image,
+      previewUrl: sd?.link ?? '',
+      sdUrl: sd?.link ?? '',
+      pageUrl: v.url,
+      duration: v.duration ?? 0,
+      user: v.user?.name ?? '',
+    };
+  });
 }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSceneAssets } from '@/lib/claude';
 import { searchPexels, searchDuckDuckGo, searchPexelsVideos } from '@/lib/image-search';
-import { resolveKey } from '@/lib/beta';
+import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { Scene, Analysis, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
 
@@ -63,7 +63,7 @@ export async function POST(
 
     let stockPhotoSegments: StockPhotoSegment[] | undefined;
     if (assets.stockPhotoQueries?.length) {
-      const pexelsApiKey = resolveKey(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
+      const pexelsApiKey = resolveKeyWithFallback(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
       if (!pexelsApiKey) {
         return NextResponse.json({ error: 'Pexels API key required. Add it in Settings.' }, { status: 400 });
       }
@@ -89,7 +89,7 @@ export async function POST(
 
     let stockVideoSegments: StockVideoSegment[] | undefined;
     if (assets.stockVideoQueries?.length) {
-      const pexelsApiKey = resolveKey(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
+      const pexelsApiKey = resolveKeyWithFallback(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
       if (!pexelsApiKey) {
         return NextResponse.json({ error: 'Pexels API key required. Add it in Settings.' }, { status: 400 });
       }
