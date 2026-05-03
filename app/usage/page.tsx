@@ -76,6 +76,8 @@ export default function UsagePage() {
   const [error, setError]         = useState('');
   const [elBalance, setElBalance] = useState<ElevenLabsBalance | null>(null);
   const [ytFingerprint, setYtFingerprint] = useState<string>('');
+  const [entryPage, setEntryPage] = useState(1);
+  const PAGE_SIZE = 20;
   const storage = useStorage();
 
   useEffect(() => {
@@ -86,6 +88,7 @@ export default function UsagePage() {
   }, [storage]);
 
   const load = useCallback(async () => {
+    setEntryPage(1);
     setLoading(true);
     setError('');
     try {
@@ -300,50 +303,99 @@ export default function UsagePage() {
           </div>
 
           {/* Recent log */}
-          <div className="rounded-xl border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-            <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-              <h2 className="font-medium text-sm">Recent Entries <span className="font-normal text-xs ml-1" style={{ color: 'var(--text-3)' }}>({entries.length})</span></h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
-                    {['Time', 'API', 'Operation', 'Project', 'Detail', 'Cost'].map(h => (
-                      <th key={h} className="px-5 py-3 text-left font-medium whitespace-nowrap" style={{ color: 'var(--text-3)' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.slice(0, 100).map(e => (
-                    <tr key={e.id} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                      <td className="px-5 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: 'var(--text-3)' }}>
-                        {new Date(e.timestamp).toLocaleString()}
-                      </td>
-                      <td className="px-5 py-2.5">
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: API_COLORS[e.api] }} />
-                          <span className="capitalize">{e.api}</span>
-                        </span>
-                      </td>
-                      <td className="px-5 py-2.5">{OP_LABELS[e.operation] ?? e.operation}</td>
-                      <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
-                        {e.project_id ? e.project_id.slice(0, 8) + '…' : '—'}
-                      </td>
-                      <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
-                        {e.api === 'anthropic'  && e.input_tokens  != null && `↑${fmt(e.input_tokens)} ↓${fmt(e.output_tokens ?? 0)}`}
-                        {e.api === 'elevenlabs' && e.characters    != null && `${fmt(e.characters)} chars`}
-                        {e.api === 'youtube'    && e.quota_units   != null && `${fmt(e.quota_units)} units`}
-                        {e.api === 'pexels'     && e.requests      != null && `${fmt(e.requests)} reqs`}
-                      </td>
-                      <td className="px-5 py-2.5 font-mono text-xs">
-                        {e.estimated_cost_usd != null ? fmtCost(e.estimated_cost_usd) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {(() => {
+            const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+            const pageEntries = entries.slice((entryPage - 1) * PAGE_SIZE, entryPage * PAGE_SIZE);
+            return (
+              <div className="rounded-xl border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+                  <h2 className="font-medium text-sm">
+                    Recent Entries
+                    <span className="font-normal text-xs ml-1" style={{ color: 'var(--text-3)' }}>({entries.length})</span>
+                  </h2>
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-3)' }}>
+                      <button
+                        onClick={() => setEntryPage(p => Math.max(1, p - 1))}
+                        disabled={entryPage === 1}
+                        className="px-2 py-1 rounded border disabled:opacity-30 hover:bg-white/5 transition-colors"
+                        style={{ borderColor: 'var(--border)' }}
+                      >
+                        ←
+                      </button>
+                      <span>Page {entryPage} of {totalPages}</span>
+                      <button
+                        onClick={() => setEntryPage(p => Math.min(totalPages, p + 1))}
+                        disabled={entryPage === totalPages}
+                        className="px-2 py-1 rounded border disabled:opacity-30 hover:bg-white/5 transition-colors"
+                        style={{ borderColor: 'var(--border)' }}
+                      >
+                        →
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                        {['Time', 'API', 'Operation', 'Project', 'Detail', 'Cost'].map(h => (
+                          <th key={h} className="px-5 py-3 text-left font-medium whitespace-nowrap" style={{ color: 'var(--text-3)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageEntries.map(e => (
+                        <tr key={e.id} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
+                          <td className="px-5 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: 'var(--text-3)' }}>
+                            {new Date(e.timestamp).toLocaleString()}
+                          </td>
+                          <td className="px-5 py-2.5">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: API_COLORS[e.api] }} />
+                              <span className="capitalize">{e.api}</span>
+                            </span>
+                          </td>
+                          <td className="px-5 py-2.5">{OP_LABELS[e.operation] ?? e.operation}</td>
+                          <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
+                            {e.project_id ? e.project_id.slice(0, 8) + '…' : '—'}
+                          </td>
+                          <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
+                            {e.api === 'anthropic'  && e.input_tokens  != null && `↑${fmt(e.input_tokens)} ↓${fmt(e.output_tokens ?? 0)}`}
+                            {e.api === 'elevenlabs' && e.characters    != null && `${fmt(e.characters)} chars`}
+                            {e.api === 'youtube'    && e.quota_units   != null && `${fmt(e.quota_units)} units`}
+                            {e.api === 'pexels'     && e.requests      != null && `${fmt(e.requests)} reqs`}
+                          </td>
+                          <td className="px-5 py-2.5 font-mono text-xs">
+                            {e.estimated_cost_usd != null ? fmtCost(e.estimated_cost_usd) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {totalPages > 1 && (
+                  <div className="px-5 py-3 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+                    <span>Showing {(entryPage - 1) * PAGE_SIZE + 1}–{Math.min(entryPage * PAGE_SIZE, entries.length)} of {entries.length}</span>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => setEntryPage(p)}
+                          className="w-7 h-7 rounded text-xs transition-colors"
+                          style={p === entryPage
+                            ? { background: '#6366f1', color: '#fff' }
+                            : { background: 'var(--surface-2)', color: 'var(--text-3)' }}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
