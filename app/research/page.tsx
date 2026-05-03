@@ -1451,7 +1451,7 @@ export default function ResearchPage() {
   useEffect(() => {
     storage.getSettings().then(s => {
       setApiKey(s.youtubeApiKey);
-      setNoApiKey(!s.youtubeApiKey);
+      setNoApiKey(!s.youtubeApiKey && !BETA_MODE);
     });
     storage.listBookmarks().then(bms => {
       setBookmarks(bms);
@@ -1553,7 +1553,7 @@ export default function ResearchPage() {
     const key = filters.countries.join(',');
     if (key === prevCountriesKeyRef.current) return;
     prevCountriesKeyRef.current = key;
-    if (!query.trim() || !apiKey) return;
+    if (!query.trim() || noApiKey) return;
     doSearch(buildEffectiveQuery(query, filters.countries));
   }, [filters.countries, query, apiKey, doSearch, buildEffectiveQuery]);
 
@@ -1676,11 +1676,11 @@ export default function ResearchPage() {
                 placeholder="Search by niche, keyword, or topic (e.g. personal finance, fitness, cooking)…"
                 className="flex-1 rounded-lg px-4 py-2.5 text-sm border outline-none focus:border-[#6366f1] transition-colors"
                 style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                disabled={searching || !apiKey}
+                disabled={searching || noApiKey}
               />
               <button
                 type="submit"
-                disabled={searching || !query.trim() || !apiKey}
+                disabled={searching || !query.trim() || noApiKey}
                 className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40"
                 style={{ background: '#6366f1', color: '#fff' }}
               >
