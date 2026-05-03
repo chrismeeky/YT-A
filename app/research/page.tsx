@@ -1086,6 +1086,10 @@ function ChannelDrawer({
             )}
           </div>
 
+          {detail && !loadingDetail && detail.recentVideos.length >= 3 && (
+            <ContentInsights videos={detail.recentVideos} />
+          )}
+
           {/* Performance trend chart */}
           {detail && !loadingDetail && detail.recentVideos.length > 1 && (
             <PerformanceTrendChart
@@ -1176,6 +1180,109 @@ function ChannelDrawer({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Content Insights ────────────────────────────────────────────────────
+
+function ContentInsights({ videos }: { videos: ResearchVideo[] }) {
+  if (videos.length < 3) return null;
+
+  // Shorts vs long-form
+  const withDur = videos.filter(v => parseDurSecs(v.duration) > 0);
+  const shortCount = withDur.filter(v => parseDurSecs(v.duration) <= 60).length;
+  const shortsPct = withDur.length > 0 ? Math.round(shortCount / withDur.length * 100) : 0;
+
+  // Engagement rate
+  const withViews = videos.filter(v => v.viewCount > 0);
+  const avgEngagement = withViews.length > 0
+    ? withViews.reduce((s, v) => s + (v.likeCount + v.commentCount) / v.viewCount * 100, 0) / withViews.length
+    : 0;
+  const avgLikeRate = withViews.length > 0
+    ? withViews.reduce((s, v) => s + v.likeCount / v.viewCount * 100, 0) / withViews.length
+    : 0;
+
+  // Trend direction — newest 5 vs oldest 5 by publish date
+  const sorted = [...videos].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+  const n = Math.min(5, Math.floor(sorted.length / 2));
+  const newestSlice = sorted.slice(0, n).filter(v => v.viewCount > 0);
+  const oldestSlice = sorted.slice(-n).filter(v => v.viewCount > 0);
+  const newestAvg = newestSlice.length > 0 ? newestSlice.reduce((s, v) => s + v.viewCount, 0) / newestSlice.length : 0;
+  const oldestAvg = oldestSlice.length > 0 ? oldestSlice.reduce((s, v) => s + v.viewCount, 0) / oldestSlice.length : 0;
+  const trendPct = oldestAvg > 0 ? ((newestAvg - oldestAvg) / oldestAvg * 100) : 0;
+  const trendUp = trendPct > 10;
+  const trendDown = trendPct < -10;
+  const trendColor = trendUp ? '#22c55e' : trendDown ? '#ef4444' : '#eab308';
+  const trendArrow = trendUp ? '↑' : trendDown ? '↓' : '→';
+
+  // View velocity — most recent video
+  const latest = sorted[0];
+  const daysSince = latest ? Math.max(1, (Date.now() - new Date(latest.publishedAt).getTime()) / 86_400_000) : 1;
+  const velocity = latest ? Math.round(latest.viewCount / daysSince) : 0;
+
+  // Best-performing post time — hour/day most common among top-third by views
+  const topN = Math.max(3, Math.ceil(videos.length / 3));
+  const topVideos = [...videos].sort((a, b) => b.viewCount - a.viewCount).slice(0, topN);
+  const bestHourCounts = new Array(24).fill(0);
+  const bestDayCounts  = new Array(7).fill(0);
+  for (const v of topVideos) {
+    const d = new Date(v.publishedAt);
+    bestHourCounts[d.getHours()]++;
+    bestDayCounts[d.getDay()]++;
+  }
+  const bestHour = bestHourCounts.indexOf(Math.max(...bestHourCounts));
+  const bestDay  = bestDayCounts.indexOf(Math.max(...bestDayCounts));
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const bestHourStr = bestHour === 0 ? '12am' : bestHour < 12 ? `${bestHour}am` : bestHour === 12 ? '12pm' : `${bestHour - 12}pm`;
+  const tz = (() => {
+    try {
+      return new Intl.DateTimeFormat('en', { timeZoneName: 'short' })
+        .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
+    } catch { return ''; }
+  })();
+
+  const tile = (label: string, main: React.ReactNode, sub: string, fullWidth = false) => (
+    <div className={`rounded-lg p-3${fullWidth ? ' col-span-2' : ''}`} style={{ background: 'var(--surface-2)' }}>
+      <p className="text-[10px] uppercase tracking-wide opacity-60 mb-1" style={{ color: 'var(--text-3)' }}>{label}</p>
+      <div className="text-lg font-bold leading-tight">{main}</div>
+      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-3)' }}>{sub}</p>
+    </div>
+  );
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-3)' }}>
+        Content Insights
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        {tile(
+          'Engagement Rate',
+          <span>{avgEngagement.toFixed(2)}%</span>,
+          `${avgLikeRate.toFixed(2)}% like · ${(avgEngagement - avgLikeRate).toFixed(2)}% comment`,
+        )}
+        {tile(
+          'Content Mix',
+          <span>{shortsPct}% Shorts</span>,
+          `${100 - shortsPct}% long-form`,
+        )}
+        {tile(
+          'Trend',
+          <span style={{ color: trendColor }}>{trendArrow} {Math.abs(Math.round(trendPct))}%</span>,
+          'newest 5 vs oldest 5 avg views',
+        )}
+        {tile(
+          'View Velocity',
+          <span>{fmt(velocity)}/day</span>,
+          'latest video pace',
+        )}
+        {tile(
+          'Best Post Time',
+          <span>{dayNames[bestDay]}s at {bestHourStr}</span>,
+          `when top ${topN} videos were published${tz ? ` · ${tz}` : ''}`,
+          true,
+        )}
       </div>
     </div>
   );
