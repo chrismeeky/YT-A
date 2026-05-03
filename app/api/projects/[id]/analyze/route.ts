@@ -4,6 +4,7 @@ import { getVideoTranscript, getThumbnailBase64 } from '@/lib/youtube';
 import { analyzeVideo, synthesizeChannelInsights } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
+import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { ChannelVideo, Analysis } from '@/lib/types';
 
 export const maxDuration = 120;
@@ -17,6 +18,7 @@ export async function POST(
     channelUrl: string;
     analysisName: string;
     anthropicApiKey?: string;
+    userId?: string;
   };
 
   const { videos, channelUrl, analysisName } = body;
@@ -36,6 +38,8 @@ export async function POST(
       const emit = (payload: object) => sseEmit(controller, encoder, payload);
       try {
         const videoAnalyses = [];
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
 
         for (let i = 0; i < videos.length; i++) {
           const video = videos[i];
@@ -48,12 +52,16 @@ export async function POST(
           ]);
 
           emit({ message: `Analysing video ${i + 1} of ${videos.length} with Claude…` });
-          const analysis = await analyzeVideo(anthropicApiKey, video, transcript, thumbnail.data);
+          const { result: analysis, inputTokens, outputTokens } = await analyzeVideo(anthropicApiKey, video, transcript, thumbnail.data);
           videoAnalyses.push(analysis);
+          totalInputTokens += inputTokens;
+          totalOutputTokens += outputTokens;
         }
 
         emit({ message: 'Synthesising channel insights…' });
-        const channelInsights = await synthesizeChannelInsights(anthropicApiKey, videoAnalyses);
+        const { result: channelInsights, inputTokens: ci, outputTokens: co } = await synthesizeChannelInsights(anthropicApiKey, videoAnalyses);
+        totalInputTokens += ci;
+        totalOutputTokens += co;
 
         emit({ message: 'Saving analysis…' });
         const analysis: Analysis = {
@@ -66,6 +74,15 @@ export async function POST(
           videoAnalyses,
           channelInsights,
         };
+
+        void trackUsage({
+          operation: 'analyze',
+          api: 'anthropic',
+          project_id: params.id,
+          input_tokens: totalInputTokens,
+          output_tokens: totalOutputTokens,
+          estimated_cost_usd: calcAnthropicCost(totalInputTokens, totalOutputTokens),
+        });
 
         emit({ done: true, result: analysis });
       } catch (err: unknown) {

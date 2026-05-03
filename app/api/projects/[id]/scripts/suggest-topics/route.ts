@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { resolveKey } from '@/lib/beta';
+import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { Analysis } from '@/lib/types';
 
 export async function POST(
@@ -55,6 +56,16 @@ Respond with a raw JSON array only. No markdown, no code fences, no explanation.
 
   try {
     const suggestions = JSON.parse(raw) as { topic: string; context: string }[];
+
+    void trackUsage({
+      operation: 'suggest-topics',
+      api: 'anthropic',
+      project_id: params.id,
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+      estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
+    });
+
     return NextResponse.json({ suggestions });
   } catch {
     console.error('[suggest-topics] Parse failed. Raw response:', text);

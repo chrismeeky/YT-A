@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getChannelVideos } from '@/lib/youtube';
 import { resolveKeyWithFallback } from '@/lib/beta';
+import { trackUsage, keyFingerprint } from '@/lib/usage';
 
 export async function POST(
   request: NextRequest,
@@ -28,6 +29,8 @@ export async function POST(
 
   try {
     const result = await getChannelVideos(channelUrl.trim(), 20, apiKey, pageToken, uploadsPlaylistId);
+    // channels.list (1) + playlistItems.list (1) + optional channel resolve (1) ≈ 3 units
+    void trackUsage({ operation: 'channel-videos', api: 'youtube', project_id: params.id, quota_units: 3, key_fingerprint: keyFingerprint(apiKey) });
     return NextResponse.json(result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to fetch channel videos';

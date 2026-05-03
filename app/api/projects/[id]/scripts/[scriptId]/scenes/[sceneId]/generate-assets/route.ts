@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateSceneAssets } from '@/lib/claude';
 import { searchPexels, searchDuckDuckGo, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey } from '@/lib/beta';
+import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { Scene, Analysis, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
 
 export async function POST(
@@ -35,7 +36,7 @@ export async function POST(
   const analysis = body.analysis;
 
   try {
-    const assets = await generateSceneAssets(
+    const { result: assets, inputTokens, outputTokens } = await generateSceneAssets(
       anthropicApiKey,
       scene,
       analysis.channelInsights,
@@ -50,6 +51,15 @@ export async function POST(
       analysis,
       scene.assetGranularity ?? 2,
     );
+
+    void trackUsage({
+      operation: 'generate-assets',
+      api: 'anthropic',
+      project_id: params.id,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+    });
 
     let stockPhotoSegments: StockPhotoSegment[] | undefined;
     if (assets.stockPhotoQueries?.length) {
@@ -90,6 +100,16 @@ export async function POST(
           videos: await searchPexelsVideos(query, pexelsApiKey, 4),
         })),
       );
+    }
+
+    const pexelsRequests = (assets.stockPhotoQueries?.length ?? 0) + (assets.stockVideoQueries?.length ?? 0);
+    if (pexelsRequests > 0) {
+      void trackUsage({
+        operation: 'generate-assets',
+        api: 'pexels',
+        project_id: params.id,
+        requests: pexelsRequests,
+      });
     }
 
     return NextResponse.json({ ok: true, assets: { ...assets, stockPhotoSegments, realImageSegments, stockVideoSegments } });

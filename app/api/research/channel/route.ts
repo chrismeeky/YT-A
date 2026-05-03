@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveKeyWithFallback } from '@/lib/beta';
+import { trackUsage, keyFingerprint } from '@/lib/usage';
 import type { ResearchChannel, ResearchVideo } from '@/lib/types';
 
 const YT = 'https://www.googleapis.com/youtube/v3';
@@ -103,6 +104,8 @@ export async function POST(request: NextRequest) {
       recentVideos,
     };
 
+    // channels.list (1) + playlistItems.list (1) + videos.list (1) = 3 quota units
+    void trackUsage({ operation: 'research-channel', api: 'youtube', quota_units: 3, key_fingerprint: keyFingerprint(resolvedYoutubeKey) });
     return NextResponse.json({ channel });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to fetch channel details';

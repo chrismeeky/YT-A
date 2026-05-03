@@ -7,6 +7,7 @@ import {
   ReferenceLine, Cell,
 } from 'recharts';
 import { useStorage } from '@/components/StorageProvider';
+import { BETA_MODE } from '@/lib/beta';
 import type { ResearchChannel, ResearchVideo, ChannelBookmark } from '@/lib/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -913,7 +914,7 @@ function ChannelDrawer({
   const [detail, setDetail] = useState<ResearchChannel | null>(null);
   const [noteText, setNoteText] = useState(bookmarkNote);
   const [tagsText, setTagsText] = useState(bookmarkTags.join(', '));
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [videoTab, setVideoTab] = useState<'recent' | 'popular'>('recent');
   const storage = useStorage();
 
@@ -927,7 +928,7 @@ function ChannelDrawer({
   }, [bookmarkNote, bookmarkTags]);
 
   useEffect(() => {
-    if (!channel.id || !apiKey) return;
+    if (!channel.id || apiKey === null) return;
     setLoadingDetail(true);
     setDetail(null);
     fetch('/api/research/channel', {
@@ -1654,7 +1655,7 @@ export default function ResearchPage() {
         </div>
       </div>
 
-      {noApiKey && (
+      {noApiKey && !BETA_MODE && (
         <div className="mx-6 mt-4 flex-shrink-0 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm" style={{ color: '#facc15' }}>
           No YouTube API key found. Add one in{' '}
           <a href="/settings" className="underline font-medium">Settings</a>{' '}

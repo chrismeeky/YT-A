@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveKeyWithFallback } from '@/lib/beta';
+import { trackUsage, keyFingerprint } from '@/lib/usage';
 import type { ResearchChannel } from '@/lib/types';
 
 const YT = 'https://www.googleapis.com/youtube/v3';
@@ -76,6 +77,8 @@ export async function POST(request: NextRequest) {
       } satisfies ResearchChannel;
     });
 
+    // search.list (100) + channels.list (1) = 101 quota units
+    void trackUsage({ operation: 'research-search', api: 'youtube', quota_units: 101, key_fingerprint: keyFingerprint(resolvedYoutubeKey) });
     return NextResponse.json({ channels, nextPageToken: searchData.nextPageToken });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Search failed';

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { generateScript } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
+import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { Script, Scene, ScriptSettings, Analysis } from '@/lib/types';
 
 export const maxDuration = 120;
@@ -43,7 +44,7 @@ export async function POST(
         emit({ message: `Building prompt from channel analysis…` });
 
         emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script with Claude… (this may take up to 60 seconds)` });
-        const generated = await generateScript(
+        const { result: generated, inputTokens, outputTokens } = await generateScript(
           anthropicApiKey,
           body.analysis,
           scriptSettings,
@@ -85,6 +86,15 @@ export async function POST(
           scenes,
           savedToDisk: false,
         };
+
+        void trackUsage({
+          operation: 'generate-script',
+          api: 'anthropic',
+          project_id: params.id,
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+        });
 
         emit({ done: true, result: script });
       } catch (err: unknown) {

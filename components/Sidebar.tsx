@@ -1,10 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/components/AuthProvider';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router   = useRouter();
+  const { user, signOut } = useAuth();
 
   const navItem = (href: string, label: string, icon: string) => {
     const active = pathname === href || (href !== '/' && pathname.startsWith(href));
@@ -21,6 +24,11 @@ export default function Sidebar() {
         {label}
       </Link>
     );
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push('/login');
   };
 
   return (
@@ -40,16 +48,23 @@ export default function Sidebar() {
       <nav className="flex-1 p-3 space-y-1">
         {navItem('/', 'Projects', '📁')}
         {navItem('/research', 'Research', '🔍')}
+        {navItem('/usage', 'Usage', '📊')}
         {navItem('/settings', 'Settings', '⚙️')}
       </nav>
 
       {/* Footer */}
-      <div className="p-3 border-t text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
-        <p>yt-dlp required for channel analysis.</p>
-        <p className="mt-1">
-          <code className="bg-[#1a1a1a] px-1 rounded">brew install yt-dlp</code>
-        </p>
-      </div>
+      {user && (
+        <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-xs truncate mb-1" style={{ color: 'var(--text-3)' }}>{user.email}</p>
+          <button
+            onClick={handleSignOut}
+            className="text-xs py-1 rounded hover:bg-[#1a1a1a] transition-colors w-full text-left"
+            style={{ color: 'var(--text-3)' }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

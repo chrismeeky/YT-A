@@ -19,7 +19,7 @@ export async function analyzeVideo(
   video: ChannelVideo,
   transcript: string,
   thumbnailBase64: string
-): Promise<VideoAnalysis> {
+): Promise<{ result: VideoAnalysis; inputTokens: number; outputTokens: number }> {
   const ai = client(apiKey);
 
   const transcriptExcerpt = transcript
@@ -228,12 +228,16 @@ RULES:
   }
 
   return {
-    videoId: video.id,
-    videoTitle: video.title,
-    videoUrl: video.url,
-    thumbnail: video.thumbnail,
-    channelName: video.channelName,
-    ...parsed,
+    result: {
+      videoId: video.id,
+      videoTitle: video.title,
+      videoUrl: video.url,
+      thumbnail: video.thumbnail,
+      channelName: video.channelName,
+      ...parsed,
+    },
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
   };
 }
 
@@ -242,7 +246,7 @@ RULES:
 export async function synthesizeChannelInsights(
   apiKey: string,
   videoAnalyses: VideoAnalysis[]
-): Promise<ChannelInsights> {
+): Promise<{ result: ChannelInsights; inputTokens: number; outputTokens: number }> {
   const ai = client(apiKey);
 
   // Slim summary — only the fields needed to identify cross-video patterns
@@ -333,7 +337,11 @@ Return ONLY valid JSON:
     cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
   }
   try {
-    return JSON.parse(cleaned) as ChannelInsights;
+    return {
+      result: JSON.parse(cleaned) as ChannelInsights,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
   } catch {
     throw new Error('Failed to parse channel insights. Please try again.');
   }
@@ -363,7 +371,7 @@ export async function generateScript(
   topic: string,
   targetAudience: string,
   additionalInstructions: string
-): Promise<GeneratedScriptPayload> {
+): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
   const ai = client(apiKey);
 
   // Send only the strategy fields needed for scripting — not the full insights object
@@ -442,7 +450,11 @@ Return ONLY valid JSON:
   }
 
   try {
-    return JSON.parse(cleaned) as GeneratedScriptPayload;
+    return {
+      result: JSON.parse(cleaned) as GeneratedScriptPayload,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
   } catch {
     throw new Error(
       `Failed to parse script JSON. Raw response starts with: ${cleaned.slice(0, 300)}`
@@ -460,14 +472,18 @@ export async function generateSceneAssets(
   analysis?: Analysis,
   granularity = 2
 ): Promise<{
-  imagePrompts?: string[];
-  imagePromptExcerpts?: string[];
-  videoPrompts?: string[];
-  videoPromptExcerpts?: string[];
-  stockUrl?: string;
-  stockPhotoQueries?: Array<{ query: string; excerpt: string }>;
-  realImageQueries?: Array<{ query: string; excerpt: string }>;
-  stockVideoQueries?: Array<{ query: string; excerpt: string }>;
+  result: {
+    imagePrompts?: string[];
+    imagePromptExcerpts?: string[];
+    videoPrompts?: string[];
+    videoPromptExcerpts?: string[];
+    stockUrl?: string;
+    stockPhotoQueries?: Array<{ query: string; excerpt: string }>;
+    realImageQueries?: Array<{ query: string; excerpt: string }>;
+    stockVideoQueries?: Array<{ query: string; excerpt: string }>;
+  };
+  inputTokens: number;
+  outputTokens: number;
 }> {
   const ai = client(apiKey);
 
@@ -636,13 +652,17 @@ Return ONLY valid JSON:
   const vid = unpack(parsed.videoPrompts);
 
   return {
-    imagePrompts: img.prompts,
-    imagePromptExcerpts: img.excerpts,
-    videoPrompts: vid.prompts,
-    videoPromptExcerpts: vid.excerpts,
-    stockUrl: parsed.stockUrl,
-    stockPhotoQueries: parsed.stockPhotoQueries,
-    realImageQueries: parsed.realImageQueries,
-    stockVideoQueries: parsed.stockVideoQueries,
+    result: {
+      imagePrompts: img.prompts,
+      imagePromptExcerpts: img.excerpts,
+      videoPrompts: vid.prompts,
+      videoPromptExcerpts: vid.excerpts,
+      stockUrl: parsed.stockUrl,
+      stockPhotoQueries: parsed.stockPhotoQueries,
+      realImageQueries: parsed.realImageQueries,
+      stockVideoQueries: parsed.stockVideoQueries,
+    },
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
   };
 }

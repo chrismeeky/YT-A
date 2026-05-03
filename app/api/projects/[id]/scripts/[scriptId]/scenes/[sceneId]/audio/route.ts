@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSpeech } from '@/lib/elevenlabs';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
+import { trackUsage } from '@/lib/usage';
 
 export async function POST(
   request: NextRequest,
@@ -30,6 +31,7 @@ export async function POST(
   const voiceId    = resolveKeyWithFallback(body.elevenLabsVoiceId, 'NEXT_PUBLIC_ELEVENLABS_VOICE_ID') || '21m00Tcm4TlvDq8ikWAM';
   const sceneNum   = body.sceneNumber ?? 0;
   const filename   = `audio_scene_${String(sceneNum).padStart(3, '0')}.mp3`;
+  const characters = body.narration.trim().length;
 
   try {
     const audioBuffer = await generateSpeech(
@@ -43,6 +45,13 @@ export async function POST(
         style:      body.elevenLabsStyle,
       },
     );
+
+    void trackUsage({
+      operation: 'audio',
+      api: 'elevenlabs',
+      project_id: params.id,
+      characters,
+    });
 
     return new NextResponse(new Uint8Array(audioBuffer), {
       headers: {
