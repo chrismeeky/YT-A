@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSceneAssets } from '@/lib/claude';
 import { searchPexels, searchDuckDuckGo, searchPexelsVideos } from '@/lib/image-search';
+import { resolveKey } from '@/lib/beta';
 import type { Scene, Analysis, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
 
 export async function POST(
@@ -21,7 +22,7 @@ export async function POST(
     pexelsApiKey?: string;
   };
 
-  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
+  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
   if (!anthropicApiKey) {
     return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }
@@ -52,7 +53,7 @@ export async function POST(
 
     let stockPhotoSegments: StockPhotoSegment[] | undefined;
     if (assets.stockPhotoQueries?.length) {
-      const pexelsApiKey = body.pexelsApiKey?.trim() ?? '';
+      const pexelsApiKey = resolveKey(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
       if (!pexelsApiKey) {
         return NextResponse.json({ error: 'Pexels API key required. Add it in Settings.' }, { status: 400 });
       }
@@ -78,7 +79,7 @@ export async function POST(
 
     let stockVideoSegments: StockVideoSegment[] | undefined;
     if (assets.stockVideoQueries?.length) {
-      const pexelsApiKey = body.pexelsApiKey?.trim() ?? '';
+      const pexelsApiKey = resolveKey(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
       if (!pexelsApiKey) {
         return NextResponse.json({ error: 'Pexels API key required. Add it in Settings.' }, { status: 400 });
       }

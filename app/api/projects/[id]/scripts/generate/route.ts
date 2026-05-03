@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
 import { generateScript } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
+import { resolveKey } from '@/lib/beta';
 import type { Script, Scene, ScriptSettings, Analysis } from '@/lib/types';
 
 export const maxDuration = 120;
@@ -20,7 +21,7 @@ export async function POST(
     anthropicApiKey?: string;
   };
 
-  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
+  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
   if (!anthropicApiKey) {
     return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }

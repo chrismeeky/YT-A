@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import type { ChannelVideo, Analysis } from '@/lib/types';
+import type { ChannelVideo, Analysis, ChannelBookmark } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import { readSSE } from '@/lib/sse';
 
@@ -13,10 +13,11 @@ type Step = 'input' | 'select' | 'analyzing' | 'done';
 export default function AnalyzePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const storage = useStorage();
 
   const [step, setStep] = useState<Step>('input');
-  const [channelUrl, setChannelUrl] = useState('');
+  const [channelUrl, setChannelUrl] = useState(() => searchParams.get('channel') ?? '');
   const [analysisName, setAnalysisName] = useState('');
   const [videos, setVideos] = useState<ChannelVideo[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -27,11 +28,33 @@ export default function AnalyzePage() {
   const [progress, setProgress] = useState('');
   const [nextPageToken, setNextPageToken] = useState<string | undefined>();
   const [uploadsPlaylistId, setUploadsPlaylistId] = useState<string | undefined>();
+  const [bookmarks, setBookmarks] = useState<ChannelBookmark[]>([]);
+  const [bookmarkOpen, setBookmarkOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const fetchVideos = async () => {
+  useEffect(() => {
+    storage.listBookmarks().then(setBookmarks);
+  }, [storage]);
+
+  useEffect(() => {
+    const pre = searchParams.get('channel');
+    if (pre) fetchVideos(pre);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selectBookmark = (bm: ChannelBookmark) => {
+    const url = bm.channel.customUrl
+      ? `https://www.youtube.com/${bm.channel.customUrl}`
+      : `https://www.youtube.com/channel/${bm.channel.id}`;
+    setChannelUrl(url);
+    setBookmarkOpen(false);
+    fetchVideos(url);
+  };
+
+  const fetchVideos = async (urlOverride?: string) => {
+    const url = urlOverride ?? channelUrl;
     setFetching(true);
     setFetchError('');
     try {
@@ -39,7 +62,7 @@ export default function AnalyzePage() {
       const res = await fetch(`/api/projects/${id}/channel-videos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelUrl, youtubeApiKey: settings.youtubeApiKey }),
+        body: JSON.stringify({ channelUrl: url, youtubeApiKey: settings.youtubeApiKey }),
       });
       const data = await res.json();
       if (!res.ok) { setFetchError(data.error); return; }
@@ -172,7 +195,7 @@ export default function AnalyzePage() {
               disabled={fetching}
             />
             <button
-              onClick={fetchVideos}
+              onClick={() => fetchVideos()}
               disabled={fetching || !channelUrl.trim()}
               className="px-4 py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 text-sm font-medium transition-colors flex-shrink-0"
             >
@@ -180,6 +203,50 @@ export default function AnalyzePage() {
             </button>
           </div>
           {fetchError && <p className="text-xs text-red-400 mt-2">{fetchError}</p>}
+
+          {/* Bookmark picker */}
+          {bookmarks.length > 0 && (
+            <div className="mt-3">
+              <button
+                onClick={() => setBookmarkOpen(o => !o)}
+                className="text-xs transition-colors flex items-center gap-1"
+                style={{ color: 'var(--text-3)' }}
+              >
+                <span>{bookmarkOpen ? '▲' : '▼'}</span>
+                {bookmarkOpen ? 'Hide saved channels' : `Choose from ${bookmarks.length} saved channel${bookmarks.length !== 1 ? 's' : ''}`}
+              </button>
+
+              {bookmarkOpen && (
+                <div
+                  className="mt-2 rounded-lg border overflow-hidden divide-y"
+                  style={{ borderColor: 'var(--border)', maxHeight: '224px', overflowY: 'auto' }}
+                >
+                  {bookmarks.map(bm => (
+                    <button
+                      key={bm.channel.id}
+                      onClick={() => selectBookmark(bm)}
+                      disabled={fetching}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/5 disabled:opacity-50"
+                      style={{ background: 'var(--surface-2)' }}
+                    >
+                      {bm.channel.thumbnail && (
+                        <img src={bm.channel.thumbnail} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{bm.channel.title}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--text-3)' }}>
+                          {bm.channel.customUrl} · {bm.channel.subscriberCount.toLocaleString()} subs
+                        </p>
+                      </div>
+                      <span className="text-xs flex-shrink-0" style={{ color: '#6366f1' }}>
+                        {bm.channel.outlierScore.toFixed(1)}×
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

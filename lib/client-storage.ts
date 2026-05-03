@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-import type { Project, Analysis, Script, MediaFile, AppSettings } from './types';
+import type { Project, Analysis, Script, MediaFile, AppSettings, ChannelBookmark } from './types';
 import { DEFAULT_SETTINGS } from './types';
 
 // ─── IndexedDB helpers ─────────────────────────────────────────────────────
@@ -418,6 +418,38 @@ export class ClientStorage {
     const buf = await idbGet<ArrayBuffer>(this.db!, FILE_STORE, `audio:${projectId}/${scriptId}/${sceneId}/${filename}`);
     if (!buf) return null;
     return URL.createObjectURL(new Blob([buf]));
+  }
+
+  // ─── Bookmarks ────────────────────────────────────────────────────────
+
+  async listBookmarks(): Promise<ChannelBookmark[]> {
+    if (this._mode === 'fsaa' && this.root) {
+      const files = (await fsaaListDir(this.root, ['research', 'bookmarks']))
+        .filter(e => e.kind === 'file' && e.name.endsWith('.json')).map(e => e.name);
+      return (await Promise.all(
+        files.map(f => this._fsaaReadJson<ChannelBookmark>(['research', 'bookmarks'], f)),
+      )).filter(Boolean) as ChannelBookmark[];
+    }
+    return this._idbListJson<ChannelBookmark>('research/bookmarks/', '.json');
+  }
+
+  async getBookmark(channelId: string): Promise<ChannelBookmark | null> {
+    if (this._mode === 'fsaa' && this.root)
+      return this._fsaaReadJson<ChannelBookmark>(['research', 'bookmarks'], `${channelId}.json`);
+    return this._idbReadJson<ChannelBookmark>(`research/bookmarks/${channelId}.json`);
+  }
+
+  async saveBookmark(bookmark: ChannelBookmark): Promise<void> {
+    const id = bookmark.channel.id;
+    if (this._mode === 'fsaa' && this.root)
+      return this._fsaaWriteJson(['research', 'bookmarks'], `${id}.json`, bookmark);
+    await this._idbWriteJson(`research/bookmarks/${id}.json`, bookmark);
+  }
+
+  async deleteBookmark(channelId: string): Promise<void> {
+    if (this._mode === 'fsaa' && this.root)
+      return fsaaDeleteEntry(this.root, ['research', 'bookmarks'], `${channelId}.json`);
+    await this._idbDeleteKey(`research/bookmarks/${channelId}.json`);
   }
 
   // ─── Export (Save to Disk) ────────────────────────────────────────────

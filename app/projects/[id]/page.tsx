@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import type { Project, Analysis, Script } from '@/lib/types';
@@ -10,6 +10,11 @@ import { useStorage } from '@/components/StorageProvider';
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const channel = searchParams.get('channel') ?? '';
+  const analyzeHref = channel
+    ? `/projects/${id}/analyze?channel=${encodeURIComponent(channel)}`
+    : `/projects/${id}/analyze`;
   const storage = useStorage();
   const [project, setProject] = useState<Project | null>(null);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
@@ -76,7 +81,7 @@ export default function ProjectPage() {
         </div>
         <div className="flex gap-2">
           <Link
-            href={`/projects/${id}/analyze`}
+            href={analyzeHref}
             className="flex items-center gap-1 px-4 py-2 rounded-lg border text-sm transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
             style={{ borderColor: 'var(--border)' }}
           >
@@ -119,7 +124,7 @@ export default function ProjectPage() {
               <p className="text-[#a1a1aa] mb-2">No analyses yet</p>
               <p className="text-[#52525b] text-sm mb-6">Paste a YouTube channel URL to analyse its top videos</p>
               <Link
-                href={`/projects/${id}/analyze`}
+                href={analyzeHref}
                 className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
               >
                 Start Analysis

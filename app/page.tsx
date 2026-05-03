@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 import type { Project } from '@/lib/types';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -9,6 +10,9 @@ import { useStorage } from '@/components/StorageProvider';
 
 export default function Dashboard() {
   const storage = useStorage();
+  const searchParams = useSearchParams();
+  const channel = searchParams.get('channel') ?? '';
+  const cq = channel ? `?channel=${encodeURIComponent(channel)}` : '';
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
@@ -34,7 +38,7 @@ export default function Dashboard() {
           <p className="text-[#71717a] text-sm mt-1">Analyze channels and generate scripts</p>
         </div>
         <Link
-          href="/projects/new"
+          href={`/projects/new${cq}`}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
         >
           <span>+</span> New Project
@@ -50,7 +54,7 @@ export default function Dashboard() {
           <p className="text-[#a1a1aa] text-base mb-2">No projects yet</p>
           <p className="text-[#52525b] text-sm mb-6">Create a project to start analysing YouTube channels</p>
           <Link
-            href="/projects/new"
+            href={`/projects/new${cq}`}
             className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
           >
             Create your first project
@@ -85,18 +89,18 @@ export default function Dashboard() {
               </p>
               <div className="flex gap-2 mt-4">
                 <Link
-                  href={`/projects/${project.id}`}
+                  href={`/projects/${project.id}${cq}`}
                   className="flex-1 text-center py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
                   style={{ borderColor: 'var(--border)' }}
                 >
                   Open
                 </Link>
                 <Link
-                  href={`/projects/${project.id}/analyze`}
-                  className="flex-1 text-center py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
-                  style={{ borderColor: 'var(--border)' }}
+                  href={`/projects/${project.id}/analyze${cq}`}
+                  className={`flex-1 text-center py-1.5 rounded-md text-xs border transition-colors ${channel ? 'border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white' : 'text-[#a1a1aa] hover:text-white hover:border-[#444]'}`}
+                  style={{ borderColor: channel ? '#6366f1' : 'var(--border)' }}
                 >
-                  + Analyze
+                  {channel ? '⚡ Analyze' : '+ Analyze'}
                 </Link>
               </div>
             </div>

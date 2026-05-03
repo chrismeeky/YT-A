@@ -39,6 +39,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-1">
         {navItem('/', 'Projects', '📁')}
+        {navItem('/research', 'Research', '🔍')}
         {navItem('/settings', 'Settings', '⚙️')}
       </nav>
 

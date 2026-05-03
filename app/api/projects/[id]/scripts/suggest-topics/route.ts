@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { resolveKey } from '@/lib/beta';
 import type { Analysis } from '@/lib/types';
 
 export async function POST(
@@ -12,7 +13,7 @@ export async function POST(
     anthropicApiKey?: string;
   };
 
-  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
+  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
   if (!anthropicApiKey) {
     return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }

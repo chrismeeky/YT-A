@@ -10,12 +10,14 @@ function SecretInput({
   placeholder,
   className,
   style,
+  disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
   style?: React.CSSProperties;
+  disabled?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -28,13 +30,15 @@ function SecretInput({
         autoComplete="off"
         className={className}
         style={{ ...style, paddingRight: '2.5rem' }}
+        disabled={disabled}
       />
       <button
         type="button"
         onClick={() => setVisible(v => !v)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525b] hover:text-[#a1a1aa] transition-colors disabled:opacity-30"
         tabIndex={-1}
         title={visible ? 'Hide' : 'Reveal'}
+        disabled={disabled}
       >
         {visible ? (
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -52,6 +56,8 @@ function SecretInput({
     </div>
   );
 }
+
+const BETA_MODE = process.env.NEXT_PUBLIC_BETA_MODE === 'true';
 
 export default function SettingsPage() {
   const storage = useStorage();
@@ -84,6 +90,7 @@ export default function SettingsPage() {
   const inputClass =
     'w-full rounded-lg px-4 py-2.5 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 font-mono';
   const inputStyle = { background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' };
+  const disabledInputStyle = { background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-3)', opacity: 0.5, cursor: 'not-allowed' };
 
   const slider = (
     key: keyof AppSettings,
@@ -147,29 +154,44 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-semibold mb-1">Settings</h1>
       <p className="text-[#71717a] text-sm mb-8">API keys and defaults for your workspace.</p>
 
+      {BETA_MODE && (
+        <div className="mb-6 rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-5 py-4 flex gap-3 items-start">
+          <span className="text-yellow-400 text-lg flex-shrink-0 mt-0.5">⚠</span>
+          <div>
+            <p className="text-sm font-semibold text-yellow-300">Beta mode — API keys are managed by the platform</p>
+            <p className="text-xs text-yellow-200/70 mt-1">
+              You are using a hosted beta build. All API keys (Anthropic, YouTube, ElevenLabs, Pexels) are
+              provided by the platform and cannot be changed here. Voice and script settings below still apply.
+            </p>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={save} className="space-y-6">
         {section('API Keys', <>
           {field(
             'Anthropic API Key',
             <SecretInput
-              value={form.anthropicApiKey ?? ''}
+              value={BETA_MODE ? '••••••••••••••••••••' : (form.anthropicApiKey ?? '')}
               onChange={v => set('anthropicApiKey', v)}
               className={inputClass}
-              style={inputStyle}
+              style={BETA_MODE ? disabledInputStyle : inputStyle}
               placeholder="sk-ant-…"
+              disabled={BETA_MODE}
             />,
-            'Required for channel analysis and script generation.'
+            BETA_MODE ? undefined : 'Required for channel analysis and script generation.'
           )}
           {field(
             'ElevenLabs API Key',
             <SecretInput
-              value={form.elevenLabsApiKey ?? ''}
+              value={BETA_MODE ? '••••••••••••••••••••' : (form.elevenLabsApiKey ?? '')}
               onChange={v => set('elevenLabsApiKey', v)}
               className={inputClass}
-              style={inputStyle}
+              style={BETA_MODE ? disabledInputStyle : inputStyle}
               placeholder="sk-…"
+              disabled={BETA_MODE}
             />,
-            'Required for audio generation on scenes.'
+            BETA_MODE ? undefined : 'Required for audio generation on scenes.'
           )}
           {field(
             'ElevenLabs Voice ID',
@@ -185,13 +207,14 @@ export default function SettingsPage() {
           {field(
             'Pexels API Key',
             <SecretInput
-              value={form.pexelsApiKey ?? ''}
+              value={BETA_MODE ? '••••••••••••••••••••' : (form.pexelsApiKey ?? '')}
               onChange={v => set('pexelsApiKey', v)}
               className={inputClass}
-              style={inputStyle}
+              style={BETA_MODE ? disabledInputStyle : inputStyle}
               placeholder="…"
+              disabled={BETA_MODE}
             />,
-            'Required for Stock Photos per scene. Free at pexels.com/api — 200 requests/hour.'
+            BETA_MODE ? undefined : 'Required for Stock Photos per scene. Free at pexels.com/api — 200 requests/hour.'
           )}
           {field(
             'YouTube Data API Key',
@@ -202,7 +225,9 @@ export default function SettingsPage() {
               style={inputStyle}
               placeholder="AIza…"
             />,
-            'Required for fetching channel videos. Get a free key at console.cloud.google.com → YouTube Data API v3.'
+            BETA_MODE
+              ? 'Optional — leave blank to use the shared beta key. Add your own if you hit the rate limit.'
+              : 'Required for fetching channel videos. Get a free key at console.cloud.google.com → YouTube Data API v3.'
           )}
         </>)}
 

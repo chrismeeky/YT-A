@@ -359,6 +359,43 @@ export interface Script {
   savedToDisk: boolean;
 }
 
+// ─── Research ──────────────────────────────────────────────────────────────
+
+export interface ResearchVideo {
+  id: string;
+  title: string;
+  thumbnail: string;
+  publishedAt: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  duration: string;
+}
+
+export interface ResearchChannel {
+  id: string;
+  title: string;
+  description: string;
+  thumbnail: string;
+  customUrl: string;
+  country: string;
+  publishedAt: string;
+  subscriberCount: number;
+  viewCount: number;
+  videoCount: number;
+  uploadsPlaylistId: string;
+  outlierScore: number;
+  avgRecentViews: number;
+  recentVideos: ResearchVideo[];
+}
+
+export interface ChannelBookmark {
+  channel: ResearchChannel;
+  note: string;
+  tags: string[];
+  savedAt: string;
+}
+
 // ─── App Settings ──────────────────────────────────────────────────────────
 
 export interface AppSettings {

@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useStorage } from '@/components/StorageProvider';
 import type { Project } from '@/lib/types';
 
 export default function NewProject() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const channel = searchParams.get('channel') ?? '';
   const storage = useStorage();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,10 @@ export default function NewProject() {
         updatedAt: new Date().toISOString(),
       };
       await storage.saveProject(project);
-      router.push(`/projects/${project.id}`);
+      const dest = channel
+        ? `/projects/${project.id}/analyze?channel=${encodeURIComponent(channel)}`
+        : `/projects/${project.id}`;
+      router.push(dest);
     } catch {
       setError('Something went wrong');
       setLoading(false);

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { getVideoTranscript, getThumbnailBase64 } from '@/lib/youtube';
 import { analyzeVideo, synthesizeChannelInsights } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
+import { resolveKey } from '@/lib/beta';
 import type { ChannelVideo, Analysis } from '@/lib/types';
 
 export const maxDuration = 120;
@@ -24,7 +25,7 @@ export async function POST(
     return NextResponse.json({ error: 'Select between 1 and 3 videos' }, { status: 400 });
   }
 
-  const anthropicApiKey = body.anthropicApiKey?.trim() ?? '';
+  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
   if (!anthropicApiKey) {
     return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
   }

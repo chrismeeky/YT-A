@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getChannelVideos } from '@/lib/youtube';
+import { resolveKeyWithFallback } from '@/lib/beta';
 
 export async function POST(
   request: NextRequest,
@@ -17,7 +18,7 @@ export async function POST(
     return NextResponse.json({ error: 'channelUrl is required' }, { status: 400 });
   }
 
-  const apiKey = youtubeApiKey?.trim() ?? '';
+  const apiKey = resolveKeyWithFallback(youtubeApiKey, 'NEXT_PUBLIC_YOUTUBE_API_KEY');
   if (!apiKey) {
     return NextResponse.json(
       { error: 'YouTube API key is required. Add it in Settings.' },

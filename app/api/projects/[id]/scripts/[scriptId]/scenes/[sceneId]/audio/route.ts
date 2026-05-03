@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSpeech } from '@/lib/elevenlabs';
+import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 
 export async function POST(
   request: NextRequest,
@@ -17,7 +18,7 @@ export async function POST(
     elevenLabsStyle?:      number;
   };
 
-  const elevenLabsApiKey = body.elevenLabsApiKey?.trim() ?? '';
+  const elevenLabsApiKey = resolveKey(body.elevenLabsApiKey, 'NEXT_PUBLIC_ELEVENLABS_API_KEY');
   if (!elevenLabsApiKey) {
     return NextResponse.json({ error: 'ElevenLabs API key required. Add it in Settings.' }, { status: 400 });
   }
@@ -26,7 +27,7 @@ export async function POST(
     return NextResponse.json({ error: 'Scene has no narration text.' }, { status: 400 });
   }
 
-  const voiceId    = body.elevenLabsVoiceId?.trim() || '21m00Tcm4TlvDq8ikWAM';
+  const voiceId    = resolveKeyWithFallback(body.elevenLabsVoiceId, 'NEXT_PUBLIC_ELEVENLABS_VOICE_ID') || '21m00Tcm4TlvDq8ikWAM';
   const sceneNum   = body.sceneNumber ?? 0;
   const filename   = `audio_scene_${String(sceneNum).padStart(3, '0')}.mp3`;
 
