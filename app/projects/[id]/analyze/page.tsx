@@ -4,11 +4,35 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import type { ChannelVideo, Analysis, ChannelBookmark } from '@/lib/types';
+import { v4 as uuid } from 'uuid';
+import type { ChannelVideo, VideoAnalysis, Analysis, ChannelBookmark } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
-import { readSSE } from '@/lib/sse';
 
 type Step = 'input' | 'select' | 'analyzing' | 'done';
+
+interface ProgressStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'loading' | 'done' | 'error';
+}
+
+function StepIcon({ status }: { status: ProgressStep['status'] }) {
+  if (status === 'loading') {
+    return (
+      <svg className="w-4 h-4 animate-spin text-indigo-400 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+      </svg>
+    );
+  }
+  if (status === 'done') {
+    return <span className="w-4 h-4 flex-shrink-0 text-green-400 text-sm leading-none">✓</span>;
+  }
+  if (status === 'error') {
+    return <span className="w-4 h-4 flex-shrink-0 text-red-400 text-sm leading-none">✗</span>;
+  }
+  return <span className="w-4 h-4 flex-shrink-0 rounded-full border border-[#444] inline-block" />;
+}
 
 export default function AnalyzePage() {
   const { id } = useParams<{ id: string }>();
@@ -25,7 +49,7 @@ export default function AnalyzePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const [analyzeError, setAnalyzeError] = useState('');
-  const [progress, setProgress] = useState('');
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | undefined>();
   const [uploadsPlaylistId, setUploadsPlaylistId] = useState<string | undefined>();
   const [bookmarks, setBookmarks] = useState<ChannelBookmark[]>([]);
@@ -105,12 +129,10 @@ export default function AnalyzePage() {
     }
   }, [nextPageToken, loadingMore, channelUrl, uploadsPlaylistId, storage, id]);
 
-  // Auto-load next page when sentinel scrolls into view inside the card
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const container = scrollRef.current;
     if (!sentinel || !container || !nextPageToken) return;
-
     const observer = new IntersectionObserver(
       (entries) => { if (entries[0].isIntersecting) loadMore(); },
       { root: container, rootMargin: '120px', threshold: 0 },
@@ -131,33 +153,90 @@ export default function AnalyzePage() {
     });
   };
 
+  const updateStep = (stepId: string, status: ProgressStep['status']) => {
+    setProgressSteps(prev => prev.map(s => s.id === stepId ? { ...s, status } : s));
+  };
+
   const runAnalysis = async () => {
+    const selectedVideos = videos.filter(v => selected.has(v.id));
+    const settings = await storage.getSettings();
+
+    // Build the step list upfront
+    const steps: ProgressStep[] = [
+      ...selectedVideos.map((v, i) => ({
+        id: `video-${i}`,
+        label: `Analysing video ${i + 1} of ${selectedVideos.length}: "${v.title.length > 50 ? v.title.slice(0, 47) + '…' : v.title}"`,
+        status: 'pending' as const,
+      })),
+      { id: 'synthesize', label: 'Synthesising channel insights with Claude', status: 'pending' },
+      { id: 'save', label: 'Saving analysis', status: 'pending' },
+    ];
+
+    setProgressSteps(steps);
     setStep('analyzing');
     setAnalyzeError('');
-    setProgress('Starting analysis…');
-
-    const selectedVideos = videos.filter(v => selected.has(v.id));
 
     try {
-      const settings = await storage.getSettings();
-      const res = await fetch(`/api/projects/${id}/analyze`, {
+      const videoAnalyses: VideoAnalysis[] = [];
+
+      for (let i = 0; i < selectedVideos.length; i++) {
+        const video = selectedVideos[i];
+        const stepId = `video-${i}`;
+        updateStep(stepId, 'loading');
+
+        const res = await fetch(`/api/projects/${id}/analyze/video`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey }),
+        });
+        const data = await res.json() as { result?: VideoAnalysis; error?: string };
+
+        if (!res.ok || data.error) {
+          updateStep(stepId, 'error');
+          setAnalyzeError(data.error ?? 'Video analysis failed');
+          setStep('select');
+          return;
+        }
+
+        videoAnalyses.push(data.result!);
+        updateStep(stepId, 'done');
+      }
+
+      // Synthesize
+      updateStep('synthesize', 'loading');
+      const synthRes = await fetch(`/api/projects/${id}/analyze/synthesize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videos: selectedVideos,
-          channelUrl,
-          analysisName: analysisName || `${selectedVideos[0]?.channelName || 'Channel'} Analysis`,
-          anthropicApiKey: settings.anthropicApiKey,
-        }),
+        body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        setAnalyzeError(data.error);
+      const synthData = await synthRes.json() as { result?: unknown; error?: string };
+
+      if (!synthRes.ok || synthData.error) {
+        updateStep('synthesize', 'error');
+        setAnalyzeError(synthData.error ?? 'Synthesis failed');
         setStep('select');
         return;
       }
-      const data = await readSSE<Analysis>(res, setProgress);
-      await storage.saveAnalysis(id, data);
+      updateStep('synthesize', 'done');
+
+      // Save
+      updateStep('save', 'loading');
+      const analysis: Analysis = {
+        id: uuid(),
+        name: analysisName || `${selectedVideos[0]?.channelName || 'Channel'} Analysis`,
+        projectId: id,
+        createdAt: new Date().toISOString(),
+        channelUrl,
+        channelName: selectedVideos[0]?.channelName || '',
+        videoAnalyses,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        channelInsights: synthData.result as any,
+      };
+      await storage.saveAnalysis(id, analysis);
+      updateStep('save', 'done');
+
+      // Small pause so the user sees all green ticks
+      await new Promise(r => setTimeout(r, 600));
       router.push(`/projects/${id}`);
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed. Check your API key in Settings.');
@@ -204,7 +283,6 @@ export default function AnalyzePage() {
           </div>
           {fetchError && <p className="text-xs text-red-400 mt-2">{fetchError}</p>}
 
-          {/* Bookmark picker */}
           {bookmarks.length > 0 && (
             <div className="mt-3">
               <button
@@ -240,7 +318,7 @@ export default function AnalyzePage() {
                       </div>
                       <span className="text-xs flex-shrink-0" style={{ color: '#6366f1' }}>
                         {bm.channel.outlierScore.toFixed(1)}×
-                      </span>
+      </span>
                     </button>
                   ))}
                 </div>
@@ -256,7 +334,6 @@ export default function AnalyzePage() {
           className="rounded-xl border flex flex-col mb-6"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)', maxHeight: '72vh' }}
         >
-          {/* Fixed header + CTA */}
           <div
             className="px-6 pt-5 pb-4 flex-shrink-0 border-b space-y-3"
             style={{ borderColor: 'var(--border)' }}
@@ -289,7 +366,6 @@ export default function AnalyzePage() {
             {analyzeError && <p className="text-xs text-red-400">{analyzeError}</p>}
           </div>
 
-          {/* Scrollable video grid */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-6">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-2">
               {videos.map(video => {
@@ -309,13 +385,7 @@ export default function AnalyzePage() {
                     style={{ background: 'var(--surface-2)' }}
                   >
                     <div className="relative aspect-video">
-                      <Image
-                        src={video.thumbnail}
-                        alt={video.title}
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
+                      <Image src={video.thumbnail} alt={video.title} fill className="object-cover" unoptimized />
                       {isSelected && (
                         <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-xs">
                           ✓
@@ -332,59 +402,46 @@ export default function AnalyzePage() {
                 );
               })}
             </div>
-
-            {/* Sentinel + status */}
             <div ref={sentinelRef} className="h-px" />
-            {loadingMore && (
-              <p className="text-center text-[#52525b] text-xs py-4">Loading more videos…</p>
-            )}
+            {loadingMore && <p className="text-center text-[#52525b] text-xs py-4">Loading more videos…</p>}
             {!nextPageToken && !loadingMore && (
               <p className="text-center text-[#52525b] text-xs py-4">{videos.length} videos loaded</p>
             )}
           </div>
-
         </div>
       )}
 
-      {/* Analyzing */}
+      {/* Analyzing — step list */}
       {step === 'analyzing' && (
         <div
-          className="rounded-xl border p-10 text-center"
+          className="rounded-xl border p-8"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
         >
-          <div className="text-4xl mb-4 animate-pulse">🔍</div>
-          <h2 className="font-semibold mb-2">Analysing…</h2>
-          <p className="text-sm text-[#71717a]">{progress}</p>
-          <p className="text-xs text-[#52525b] mt-3">This may take 30–60 seconds</p>
-        </div>
-      )}
-
-      {/* Done */}
-      {step === 'done' && (
-        <div
-          className="rounded-xl border p-10 text-center"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-        >
-          <div className="text-4xl mb-4">✅</div>
-          <h2 className="font-semibold mb-2">Analysis Complete</h2>
-          <p className="text-sm text-[#71717a] mb-6">
-            Channel insights saved. You can now generate scripts based on this analysis.
-          </p>
-          <div className="flex justify-center gap-3">
-            <Link
-              href={`/projects/${id}`}
-              className="px-5 py-2.5 rounded-lg border text-sm transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
-              style={{ borderColor: 'var(--border)' }}
-            >
-              View Project
-            </Link>
-            <Link
-              href={`/projects/${id}/scripts/new`}
-              className="px-5 py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
-            >
-              Write a Script →
-            </Link>
+          <h2 className="font-semibold mb-6">Analysing…</h2>
+          <div className="space-y-4">
+            {progressSteps.map(s => (
+              <div key={s.id} className="flex items-center gap-3">
+                <StepIcon status={s.status} />
+                <span
+                  className="text-sm"
+                  style={{
+                    color: s.status === 'done'
+                      ? 'var(--text)'
+                      : s.status === 'loading'
+                        ? 'var(--text)'
+                        : s.status === 'error'
+                          ? '#f87171'
+                          : 'var(--text-3)',
+                  }}
+                >
+                  {s.label}
+                </span>
+              </div>
+            ))}
           </div>
+          <p className="text-xs mt-8" style={{ color: 'var(--text-3)' }}>
+            This may take 30–90 seconds per video. Please keep this tab open.
+          </p>
         </div>
       )}
     </div>
