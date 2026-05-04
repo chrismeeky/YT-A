@@ -193,13 +193,18 @@ export default function AnalyzePage() {
 
         if (!res.ok || data.error) {
           updateStep(stepId, 'error');
-          setAnalyzeError(data.error ?? 'Video analysis failed');
-          setStep('select');
-          return;
+          // Skip this video but continue with the rest
+          continue;
         }
 
         videoAnalyses.push(data.result!);
         updateStep(stepId, 'done');
+      }
+
+      if (videoAnalyses.length === 0) {
+        setAnalyzeError('All selected videos were declined or failed. Please choose different videos.');
+        setStep('select');
+        return;
       }
 
       // Synthesize

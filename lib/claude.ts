@@ -218,6 +218,12 @@ RULES:
     cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
   }
 
+  if (!cleaned.startsWith('{')) {
+    throw new Error(
+      `"${video.title}" could not be analysed — the content was declined by the AI. Try a different video.`
+    );
+  }
+
   let parsed: Omit<VideoAnalysis, 'videoId' | 'videoTitle' | 'videoUrl' | 'thumbnail' | 'channelName'>;
   try {
     parsed = JSON.parse(cleaned);
