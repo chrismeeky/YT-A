@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSceneAssets } from '@/lib/claude';
-import { searchPexels, searchDuckDuckGo, searchPexelsVideos } from '@/lib/image-search';
+import { searchPexels, searchBraveImages, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { Scene, Analysis, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
@@ -21,6 +21,7 @@ export async function POST(
     stockVideos?: boolean;
     anthropicApiKey?: string;
     pexelsApiKey?: string;
+    braveApiKey?: string;
   };
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -78,11 +79,15 @@ export async function POST(
 
     let realImageSegments: RealImageSegment[] | undefined;
     if (assets.realImageQueries?.length) {
+      const braveApiKey = resolveKeyWithFallback(body.braveApiKey, 'NEXT_PUBLIC_BRAVE_API_KEY');
+      if (!braveApiKey) {
+        return NextResponse.json({ error: 'Brave Search API key required for Real Images. Add it in Settings.' }, { status: 400 });
+      }
       realImageSegments = await Promise.all(
         assets.realImageQueries.map(async ({ query, excerpt }) => ({
           query,
           narrationExcerpt: excerpt,
-          images: await searchDuckDuckGo(query, 6),
+          images: await searchBraveImages(query, braveApiKey, 6),
         })),
       );
     }

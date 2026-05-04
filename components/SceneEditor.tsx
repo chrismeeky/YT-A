@@ -64,6 +64,19 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [struckItems, setStruckItems] = useState<Set<string>>(new Set());
   const [badgeAnimating, setBadgeAnimating] = useState(false);
   const prevMediaCountRef = useRef<number>(0);
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
+  const tabContentRef = useRef<HTMLDivElement>(null);
+
+  const handleTabClick = (key: string) => {
+    setActiveAssetTab(key);
+    requestAnimationFrame(() => {
+      if (scrollBodyRef.current && tabContentRef.current) {
+        const bodyRect = scrollBodyRef.current.getBoundingClientRect();
+        const contentRect = tabContentRef.current.getBoundingClientRect();
+        scrollBodyRef.current.scrollBy({ top: contentRect.top - bodyRect.top - 24, behavior: 'smooth' });
+      }
+    });
+  };
 
   const toggleStruck = (key: string) =>
     setStruckItems(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
@@ -119,6 +132,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             analysis,
             anthropicApiKey: settings.anthropicApiKey,
             pexelsApiKey: settings.pexelsApiKey,
+            braveApiKey: settings.braveApiKey,
           }),
         }
       );
@@ -131,7 +145,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         imagePromptExcerpts: assets.imagePromptExcerpts ?? scene.imagePromptExcerpts,
         videoPrompts:        assets.videoPrompts        ?? scene.videoPrompts,
         videoPromptExcerpts: assets.videoPromptExcerpts ?? scene.videoPromptExcerpts,
-        stockUrl:            assets.stockUrl            ?? scene.stockUrl,
         ...(assets.stockPhotoSegments !== undefined && { stockPhotoSegments: assets.stockPhotoSegments }),
         ...(assets.realImageSegments  !== undefined && { realImageSegments:  assets.realImageSegments }),
         ...(assets.stockVideoSegments !== undefined && { stockVideoSegments: assets.stockVideoSegments }),
@@ -142,7 +155,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         const firstNewTab =
           assets.imagePrompts       ? 'imagePrompt' :
           assets.videoPrompts       ? 'videoPrompt' :
-          assets.stockUrl           ? 'stockUrl' :
           assets.stockPhotoSegments ? 'stockPhotos' :
           assets.stockVideoSegments ? 'stockVideos' :
           assets.realImageSegments  ? 'realImages' : null;
@@ -253,7 +265,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const assetTabs = [
     { key: 'imagePrompt', label: 'Image Prompts',   color: 'text-indigo-300',  border: '#6366f1', visible: !!scene.imagePrompts?.length },
     { key: 'videoPrompt', label: 'Video Prompts',   color: 'text-yellow-300',  border: '#eab308', visible: !!scene.videoPrompts?.length },
-    { key: 'stockUrl',    label: 'Stock URL',        color: 'text-[#a1a1aa]',  border: '#71717a', visible: !!scene.stockUrl },
     { key: 'stockPhotos', label: '📷 Stock Photos', color: 'text-emerald-300', border: '#10b981', visible: !!scene.stockPhotoSegments?.length },
     { key: 'stockVideos', label: '📹 Stock Videos', color: 'text-sky-300',     border: '#0ea5e9', visible: !!scene.stockVideoSegments?.length },
     { key: 'realImages',  label: '🔍 Real Images',  color: 'text-orange-300',  border: '#f97316', visible: !!scene.realImageSegments?.length  },
@@ -333,7 +344,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             return (
               <button
                 key={tab.key}
-                onClick={() => setActiveAssetTab(tab.key)}
+                onClick={() => handleTabClick(tab.key)}
                 className={`flex-shrink-0 px-4 py-2.5 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px ${
                   isActive
                     ? `${tab.color} border-current`
@@ -348,7 +359,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
       )}
 
       {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div ref={scrollBodyRef} className="flex-1 overflow-y-auto p-6 space-y-6">
 
         {/* Narration */}
         <div>
@@ -392,7 +403,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Visual Assets</p>
             <button
               onClick={generateAssets}
-              disabled={generatingScenes.has(scene.id) || (!scene.includeImagePrompt && !scene.includeVideoPrompt && !scene.includeStockUrl && !scene.includeStockPhotos && !scene.includeRealImages && !scene.includeStockVideos)}
+              disabled={generatingScenes.has(scene.id) || (!scene.includeImagePrompt && !scene.includeVideoPrompt && !scene.includeStockPhotos && !scene.includeRealImages && !scene.includeStockVideos)}
               className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {generatingScenes.has(scene.id) ? (
@@ -410,7 +421,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             {[
               { key: 'includeImagePrompt' as const, label: 'Image Prompt' },
               { key: 'includeVideoPrompt' as const, label: 'Video Prompt' },
-              { key: 'includeStockUrl' as const,    label: 'Stock URL' },
               { key: 'includeStockPhotos' as const, label: '📷 Stock Photos' },
               { key: 'includeRealImages' as const,  label: '🔍 Real Images' },
               { key: 'includeStockVideos' as const, label: '📹 Stock Videos' },
@@ -468,7 +478,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
 
         {/* Tab content */}
         {assetTabs.length > 0 && (
-          <div className="pt-2">
+          <div ref={tabContentRef} className="pt-2">
 
               {/* Image Prompts */}
               {effectiveTab === 'imagePrompt' && scene.includeImagePrompt && (
@@ -571,30 +581,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                   >
                     + Add chunk
                   </button>
-                </div>
-              )}
-
-              {/* Stock URL */}
-              {effectiveTab === 'stockUrl' && scene.includeStockUrl && (
-                <div className="flex gap-2">
-                  <input
-                    value={scene.stockUrl ?? ''}
-                    onChange={e => updateScene({ stockUrl: e.target.value })}
-                    className="flex-1 rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
-                    style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                    placeholder="https://www.pexels.com/search/videos/…"
-                  />
-                  {scene.stockUrl && (
-                    <a
-                      href={scene.stockUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-2 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#555]"
-                      style={{ borderColor: 'var(--border)' }}
-                    >
-                      Open ↗
-                    </a>
-                  )}
                 </div>
               )}
 
@@ -808,7 +794,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
               {effectiveTab && !{
                 imagePrompt: scene.imagePrompts?.length,
                 videoPrompt: scene.videoPrompts?.length,
-                stockUrl:    scene.stockUrl,
                 stockPhotos: scene.stockPhotoSegments?.length,
                 stockVideos: scene.stockVideoSegments?.length,
                 realImages:  scene.realImageSegments?.length,

@@ -22,43 +22,31 @@ export async function searchPexels(
   }));
 }
 
-export async function searchDuckDuckGo(
+export async function searchBraveImages(
   query: string,
+  apiKey: string,
   count = 6
 ): Promise<RealImage[]> {
-  const pageRes = await fetch(
-    `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
+  const res = await fetch(
+    `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=${count}`,
     {
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml',
+        'Accept': 'application/json',
+        'X-Subscription-Token': apiKey,
       },
     }
   );
-  if (!pageRes.ok) throw new Error(`DuckDuckGo page error ${pageRes.status}`);
-  const html = await pageRes.text();
-  const vqdMatch = html.match(/vqd=([^&"'\s]+)/);
-  if (!vqdMatch) throw new Error('DuckDuckGo: could not extract vqd token — the scraping method may be blocked');
-
-  const imgRes = await fetch(
-    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&o=json&p=1&s=0&vqd=${vqdMatch[1]}&f=,,,,,,&l=us-en`,
-    {
-      headers: {
-        Referer: 'https://duckduckgo.com/',
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    }
-  );
-  if (!imgRes.ok) throw new Error(`DuckDuckGo images error ${imgRes.status}`);
-  const data = await imgRes.json();
+  if (!res.ok) {
+    const body = await res.text().catch(() => res.statusText);
+    throw new Error(`Brave Images API error ${res.status}: ${body}`);
+  }
+  const data = await res.json();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (data.results ?? []).slice(0, count).map((r: any) => ({
     title: r.title || query,
-    thumb: r.thumbnail,
-    full: r.image,
-    sourceUrl: r.url,
+    thumb: r.thumbnail?.src ?? r.properties?.url ?? '',
+    full: r.properties?.url ?? r.thumbnail?.src ?? '',
+    sourceUrl: r.url ?? '',
   }));
 }
 

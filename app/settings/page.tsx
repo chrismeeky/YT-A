@@ -214,7 +214,19 @@ export default function SettingsPage() {
               placeholder="…"
               disabled={BETA_MODE}
             />,
-            BETA_MODE ? undefined : 'Required for Stock Photos per scene. Free at pexels.com/api — 200 requests/hour.'
+            BETA_MODE ? undefined : 'Required for Stock Photos & Videos per scene. Free at pexels.com/api — 200 requests/hour.'
+          )}
+          {field(
+            'Brave Search API Key',
+            <SecretInput
+              value={BETA_MODE ? '••••••••••••••••••••' : (form.braveApiKey ?? '')}
+              onChange={v => set('braveApiKey', v)}
+              className={inputClass}
+              style={BETA_MODE ? disabledInputStyle : inputStyle}
+              placeholder="…"
+              disabled={BETA_MODE}
+            />,
+            BETA_MODE ? undefined : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
           )}
           {field(
             'YouTube Data API Key',

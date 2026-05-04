@@ -407,6 +407,7 @@ export interface AppSettings {
   elevenLabsSimilarity: number;
   elevenLabsStyle: number;
   pexelsApiKey: string;
+  braveApiKey: string;
   youtubeApiKey: string;
   defaultVideoLength: number;
   defaultWpm: number;
@@ -422,6 +423,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   elevenLabsSimilarity: 0.75,
   elevenLabsStyle: 0.0,
   pexelsApiKey: '',
+  braveApiKey: '',
   youtubeApiKey: '',
   defaultVideoLength: 5,
   defaultWpm: 150,
