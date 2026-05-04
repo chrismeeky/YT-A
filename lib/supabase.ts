@@ -19,6 +19,6 @@ let _browser: SupabaseClient | null = null;
 export function getBrowserSupabase(): SupabaseClient | null {
   if (typeof window === 'undefined') return null;
   if (!url || !anonKey) return null;
-  if (!_browser) _browser = createClient(url, anonKey);
+  if (!_browser) _browser = createClient(url, anonKey, { auth: { autoRefreshToken: false } });
   return _browser;
 }
