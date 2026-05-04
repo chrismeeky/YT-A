@@ -229,6 +229,27 @@ export default function SettingsPage() {
             BETA_MODE ? undefined : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
           )}
           {field(
+            'Real Images Provider',
+            <div className="flex gap-2">
+              {(['brave', 'duckduckgo'] as const).map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => set('realImageProvider', p)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    (form.realImageProvider ?? 'brave') === p
+                      ? 'bg-indigo-500 border-indigo-500 text-white'
+                      : 'border-[#333] text-[#a1a1aa] hover:border-[#555] hover:text-white'
+                  }`}
+                  style={(form.realImageProvider ?? 'brave') !== p ? { background: 'var(--surface-2)' } : {}}
+                >
+                  {p === 'brave' ? 'Brave Search' : 'DuckDuckGo'}
+                </button>
+              ))}
+            </div>,
+            'Brave Search requires an API key but works on all hosts. DuckDuckGo is free but may be blocked on Vercel/serverless.'
+          )}
+          {field(
             'YouTube Data API Key',
             <SecretInput
               value={form.youtubeApiKey ?? ''}

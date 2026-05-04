@@ -22,6 +22,7 @@ export async function POST(
     anthropicApiKey?: string;
     pexelsApiKey?: string;
     braveApiKey?: string;
+    realImageProvider?: 'brave' | 'duckduckgo';
   };
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -78,7 +79,7 @@ export async function POST(
     }
 
     let realImageSegments: RealImageSegment[] | undefined;
-    if (assets.realImageQueries?.length) {
+    if (assets.realImageQueries?.length && (body.realImageProvider ?? 'brave') === 'brave') {
       const braveApiKey = resolveKeyWithFallback(body.braveApiKey, 'NEXT_PUBLIC_BRAVE_API_KEY');
       if (!braveApiKey) {
         return NextResponse.json({ error: 'Brave Search API key required for Real Images. Add it in Settings.' }, { status: 400 });

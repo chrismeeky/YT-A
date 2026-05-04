@@ -408,6 +408,7 @@ export interface AppSettings {
   elevenLabsStyle: number;
   pexelsApiKey: string;
   braveApiKey: string;
+  realImageProvider: 'brave' | 'duckduckgo';
   youtubeApiKey: string;
   defaultVideoLength: number;
   defaultWpm: number;
@@ -424,6 +425,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   elevenLabsStyle: 0.0,
   pexelsApiKey: '',
   braveApiKey: '',
+  realImageProvider: 'brave',
   youtubeApiKey: '',
   defaultVideoLength: 5,
   defaultWpm: 150,

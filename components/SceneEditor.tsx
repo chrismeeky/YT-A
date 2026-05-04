@@ -133,12 +133,28 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             anthropicApiKey: settings.anthropicApiKey,
             pexelsApiKey: settings.pexelsApiKey,
             braveApiKey: settings.braveApiKey,
+            realImageProvider: settings.realImageProvider,
           }),
         }
       );
       const data = await res.json();
       if (!res.ok) { setAssetError(data.error); return; }
       const { assets } = data;
+
+      // DuckDuckGo: server skips image fetching; call the edge route client-side instead
+      if (settings.realImageProvider === 'duckduckgo' && assets.realImageQueries?.length) {
+        const ddgResults = await Promise.all(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          assets.realImageQueries.map(async ({ query, excerpt }: { query: string; excerpt: string }) => {
+            const r = await fetch(`/api/ddg-images?q=${encodeURIComponent(query)}&count=6`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error ?? 'DuckDuckGo image search failed');
+            return { query, narrationExcerpt: excerpt, images: d.images ?? [] };
+          })
+        );
+        assets.realImageSegments = ddgResults;
+      }
+
       const updatedScene = {
         ...scene,
         imagePrompts:        assets.imagePrompts        ?? scene.imagePrompts,

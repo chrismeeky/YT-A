@@ -22,6 +22,33 @@ export async function searchPexels(
   }));
 }
 
+export async function searchDuckDuckGoImages(
+  query: string,
+  count = 6
+): Promise<RealImage[]> {
+  const vqdRes = await fetch(
+    `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
+    { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
+  );
+  const html = await vqdRes.text();
+  const vqdMatch = html.match(/vqd=([^&"]+)/);
+  if (!vqdMatch) throw new Error('DuckDuckGo: could not extract vqd token');
+  const vqd = vqdMatch[1];
+  const res = await fetch(
+    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${vqd}&o=json`,
+    { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', Referer: 'https://duckduckgo.com/' } }
+  );
+  if (!res.ok) throw new Error(`DuckDuckGo Images error ${res.status}: ${res.statusText}`);
+  const data = await res.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data.results ?? []).slice(0, count).map((r: any) => ({
+    title: r.title || query,
+    thumb: r.thumbnail || r.image || '',
+    full: r.image || r.thumbnail || '',
+    sourceUrl: r.url || '',
+  }));
+}
+
 export async function searchBraveImages(
   query: string,
   apiKey: string,
