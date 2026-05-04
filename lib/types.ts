@@ -352,6 +352,7 @@ export interface Script {
   targetAudience: string;
   additionalInstructions: string;
   thumbnailConcept: string;
+  youtubeDescription?: string;
   createdAt: string;
   updatedAt: string;
   settings: ScriptSettings;

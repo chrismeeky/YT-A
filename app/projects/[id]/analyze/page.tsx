@@ -184,11 +184,27 @@ export default function AnalyzePage() {
         const stepId = `video-${i}`;
         updateStep(stepId, 'loading');
 
-        const res = await fetch(`/api/projects/${id}/analyze/video`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey }),
-        });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 115_000);
+        let res: Response;
+        try {
+          res = await fetch(`/api/projects/${id}/analyze/video`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey }),
+            signal: ctrl.signal,
+          });
+        } catch (e) {
+          clearTimeout(timer);
+          const msg = e instanceof DOMException && e.name === 'AbortError'
+            ? 'Request timed out — the analysis is taking too long. Try a shorter video or check your Vercel plan limits.'
+            : 'Network error — could not reach the server. Check your connection.';
+          updateStep(stepId, 'error');
+          setAnalyzeError(msg);
+          setStep('select');
+          return;
+        }
+        clearTimeout(timer);
         const data = await res.json() as { result?: VideoAnalysis; error?: string };
 
         if (!res.ok || data.error) {

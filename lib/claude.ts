@@ -672,3 +672,47 @@ Return ONLY valid JSON:
     outputTokens: response.usage.output_tokens,
   };
 }
+
+// ─── YouTube Description ─────────────────────────────────────────────────────
+
+export async function generateYoutubeDescription(
+  apiKey: string,
+  title: string,
+  fullScript: string,
+  channelStyle?: string,
+): Promise<{ description: string; inputTokens: number; outputTokens: number }> {
+  const ai = client(apiKey);
+
+  const response = await ai.messages.create({
+    model: 'claude-opus-4-7',
+    max_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content: `You are an expert YouTube content strategist. Write a compelling YouTube description for this video.
+
+VIDEO TITLE: ${title}
+
+${channelStyle ? `CHANNEL STYLE & AUDIENCE:\n${channelStyle}\n\n` : ''}SCRIPT EXCERPT (first 6000 chars):
+${fullScript.slice(0, 6000)}${fullScript.length > 6000 ? '\n...[continues]' : ''}
+
+REQUIREMENTS:
+- First 2-3 lines are the hook (visible before "Show more") — make them punchy and curiosity-driving
+- Summarise what the viewer will learn or experience
+- Include 2-3 relevant timestamps if the script has clear sections (estimate timing from word count at ~150wpm)
+- End with a soft CTA (like / subscribe / comment)
+- 150–300 words total
+- No hashtags
+- No emoji unless the channel style clearly uses them
+- Plain text only — no markdown, no asterisks
+
+Return ONLY the description text, nothing else.`,
+    }],
+  });
+
+  const description = (response.content[0] as { type: string; text: string }).text.trim();
+  return {
+    description,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+}

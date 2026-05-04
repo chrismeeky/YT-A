@@ -48,8 +48,10 @@ export async function getChannelVideos(
 
 // Transcript and thumbnail fetches are plain HTTP — no API key needed.
 export async function getVideoTranscript(videoId: string): Promise<string> {
+  const timeout = (ms: number) => AbortSignal.timeout(ms);
   try {
     const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      signal: timeout(15000),
       headers: {
         'Accept-Language': 'en-US,en;q=0.9',
         'User-Agent':
@@ -65,7 +67,7 @@ export async function getVideoTranscript(videoId: string): Promise<string> {
     const baseUrlMatch = raw.match(/"baseUrl":"([^"]+)"/);
     if (!baseUrlMatch) return '';
 
-    const captionResponse = await fetch(`${baseUrlMatch[1]}&fmt=json3`);
+    const captionResponse = await fetch(`${baseUrlMatch[1]}&fmt=json3`, { signal: timeout(10000) });
     if (!captionResponse.ok) return '';
 
     const captionData = (await captionResponse.json()) as {

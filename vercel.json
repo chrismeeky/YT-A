@@ -1,0 +1,20 @@
+{
+  "functions": {
+    "app/api/projects/[id]/analyze/video/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "app/api/projects/[id]/analyze/synthesize/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "app/api/projects/[id]/scripts/generate/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "app/api/projects/[id]/scripts/[scriptId]/scenes/[sceneId]/generate-assets/route.ts": {
+      "maxDuration": 120,
+      "memory": 1024
+    }
+  }
+}

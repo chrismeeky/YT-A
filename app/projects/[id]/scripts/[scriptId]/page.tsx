@@ -22,6 +22,10 @@ export default function ScriptEditorPage() {
   const [saveMsg, setSaveMsg] = useState('');
   const [savedToDisk, setSavedToDisk] = useState(false);
   const [exportFolder, setExportFolder] = useState('');
+  const [descOpen, setDescOpen] = useState(false);
+  const [generatingDesc, setGeneratingDesc] = useState(false);
+  const [descError, setDescError] = useState('');
+  const [descCopied, setDescCopied] = useState(false);
   const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -30,6 +34,7 @@ export default function ScriptEditorPage() {
       if (!data) { setLoading(false); return; }
       setScript(data);
       setSavedToDisk(data.savedToDisk ?? false);
+      if (data.youtubeDescription) setDescOpen(true);
       const fromUrl = searchParams.get('scene');
       const exists = fromUrl && data.scenes?.some((s: Scene) => s.id === fromUrl);
       setActiveSceneId(exists ? fromUrl : (data.scenes?.[0]?.id ?? null));
@@ -73,6 +78,33 @@ export default function ScriptEditorPage() {
     },
     [debouncedSave]
   );
+
+  const generateDescription = async () => {
+    if (!script) return;
+    setGeneratingDesc(true);
+    setDescError('');
+    setDescOpen(true);
+    try {
+      const settings = await storage.getSettings();
+      const fullScript = script.scenes.map(s => s.narration).join('\n\n');
+      const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/generate-description`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: script.title,
+          fullScript,
+          anthropicApiKey: settings.anthropicApiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setDescError(data.error); return; }
+      handleScriptChange({ ...script, youtubeDescription: data.description });
+    } catch {
+      setDescError('Failed to generate description');
+    } finally {
+      setGeneratingDesc(false);
+    }
+  };
 
   const saveNow = async () => {
     if (!script) return;
@@ -201,6 +233,15 @@ export default function ScriptEditorPage() {
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
+          <button
+            onClick={generateDescription}
+            disabled={generatingDesc}
+            className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
+            style={{ borderColor: 'var(--border)' }}
+            title="Generate YouTube description with Claude"
+          >
+            {generatingDesc ? <><span className="animate-pulse">✍️</span> Writing…</> : <>✍️ Description</>}
+          </button>
           {storage.canSaveToDisk && (
             <button
               onClick={saveToDisk}
@@ -232,6 +273,70 @@ export default function ScriptEditorPage() {
         >
           <span className="text-[#52525b]">Thumbnail concept:</span>
           <span>{script.thumbnailConcept}</span>
+        </div>
+      )}
+
+      {/* YouTube description panel */}
+      {(descOpen || script.youtubeDescription) && (
+        <div className="border-b flex-shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}>
+          <button
+            onClick={() => setDescOpen(o => !o)}
+            className="w-full flex items-center justify-between px-6 py-2.5 text-xs text-[#71717a] hover:text-[#a1a1aa] transition-colors"
+          >
+            <span className="font-medium uppercase tracking-wider">YouTube Description</span>
+            <span>{descOpen ? '▲' : '▼'}</span>
+          </button>
+          {descOpen && (
+            <div className="px-6 pb-4 space-y-2">
+              {descError && <p className="text-xs text-red-400">{descError}</p>}
+              {generatingDesc ? (
+                <div className="flex items-center gap-2 text-xs text-[#52525b] py-2">
+                  <span className="animate-spin inline-block">⚡</span> Generating…
+                </div>
+              ) : (
+                <textarea
+                  value={script.youtubeDescription ?? ''}
+                  onChange={e => handleScriptChange({ ...script, youtubeDescription: e.target.value })}
+                  rows={8}
+                  className="w-full rounded-lg px-3 py-2.5 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 font-mono resize-y"
+                  style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                  placeholder="Your YouTube description will appear here…"
+                />
+              )}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={generateDescription}
+                  disabled={generatingDesc}
+                  className="px-3 py-1.5 rounded-md text-xs bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 transition-colors font-medium"
+                >
+                  {script.youtubeDescription ? '↺ Regenerate' : '⚡ Generate'}
+                </button>
+                {script.youtubeDescription && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(script.youtubeDescription ?? '').then(() => {
+                        setDescCopied(true);
+                        setTimeout(() => setDescCopied(false), 1500);
+                      });
+                    }}
+                    className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
+                      descCopied
+                        ? 'text-green-400 border-green-500/40 bg-green-500/10'
+                        : 'text-[#a1a1aa] hover:text-white hover:border-[#444]'
+                    }`}
+                    style={descCopied ? {} : { borderColor: 'var(--border)' }}
+                  >
+                    {descCopied ? '✓ Copied' : '⎘ Copy'}
+                  </button>
+                )}
+                {script.youtubeDescription && (
+                  <span className="text-xs text-[#52525b] ml-auto">
+                    {script.youtubeDescription.length} chars
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
