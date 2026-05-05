@@ -343,7 +343,7 @@ export default function NewScriptPage() {
                   Paste article or public page URLs. Claude will fetch and extract the relevant story details.
                 </p>
                 <p className="text-xs text-[#a1a1aa] mb-2">
-                  Note: Some sites block automated requests and may not work. News articles and blogs tend to work best.
+                  Note: Some sitesAnalyze channels and generate scripts block automated requests and may not work. News articles and blogs tend to work best.
                 </p>
                 <div className="space-y-2">
                   {urls.map((url, i) => (

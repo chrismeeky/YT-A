@@ -6,11 +6,13 @@ import type { ResearchChannel, ResearchVideo } from '@/lib/types';
 const YT = 'https://www.googleapis.com/youtube/v3';
 
 export async function POST(request: NextRequest) {
-  const { channelId, uploadsPlaylistId, youtubeApiKey } = (await request.json()) as {
+  const { channelId, uploadsPlaylistId, youtubeApiKey, videoLimit } = (await request.json()) as {
     channelId: string;
     uploadsPlaylistId?: string;
     youtubeApiKey: string;
+    videoLimit?: number;
   };
+  const clampedLimit = Math.min(50, Math.max(5, videoLimit ?? 15));
 
   if (!channelId?.trim()) {
     return NextResponse.json({ error: 'channelId is required' }, { status: 400 });
@@ -38,11 +40,11 @@ export async function POST(request: NextRequest) {
     const subs = parseInt(stats.subscriberCount ?? '0', 10);
     const uploadsId = uploadsPlaylistId ?? (item.contentDetails?.relatedPlaylists?.uploads ?? '');
 
-    // Fetch last 15 videos from uploads playlist — 1 unit
+    // Fetch recent videos from uploads playlist — 1 unit
     const recentVideos: ResearchVideo[] = [];
     if (uploadsId) {
       const plRes = await fetch(
-        `${YT}/playlistItems?part=snippet&playlistId=${uploadsId}&maxResults=15&key=${resolvedYoutubeKey}`,
+        `${YT}/playlistItems?part=snippet&playlistId=${uploadsId}&maxResults=${clampedLimit}&key=${resolvedYoutubeKey}`,
       );
       const plData = await plRes.json() as {
         error?: { message: string };
@@ -82,8 +84,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const avgRecentViews = recentVideos.length > 0
-      ? Math.round(recentVideos.reduce((s, v) => s + v.viewCount, 0) / recentVideos.length)
+    // Always compute avg from first 15 videos for a consistent benchmark
+    const baseSample = recentVideos.slice(0, 15);
+    const avgRecentViews = baseSample.length > 0
+      ? Math.round(baseSample.reduce((s, v) => s + v.viewCount, 0) / baseSample.length)
       : 0;
     const outlierScore = subs > 0 ? avgRecentViews / subs : 0;
 

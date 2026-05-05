@@ -892,6 +892,16 @@ function ChannelCard({
 
 // ─── Channel Detail Drawer ────────────────────────────────────────────────
 
+const DATE_STEPS = [
+  { label: 'Last 7 days',   days: 7 },
+  { label: 'Last 30 days',  days: 30 },
+  { label: 'Last 90 days',  days: 90 },
+  { label: 'Last 6 months', days: 180 },
+  { label: 'Last year',     days: 365 },
+  { label: 'Last 2 years',  days: 730 },
+  { label: 'All time',      days: 0 },
+] as const;
+
 function ChannelDrawer({
   channel,
   bookmarked,
@@ -915,7 +925,13 @@ function ChannelDrawer({
   const [noteText, setNoteText] = useState(bookmarkNote);
   const [tagsText, setTagsText] = useState(bookmarkTags.join(', '));
   const [apiKey, setApiKey] = useState<string | null>(null);
-  const [videoTab, setVideoTab] = useState<'recent' | 'popular'>('recent');
+  const [videoTab, setVideoTab]         = useState<'recent' | 'popular'>('recent');
+  const [videoLimit, setVideoLimit]         = useState(15);
+  const [debouncedLimit, setDebouncedLimit] = useState(15);
+  const [videoSort, setVideoSort]           = useState<'desc' | 'asc'>('desc');
+  const [viewsSliderPos, setViewsSliderPos] = useState(0);
+  const [dateStepIdx, setDateStepIdx]   = useState(DATE_STEPS.length - 1);
+  const prevChannelRef = useRef<string>('');
   const storage = useStorage();
 
   useEffect(() => {
@@ -928,18 +944,25 @@ function ChannelDrawer({
   }, [bookmarkNote, bookmarkTags]);
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedLimit(videoLimit), 500);
+    return () => clearTimeout(t);
+  }, [videoLimit]);
+
+  useEffect(() => {
     if (!channel.id || apiKey === null) return;
+    const isNewChannel = prevChannelRef.current !== channel.id;
+    prevChannelRef.current = channel.id;
     setLoadingDetail(true);
-    setDetail(null);
+    if (isNewChannel) { setDetail(null); setViewsSliderPos(0); setDateStepIdx(DATE_STEPS.length - 1); setVideoSort('desc'); }
     fetch('/api/research/channel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channelId: channel.id, uploadsPlaylistId: channel.uploadsPlaylistId, youtubeApiKey: apiKey }),
+      body: JSON.stringify({ channelId: channel.id, uploadsPlaylistId: channel.uploadsPlaylistId, youtubeApiKey: apiKey, videoLimit: debouncedLimit }),
     })
       .then(r => r.json())
       .then(data => { if (data.channel) setDetail(data.channel); })
       .finally(() => setLoadingDetail(false));
-  }, [channel.id, apiKey]);
+  }, [channel.id, apiKey, debouncedLimit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = detail ?? channel;
   const ol = outlierLabel(data.outlierScore);
@@ -1086,6 +1109,49 @@ function ChannelDrawer({
             )}
           </div>
 
+          {/* Video sample control — affects insights, chart, posting pattern & video list */}
+          <div className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+            <div>
+              <p className="text-xs font-medium" style={{ color: 'var(--text)' }}>Video sample</p>
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-3)' }}>Affects insights, charts & video list below</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center rounded border text-xs" style={{ borderColor: 'var(--border)' }}>
+                <button
+                  onClick={() => setVideoLimit(l => Math.max(1, l - 1))}
+                  disabled={videoLimit <= 1 || loadingDetail}
+                  className="px-2 py-1 hover:bg-white/5 transition-colors disabled:opacity-30"
+                  style={{ color: 'var(--text-3)' }}
+                >−</button>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={videoLimit}
+                  onChange={e => {
+                    const v = Math.min(50, Math.max(1, parseInt(e.target.value) || 1));
+                    setVideoLimit(v);
+                  }}
+                  className="w-10 text-center font-mono text-xs border-x bg-transparent outline-none"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                />
+                <button
+                  onClick={() => setVideoLimit(l => Math.min(50, l + 1))}
+                  disabled={videoLimit >= 50 || loadingDetail}
+                  className="px-2 py-1 hover:bg-white/5 transition-colors disabled:opacity-30"
+                  style={{ color: 'var(--text-3)' }}
+                >+</button>
+              </div>
+              <button
+                onClick={() => setVideoLimit(Math.min(50, data.videoCount || 50))}
+                disabled={videoLimit === Math.min(50, data.videoCount || 50) || loadingDetail}
+                className="px-2 py-1 rounded border text-[10px] font-medium hover:bg-white/5 transition-colors disabled:opacity-30"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+                title="Fetch maximum available videos"
+              >All</button>
+            </div>
+          </div>
+
           {detail && !loadingDetail && detail.recentVideos.length >= 3 && (
             <ContentInsights videos={detail.recentVideos} />
           )}
@@ -1110,43 +1176,127 @@ function ChannelDrawer({
             </div>
           )}
 
-          {/* Recent videos */}
-          {loadingDetail && (
+          {/* Videos section */}
+          {loadingDetail && !detail && (
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-3)' }}>
-              <span className="animate-spin">⟳</span> Loading recent videos…
+              <span className="animate-spin">⟳</span> Loading videos…
             </div>
           )}
-          {!loadingDetail && detail && detail.recentVideos.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>
-                  Videos ({detail.recentVideos.length})
-                </p>
-                <div className="flex rounded-md overflow-hidden border text-[10px] font-medium" style={{ borderColor: 'var(--border)' }}>
-                  {(['recent', 'popular'] as const).map(tab => (
+          {detail && detail.recentVideos.length > 0 && (() => {
+            const videos = detail.recentVideos;
+            const maxViews = Math.max(0, ...videos.map(v => v.viewCount));
+            const viewsMin = Math.round((viewsSliderPos / 100) ** 2 * maxViews);
+            const dateFilter = DATE_STEPS[dateStepIdx]?.days ?? 0;
+
+            const filteredVideos = (() => {
+              let vids = [...videos];
+              if (videoTab === 'popular') {
+                if (viewsMin > 0) vids = vids.filter(v => v.viewCount >= viewsMin);
+                vids.sort((a, b) => videoSort === 'desc' ? b.viewCount - a.viewCount : a.viewCount - b.viewCount);
+              } else {
+                if (dateFilter > 0) {
+                  const cutoff = Date.now() - dateFilter * 86_400_000;
+                  vids = vids.filter(v => new Date(v.publishedAt).getTime() >= cutoff);
+                }
+                vids.sort((a, b) => {
+                  const diff = new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+                  return videoSort === 'desc' ? diff : -diff;
+                });
+              }
+              return vids;
+            })();
+
+            return (
+              <div>
+                {/* Header row */}
+                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                  <p className="text-xs font-semibold uppercase tracking-wide flex-shrink-0" style={{ color: 'var(--text-3)' }}>
+                    Videos ({videos.length})
+                  </p>
+                  <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
+                    {/* Sort direction */}
                     <button
-                      key={tab}
-                      onClick={() => setVideoTab(tab)}
-                      className="px-2.5 py-1 transition-colors capitalize"
-                      style={videoTab === tab
-                        ? { background: '#6366f1', color: '#fff' }
-                        : { background: 'var(--surface-2)', color: 'var(--text-3)' }}
+                      onClick={() => setVideoSort(s => s === 'desc' ? 'asc' : 'desc')}
+                      className="px-2 py-1 rounded border text-[10px] hover:bg-white/5 transition-colors"
+                      style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+                      title="Toggle sort order"
                     >
-                      {tab}
+                      {videoSort === 'desc' ? '↓ Desc' : '↑ Asc'}
                     </button>
-                  ))}
+                    {/* Tab switcher */}
+                    <div className="flex rounded-md overflow-hidden border text-[10px] font-medium" style={{ borderColor: 'var(--border)' }}>
+                      {(['recent', 'popular'] as const).map(tab => (
+                        <button
+                          key={tab}
+                          onClick={() => setVideoTab(tab)}
+                          className="px-2.5 py-1 transition-colors capitalize"
+                          style={videoTab === tab
+                            ? { background: '#6366f1', color: '#fff' }
+                            : { background: 'var(--surface-2)', color: 'var(--text-3)' }}
+                        >{tab}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filter row */}
+                {videoTab === 'popular' && maxViews > 0 && (
+                  <div className="mb-3 px-3 pt-2.5 pb-3 rounded-lg border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                    <div className="flex items-center justify-between text-[10px] mb-1.5" style={{ color: 'var(--text-3)' }}>
+                      <span>Min. views</span>
+                      <span className="font-mono font-medium" style={{ color: 'var(--text)' }}>
+                        {viewsMin > 0 ? `≥ ${fmt(viewsMin)}` : 'Any'}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min={0} max={100} value={viewsSliderPos}
+                      onChange={e => setViewsSliderPos(Number(e.target.value))}
+                      className="w-full accent-indigo-500 h-1.5"
+                    />
+                    <div className="flex justify-between text-[9px] mt-1 opacity-40">
+                      <span>0</span><span>{fmt(maxViews)}</span>
+                    </div>
+                  </div>
+                )}
+                {videoTab === 'recent' && (
+                  <div className="mb-3 px-3 pt-2.5 pb-3 rounded-lg border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                    <div className="flex items-center justify-between text-[10px] mb-1.5" style={{ color: 'var(--text-3)' }}>
+                      <span>Date range</span>
+                      <span className="font-mono font-medium" style={{ color: 'var(--text)' }}>
+                        {DATE_STEPS[dateStepIdx].label}
+                      </span>
+                    </div>
+                    <input
+                      type="range" min={0} max={DATE_STEPS.length - 1} value={dateStepIdx}
+                      onChange={e => setDateStepIdx(Number(e.target.value))}
+                      className="w-full accent-indigo-500 h-1.5"
+                    />
+                    <div className="flex justify-between text-[9px] mt-1 opacity-40">
+                      <span>7 days</span><span>All time</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading overlay indicator */}
+                {loadingDetail && (
+                  <p className="text-[10px] mb-2 flex items-center gap-1" style={{ color: 'var(--text-3)' }}>
+                    <span className="animate-spin inline-block">⟳</span> Updating…
+                  </p>
+                )}
+
+                {/* Video list */}
+                <div className={`space-y-2 ${loadingDetail ? 'opacity-50' : ''}`}>
+                  {filteredVideos.length === 0 ? (
+                    <p className="text-xs text-center py-4" style={{ color: 'var(--text-3)' }}>
+                      No videos match the current filter.
+                    </p>
+                  ) : (
+                    filteredVideos.map(v => <VideoRow key={v.id} video={v} channelOutlierScore={detail.outlierScore} />)
+                  )}
                 </div>
               </div>
-              <div className="space-y-2">
-                {(videoTab === 'recent'
-                  ? detail.recentVideos
-                  : [...detail.recentVideos].sort((a, b) => b.viewCount - a.viewCount)
-                ).map(v => (
-                  <VideoRow key={v.id} video={v} channelOutlierScore={detail.outlierScore} />
-                ))}
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Bookmark note */}
           {bookmarked && (
