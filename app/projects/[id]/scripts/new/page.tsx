@@ -29,6 +29,12 @@ export default function NewScriptPage() {
   const [suggestions, setSuggestions] = useState<{ topic: string; context: string }[]>([]);
   const [loadingTopics, setLoadingTopics] = useState(false);
   const [topicsError, setTopicsError] = useState('');
+  const [contextMode, setContextMode] = useState<'manual' | 'url'>('manual');
+  const [urls, setUrls] = useState<string[]>(['']);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState('');
+  const [extractWarnings, setExtractWarnings] = useState<string[]>([]);
+  const [extractedSources, setExtractedSources] = useState<string[]>([]);
 
   const cacheKey = (analysisId: string) => `topic-suggestions:${analysisId}`;
 
@@ -91,6 +97,38 @@ export default function NewScriptPage() {
       setTopicsError('Failed to generate topic ideas.');
     } finally {
       setLoadingTopics(false);
+    }
+  };
+
+  const extractContext = async () => {
+    const validUrls = urls.filter(u => u.trim());
+    if (!validUrls.length) return;
+    setExtracting(true);
+    setExtractError('');
+    setExtractWarnings([]);
+    setExtractedSources([]);
+    try {
+      const settings = await storage.getSettings();
+      const res = await fetch(`/api/projects/${id}/scripts/extract-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          urls: validUrls,
+          topic: form.topic || undefined,
+          anthropicApiKey: settings.anthropicApiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setExtractError(data.error); return; }
+      setForm(f => ({ ...f, additionalInstructions: data.context }));
+      if (data.warnings?.length) setExtractWarnings(data.warnings);
+      const failedUrls = new Set((data.warnings ?? []).map((w: string) => w.split(':')[0].trim()));
+      setExtractedSources(validUrls.filter(u => !failedUrls.has(u)));
+      setContextMode('manual');
+    } catch {
+      setExtractError('Failed to extract context from URLs.');
+    } finally {
+      setExtracting(false);
     }
   };
 
@@ -242,20 +280,130 @@ export default function NewScriptPage() {
             />
           </div>
 
-          {/* Additional Instructions */}
+          {/* Story Context */}
           <div>
-            <label className="block text-sm font-medium mb-1">Story Context (optional)</label>
-            <p className="text-xs text-[#52525b] mb-2">
-              Add details that give the script writer context — names of people involved, locations, key dates, what happened, the outcome. The richer the context, the more specific the script.
-            </p>
-            <textarea
-              value={form.additionalInstructions}
-              onChange={e => setForm(f => ({ ...f, additionalInstructions: e.target.value }))}
-              rows={4}
-              className={inputClass}
-              style={inputStyle}
-              placeholder="e.g. The story is about John Doe, a 34-year-old from Atlanta who turned $500 into $50k trading options in 2023…"
-            />
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium">Story Context (optional)</label>
+              <div className="flex rounded-md overflow-hidden border text-xs" style={{ borderColor: 'var(--border)' }}>
+                {(['manual', 'url'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setContextMode(mode)}
+                    className={`px-3 py-1.5 transition-colors ${
+                      contextMode === mode
+                        ? 'bg-indigo-500 text-white'
+                        : 'text-[#71717a] hover:text-white'
+                    }`}
+                    style={contextMode !== mode ? { background: 'var(--surface-2)' } : {}}
+                  >
+                    {mode === 'manual' ? 'Write' : '🔗 From URLs'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {contextMode === 'manual' ? (
+              <>
+                <p className="text-xs text-[#52525b] mb-2">
+                  Add details that give the script writer context — names, locations, key dates, what happened, the outcome.
+                </p>
+                {extractedSources.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    <span className="text-xs text-[#52525b]">Sources:</span>
+                    {extractedSources.map((url, i) => {
+                      let hostname = url;
+                      try { hostname = new URL(url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+                      return (
+                        <a
+                          key={i}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-[#333] text-[#71717a] hover:text-indigo-300 hover:border-indigo-400/50 transition-colors"
+                        >
+                          🔗 {hostname}
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+                <textarea
+                  value={form.additionalInstructions}
+                  onChange={e => { setForm(f => ({ ...f, additionalInstructions: e.target.value })); setExtractedSources([]); }}
+                  rows={4}
+                  className={inputClass}
+                  style={inputStyle}
+                  placeholder="e.g. The story is about John Doe, a 34-year-old from Atlanta who turned $500 into $50k trading options in 2023…"
+                />
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-[#52525b] mb-2">
+                  Paste article or public page URLs. Claude will fetch and extract the relevant story details.
+                </p>
+                <p className="text-xs text-[#a1a1aa] mb-2">
+                  Note: Some sites block automated requests and may not work. News articles and blogs tend to work best.
+                </p>
+                <div className="space-y-2">
+                  {urls.map((url, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input
+                        value={url}
+                        onChange={e => {
+                          const next = [...urls];
+                          next[i] = e.target.value;
+                          setUrls(next);
+                        }}
+                        className={inputClass}
+                        style={inputStyle}
+                        placeholder="https://en.wikipedia.org/wiki/…"
+                        type="url"
+                      />
+                      {urls.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setUrls(urls.filter((_, j) => j !== i))}
+                          className="px-3 rounded-lg border text-[#52525b] hover:text-red-400 hover:border-red-400/50 transition-colors flex-shrink-0"
+                          style={{ borderColor: 'var(--border)' }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setUrls([...urls, ''])}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      + Add URL
+                    </button>
+                    <button
+                      type="button"
+                      onClick={extractContext}
+                      disabled={extracting || !urls.some(u => u.trim())}
+                      className="px-4 py-1.5 rounded-md text-xs font-medium bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                    >
+                      {extracting ? <><span className="animate-spin inline-block">⚡</span> Extracting…</> : '⚡ Extract Context'}
+                    </button>
+                  </div>
+                  {extractError && <p className="text-xs text-red-400 whitespace-pre-wrap">{extractError}</p>}
+                  {!extractError && extractWarnings.length > 0 && (
+                    <div className="text-xs text-yellow-400/80 space-y-0.5">
+                      <p className="font-medium">Some URLs could not be fetched:</p>
+                      {extractWarnings.map((w, i) => <p key={i} className="text-yellow-400/60">• {w}</p>)}
+                    </div>
+                  )}
+                </div>
+                {!extractError && form.additionalInstructions && (
+                  <div className="mt-3">
+                    <p className="text-xs text-green-400 mb-1">✓ Context extracted — switch to Write to review or edit</p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Settings row */}

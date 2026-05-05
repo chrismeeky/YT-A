@@ -28,6 +28,20 @@ interface UsageEntry {
   key_fingerprint?: string;
 }
 
+interface AggRow {
+  api: string;
+  operation: string;
+  estimated_cost_usd?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  characters?: number;
+  quota_units?: number;
+  requests?: number;
+  key_fingerprint?: string;
+}
+
+const PAGE_SIZE = 20;
+
 const RANGES = [
   { label: 'Today',    days: 1 },
   { label: '7 days',   days: 7 },
@@ -43,14 +57,18 @@ const API_COLORS: Record<string, string> = {
 };
 
 const OP_LABELS: Record<string, string> = {
-  'analyze':         'Channel Analysis',
-  'generate-script': 'Script Generation',
-  'suggest-topics':  'Topic Suggestions',
-  'generate-assets': 'Scene Assets',
-  'audio':           'Audio Generation',
-  'channel-videos':  'Channel Videos',
-  'research-search': 'Research Search',
-  'research-channel':'Channel Details',
+  'analyze':          'Channel Analysis',
+  'analyze-video':    'Video Analysis',
+  'synthesize':       'Synthesis',
+  'generate-script':  'Script Generation',
+  'suggest-topics':   'Topic Suggestions',
+  'generate-assets':  'Scene Assets',
+  'generate-description': 'YT Description',
+  'extract-context':  'Context Extraction',
+  'audio':            'Audio Generation',
+  'channel-videos':   'Channel Videos',
+  'research-search':  'Research Search',
+  'research-channel': 'Channel Details',
 };
 
 function fmt(n: number, decimals = 0) {
@@ -70,14 +88,16 @@ function sinceDate(days: number): string | null {
 }
 
 export default function UsagePage() {
-  const [entries, setEntries]     = useState<UsageEntry[]>([]);
-  const [range, setRange]         = useState<number>(7);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
-  const [elBalance, setElBalance] = useState<ElevenLabsBalance | null>(null);
+  const [logEntries, setLogEntries] = useState<UsageEntry[]>([]);
+  const [allRows, setAllRows]       = useState<AggRow[]>([]);
+  const [total, setTotal]           = useState(0);
+  const [page, setPage]             = useState(1);
+  const [range, setRange]           = useState<number>(7);
+  const [loading, setLoading]       = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [error, setError]           = useState('');
+  const [elBalance, setElBalance]   = useState<ElevenLabsBalance | null>(null);
   const [ytFingerprint, setYtFingerprint] = useState<string>('');
-  const [entryPage, setEntryPage] = useState(1);
-  const PAGE_SIZE = 20;
   const storage = useStorage();
 
   useEffect(() => {
@@ -87,25 +107,30 @@ export default function UsagePage() {
     });
   }, [storage]);
 
-  const load = useCallback(async () => {
-    setEntryPage(1);
-    setLoading(true);
+  const fetchPage = useCallback(async (p: number, r: number, isInitial: boolean) => {
+    isInitial ? setLoading(true) : setPageLoading(true);
     setError('');
     try {
-      const since = sinceDate(range);
-      const url = '/api/usage' + (since ? `?since=${encodeURIComponent(since)}` : '');
-      const res = await fetch(url);
-      const data = await res.json() as { entries?: UsageEntry[]; error?: string };
+      const since = sinceDate(r);
+      const params = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) });
+      if (since) params.set('since', since);
+      const res = await fetch(`/api/usage?${params}`);
+      const data = await res.json() as { entries?: UsageEntry[]; allRows?: AggRow[]; total?: number; error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Failed to load usage'); return; }
-      setEntries(data.entries ?? []);
+      setLogEntries(data.entries ?? []);
+      setTotal(data.total ?? 0);
+      if (isInitial) setAllRows(data.allRows ?? []);
     } catch {
       setError('Failed to load usage data');
     } finally {
-      setLoading(false);
+      isInitial ? setLoading(false) : setPageLoading(false);
     }
-  }, [range]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setPage(1);
+    fetchPage(1, range, true);
+  }, [range, fetchPage]);
 
   useEffect(() => {
     fetch('/api/elevenlabs-balance')
@@ -114,26 +139,29 @@ export default function UsagePage() {
       .catch(() => {});
   }, []);
 
-  // Aggregations
-  const anthropic  = entries.filter(e => e.api === 'anthropic');
-  const elevenlabs = entries.filter(e => e.api === 'elevenlabs');
-  const youtube    = entries.filter(e => e.api === 'youtube');
-  const pexels     = entries.filter(e => e.api === 'pexels');
+  const goToPage = (p: number) => {
+    setPage(p);
+    fetchPage(p, range, false);
+  };
 
-  const totalCost       = anthropic.reduce((s, e) => s + (e.estimated_cost_usd ?? 0), 0);
-  const totalInputTok   = anthropic.reduce((s, e) => s + (e.input_tokens ?? 0), 0);
-  const totalOutputTok  = anthropic.reduce((s, e) => s + (e.output_tokens ?? 0), 0);
-  const totalChars      = elevenlabs.reduce((s, e) => s + (e.characters ?? 0), 0);
-  // Only count quota for the current key (entries without a fingerprint are legacy — include them)
-  const totalQuota      = youtube.reduce((s, e) => {
+  // Aggregations from allRows (full date range, lightweight)
+  const anthropic  = allRows.filter(e => e.api === 'anthropic');
+  const elevenlabs = allRows.filter(e => e.api === 'elevenlabs');
+  const youtube    = allRows.filter(e => e.api === 'youtube');
+  const pexels     = allRows.filter(e => e.api === 'pexels');
+
+  const totalCost      = anthropic.reduce((s, e) => s + (e.estimated_cost_usd ?? 0), 0);
+  const totalInputTok  = anthropic.reduce((s, e) => s + (e.input_tokens ?? 0), 0);
+  const totalOutputTok = anthropic.reduce((s, e) => s + (e.output_tokens ?? 0), 0);
+  const totalChars     = elevenlabs.reduce((s, e) => s + (e.characters ?? 0), 0);
+  const totalQuota     = youtube.reduce((s, e) => {
     if (e.key_fingerprint && ytFingerprint && e.key_fingerprint !== ytFingerprint) return s;
     return s + (e.quota_units ?? 0);
   }, 0);
-  const totalPexels     = pexels.reduce((s, e) => s + (e.requests ?? 0), 0);
+  const totalPexels    = pexels.reduce((s, e) => s + (e.requests ?? 0), 0);
 
-  // Per-operation breakdown
   const opMap = new Map<string, { count: number; cost: number; tokens: number; chars: number; quota: number; requests: number }>();
-  for (const e of entries) {
+  for (const e of allRows) {
     const key = `${e.api}:${e.operation}`;
     const cur = opMap.get(key) ?? { count: 0, cost: 0, tokens: 0, chars: 0, quota: 0, requests: 0 };
     opMap.set(key, {
@@ -146,7 +174,8 @@ export default function UsagePage() {
     });
   }
 
-  const inputClass = 'rounded-lg px-4 py-2.5 text-sm border';
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
   const inputStyle = { background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' };
 
   const card = (label: string, value: string, sub: string, api: string) => (
@@ -173,16 +202,13 @@ export default function UsagePage() {
           </p>
         </div>
 
-        {/* Range filter */}
         <div className="flex gap-1 rounded-lg border p-1" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
           {RANGES.map(r => (
             <button
               key={r.days}
               onClick={() => setRange(r.days)}
               className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                range === r.days
-                  ? 'bg-indigo-500 text-white'
-                  : 'hover:bg-[#1a1a1a]'
+                range === r.days ? 'bg-indigo-500 text-white' : 'hover:bg-[#1a1a1a]'
               }`}
             >
               {r.label}
@@ -207,7 +233,6 @@ export default function UsagePage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {card('Anthropic', fmtCost(totalCost), `${fmt(totalInputTok)} in · ${fmt(totalOutputTok)} out tokens`, 'anthropic')}
 
-            {/* ElevenLabs — show live balance if available */}
             <div
               className="rounded-xl border p-5 space-y-1"
               style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
@@ -225,7 +250,6 @@ export default function UsagePage() {
                       {elBalance.tier}
                     </span>
                   </div>
-                  {/* Progress bar */}
                   {elBalance.charactersLimit > 0 && (
                     <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
                       <div
@@ -303,101 +327,125 @@ export default function UsagePage() {
           </div>
 
           {/* Recent log */}
-          {(() => {
-            const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
-            const pageEntries = entries.slice((entryPage - 1) * PAGE_SIZE, entryPage * PAGE_SIZE);
-            return (
-              <div className="rounded-xl border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-                <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
-                  <h2 className="font-medium text-sm">
-                    Recent Entries
-                    <span className="font-normal text-xs ml-1" style={{ color: 'var(--text-3)' }}>({entries.length})</span>
-                  </h2>
-                  {totalPages > 1 && (
-                    <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-3)' }}>
-                      <button
-                        onClick={() => setEntryPage(p => Math.max(1, p - 1))}
-                        disabled={entryPage === 1}
-                        className="px-2 py-1 rounded border disabled:opacity-30 hover:bg-white/5 transition-colors"
-                        style={{ borderColor: 'var(--border)' }}
-                      >
-                        ←
-                      </button>
-                      <span>Page {entryPage} of {totalPages}</span>
-                      <button
-                        onClick={() => setEntryPage(p => Math.min(totalPages, p + 1))}
-                        disabled={entryPage === totalPages}
-                        className="px-2 py-1 rounded border disabled:opacity-30 hover:bg-white/5 transition-colors"
-                        style={{ borderColor: 'var(--border)' }}
-                      >
-                        →
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
-                        {['Time', 'API', 'Operation', 'Project', 'Detail', 'Cost'].map(h => (
-                          <th key={h} className="px-5 py-3 text-left font-medium whitespace-nowrap" style={{ color: 'var(--text-3)' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pageEntries.map(e => (
-                        <tr key={e.id} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                          <td className="px-5 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: 'var(--text-3)' }}>
-                            {new Date(e.timestamp).toLocaleString()}
-                          </td>
-                          <td className="px-5 py-2.5">
-                            <span className="flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: API_COLORS[e.api] }} />
-                              <span className="capitalize">{e.api}</span>
-                            </span>
-                          </td>
-                          <td className="px-5 py-2.5">{OP_LABELS[e.operation] ?? e.operation}</td>
-                          <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
-                            {e.project_id ? e.project_id.slice(0, 8) + '…' : '—'}
-                          </td>
-                          <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
-                            {e.api === 'anthropic'  && e.input_tokens  != null && `↑${fmt(e.input_tokens)} ↓${fmt(e.output_tokens ?? 0)}`}
-                            {e.api === 'elevenlabs' && e.characters    != null && `${fmt(e.characters)} chars`}
-                            {e.api === 'youtube'    && e.quota_units   != null && `${fmt(e.quota_units)} units`}
-                            {e.api === 'pexels'     && e.requests      != null && `${fmt(e.requests)} reqs`}
-                          </td>
-                          <td className="px-5 py-2.5 font-mono text-xs">
-                            {e.estimated_cost_usd != null ? fmtCost(e.estimated_cost_usd) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {totalPages > 1 && (
-                  <div className="px-5 py-3 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
-                    <span>Showing {(entryPage - 1) * PAGE_SIZE + 1}–{Math.min(entryPage * PAGE_SIZE, entries.length)} of {entries.length}</span>
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                        <button
-                          key={p}
-                          onClick={() => setEntryPage(p)}
-                          className="w-7 h-7 rounded text-xs transition-colors"
-                          style={p === entryPage
-                            ? { background: '#6366f1', color: '#fff' }
-                            : { background: 'var(--surface-2)', color: 'var(--text-3)' }}
-                        >
-                          {p}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+          <div className="rounded-xl border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+              <h2 className="font-medium text-sm">
+                Recent Entries
+                <span className="font-normal text-xs ml-1" style={{ color: 'var(--text-3)' }}>({fmt(total)})</span>
+              </h2>
+              {totalPages > 1 && (
+                <Paginator page={page} totalPages={totalPages} onChange={goToPage} loading={pageLoading} />
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                    {['Time', 'API', 'Operation', 'Project', 'Detail', 'Cost'].map(h => (
+                      <th key={h} className="px-5 py-3 text-left font-medium whitespace-nowrap" style={{ color: 'var(--text-3)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className={pageLoading ? 'opacity-50' : ''}>
+                  {logEntries.map(e => (
+                    <tr key={e.id} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
+                      <td className="px-5 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: 'var(--text-3)' }}>
+                        {new Date(e.timestamp).toLocaleString()}
+                      </td>
+                      <td className="px-5 py-2.5">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: API_COLORS[e.api] }} />
+                          <span className="capitalize">{e.api}</span>
+                        </span>
+                      </td>
+                      <td className="px-5 py-2.5">{OP_LABELS[e.operation] ?? e.operation}</td>
+                      <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
+                        {e.project_id ? e.project_id.slice(0, 8) + '…' : '—'}
+                      </td>
+                      <td className="px-5 py-2.5 font-mono text-xs" style={{ color: 'var(--text-3)' }}>
+                        {e.api === 'anthropic'  && e.input_tokens  != null && `↑${fmt(e.input_tokens)} ↓${fmt(e.output_tokens ?? 0)}`}
+                        {e.api === 'elevenlabs' && e.characters    != null && `${fmt(e.characters)} chars`}
+                        {e.api === 'youtube'    && e.quota_units   != null && `${fmt(e.quota_units)} units`}
+                        {e.api === 'pexels'     && e.requests      != null && `${fmt(e.requests)} reqs`}
+                      </td>
+                      <td className="px-5 py-2.5 font-mono text-xs">
+                        {e.estimated_cost_usd != null ? fmtCost(e.estimated_cost_usd) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div className="px-5 py-3 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+                <span>
+                  {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {fmt(total)}
+                </span>
+                <Paginator page={page} totalPages={totalPages} onChange={goToPage} loading={pageLoading} />
               </div>
-            );
-          })()}
+            )}
+          </div>
         </>
       )}
+    </div>
+  );
+}
+
+function Paginator({ page, totalPages, onChange, loading }: {
+  page: number;
+  totalPages: number;
+  onChange: (p: number) => void;
+  loading: boolean;
+}) {
+  const btnClass = 'px-2.5 py-1 rounded border text-xs transition-colors disabled:opacity-30';
+  const btnStyle = { borderColor: 'var(--border)' };
+
+  const pages: (number | '…')[] = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (page > 3) pages.push('…');
+    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
+    if (page < totalPages - 2) pages.push('…');
+    pages.push(totalPages);
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => onChange(page - 1)}
+        disabled={page === 1 || loading}
+        className={`${btnClass} hover:bg-white/5`}
+        style={btnStyle}
+      >
+        ←
+      </button>
+      {pages.map((p, i) =>
+        p === '…' ? (
+          <span key={`ellipsis-${i}`} className="px-1 text-xs" style={{ color: 'var(--text-3)' }}>…</span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onChange(p)}
+            disabled={loading}
+            className={`${btnClass} min-w-[28px]`}
+            style={p === page
+              ? { background: '#6366f1', color: '#fff', borderColor: '#6366f1' }
+              : { ...btnStyle, background: 'var(--surface-2)' }}
+          >
+            {p}
+          </button>
+        )
+      )}
+      <button
+        onClick={() => onChange(page + 1)}
+        disabled={page === totalPages || loading}
+        className={`${btnClass} hover:bg-white/5`}
+        style={btnStyle}
+      >
+        →
+      </button>
     </div>
   );
 }

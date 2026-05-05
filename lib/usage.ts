@@ -1,11 +1,13 @@
 import { getSupabase } from './supabase';
 
-// claude-sonnet-4-6 pricing
-const INPUT_COST  = 3  / 1_000_000; // $3 per million input tokens
-const OUTPUT_COST = 15 / 1_000_000; // $15 per million output tokens
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-haiku-4-5-20251001': { input: 0.80 / 1_000_000, output: 4 / 1_000_000 },
+  default:                     { input: 3    / 1_000_000, output: 15 / 1_000_000 }, // sonnet
+};
 
-export function calcAnthropicCost(inputTokens: number, outputTokens: number): number {
-  return inputTokens * INPUT_COST + outputTokens * OUTPUT_COST;
+export function calcAnthropicCost(inputTokens: number, outputTokens: number, model?: string): number {
+  const p = (model && MODEL_PRICING[model]) ?? MODEL_PRICING.default;
+  return inputTokens * p.input + outputTokens * p.output;
 }
 
 export interface UsageRecord {
