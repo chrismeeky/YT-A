@@ -35,7 +35,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-semibold">Projects</h1>
-          <p className="text-[#71717a] text-sm mt-1">Analyze channels and generate scripts</p>
+          <p className="text-[#71717a] text-sm mt-1">Analyze channels and generate scripts based on the channel strategy</p>
         </div>
         <Link
           href={`/projects/new${cq}`}
