@@ -6,7 +6,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 };
 
 export function calcAnthropicCost(inputTokens: number, outputTokens: number, model?: string): number {
-  const p = (model && MODEL_PRICING[model]) ?? MODEL_PRICING.default;
+  const p = (model ? MODEL_PRICING[model] : undefined) ?? MODEL_PRICING.default;
   return inputTokens * p.input + outputTokens * p.output;
 }
 
