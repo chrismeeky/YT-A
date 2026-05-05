@@ -289,21 +289,23 @@ export async function synthesizeChannelInsights(
     messages: [
       {
         role: 'user',
-        content: `Synthesise a replication-ready channel strategy profile from these ${videoAnalyses.length} detailed video analyses. A creator wants to model their channel on this one — give them a concrete playbook.
+        content: `Synthesise a channel strategy profile from these ${videoAnalyses.length} detailed video analyses. A creator wants to model their channel on this one.
+
+CRITICAL INSTRUCTION: You are extracting PRINCIPLES and PSYCHOLOGICAL MECHANISMS — not surface-level templates or example sentences. The goal is to describe WHY each technique works and WHAT effect it creates, so a writer can apply the same intent to any topic with fresh language. Never write reusable sentence starters or copy-paste templates — describe the underlying approach so deeply that someone could apply it to a completely different subject and produce a recognisably similar style with entirely original content.
 
 VIDEO ANALYSES:
 ${JSON.stringify(summaries, null, 2)}
 
 Return ONLY valid JSON:
 {
-  "channelOverview": "3-sentence strategic summary of what makes this channel work",
-  "contentPillars": ["Pillar 1: specific theme with angle", "Pillar 2", "Pillar 3"],
-  "titleFormulas": ["Formula 1 with example: e.g. 'The [NOUN] That [VERB]ed [TARGET] — The Zodiac Killer That Vanished'", "Formula 2"],
-  "hookStrategies": ["Strategy 1: specific technique with example", "Strategy 2", "Strategy 3"],
+  "channelOverview": "3-sentence strategic summary of what makes this channel work — focus on the psychological contract with the viewer",
+  "contentPillars": ["Pillar 1: specific theme with the emotional angle it exploits", "Pillar 2", "Pillar 3"],
+  "titleFormulas": ["Formula 1: describe the structural pattern and the psychological trigger it activates — e.g. 'contrast between official narrative and hidden truth, creates cognitive dissonance'", "Formula 2"],
+  "hookStrategies": ["Strategy 1: describe the PSYCHOLOGICAL MECHANISM — what assumption it exploits, what gap it opens, what emotion it triggers, and why viewers cannot stop watching. Do NOT write example sentences or templates.", "Strategy 2", "Strategy 3"],
   "scriptStructureTemplate": {
-    "intro": "Precise description of how the first 60 seconds are typically structured",
-    "body": "How main content is organised, paced, and delivered",
-    "outro": "How videos typically end — CTA style and wrap-up approach"
+    "intro": "Describe the INTENT and EFFECT of the opening — what the viewer feels, what question gets planted, what commitment is created. No example sentences.",
+    "body": "Describe the pacing rhythm, how tension is built and released, how information is sequenced to maintain curiosity. Focus on the underlying architecture.",
+    "outro": "Describe the emotional resolution the channel typically delivers and how the CTA is integrated into that resolution."
   },
   "visualBrand": {
     "thumbnailStyle": "Specific repeatable thumbnail formula this channel uses",
@@ -317,18 +319,19 @@ Return ONLY valid JSON:
     "desiredOutcomes": ["What they want to feel/know/have after watching 1", "Outcome 2"]
   },
   "uniqueValueProposition": "What this channel delivers that most channels in the niche do not",
-  "engagementPatterns": ["Specific pattern 1", "Pattern 2", "Pattern 3"],
+  "engagementPatterns": ["Specific pattern 1 — describe the mechanism, not the surface behaviour", "Pattern 2", "Pattern 3"],
   "contentStyle": {
-    "tone": "Specific tonal description",
-    "energy": "Energy level and delivery style",
-    "expertise": "Knowledge level assumed and demonstrated"
+    "tone": "Describe the voice character — what adjectives define it, what it deliberately avoids, what relationship it builds with the viewer",
+    "energy": "Energy level, delivery pace, and how it modulates across the video",
+    "expertise": "What level of prior knowledge the viewer is assumed to have, and how the channel signals its own authority"
   },
   "videoLength": {
     "typical": "Duration range in minutes",
     "reasoning": "Why this length serves this audience and content type"
   },
-  "replicationFormula": "Step-by-step formula someone could follow to create a video in this channel's exact style",
-  "thingsToSteal": ["Most impactful technique to adopt 1", "Technique 2", "Technique 3", "Technique 4", "Technique 5"]
+  "styleFingerprint": ["Distinctive quality 1 — something a reader could identify in a blind test as belonging to this channel", "Quality 2", "Quality 3", "Quality 4"],
+  "replicationFormula": "Describe the creative PROCESS — how to find the right angle, how to open the narrative tension, how to sustain it. Focus on decisions a writer makes, not sentence-level patterns.",
+  "thingsToSteal": ["Principle 1: describe what makes it effective and how to apply it to a new topic — not what it looks like on the surface", "Principle 2", "Principle 3", "Principle 4", "Principle 5"]
 }`,
       },
     ],
@@ -401,9 +404,9 @@ export async function generateScript(
     messages: [
       {
         role: 'user',
-        content: `Create a complete YouTube video script modelled on this channel's proven strategy.
+        content: `Create a complete YouTube video script for the topic below, written in the style of the analysed channel.
 
-CHANNEL STRATEGY:
+CHANNEL STRATEGY (principles and mechanisms — not templates):
 ${JSON.stringify(strategy, null, 2)}
 
 SCRIPT PARAMETERS:
@@ -414,8 +417,12 @@ Narration Speed: ${settings.wpm} words per minute
 Target Word Count: ${settings.targetWordCount} words (±10%)
 Additional Instructions: ${additionalInstructions || 'None'}
 
-INSTRUCTIONS:
-- Follow the channel's title formula, hook strategy, script structure template, and content style exactly
+STYLE RULES — READ CAREFULLY:
+- The channel strategy above describes PRINCIPLES and PSYCHOLOGICAL MECHANISMS. Your job is to find fresh, topic-specific expressions of those principles — not to copy sentence structures, opening patterns, or templates from the strategy description.
+- FORBIDDEN: reproducing any sentence structures, phrase patterns, or grammatical templates from the strategy description. A reviewer comparing two scripts from this channel should recognise the same STYLE but see completely different creative approaches.
+- Every scene must find its own unique entry point into the material. Do NOT open multiple scenes with the same grammatical structure.
+- The hook must be built from what is specifically surprising, counterintuitive, or emotionally charged about THIS topic — not from a generic formula applied to any topic.
+- Apply the tone, pacing, and structural intent described in the strategy, but execute them through language that is entirely native to this specific subject.
 - Total narration word count across ALL scenes must total approximately ${settings.targetWordCount} words
 - For each scene: estimatedDurationSeconds = (wordCount / ${settings.wpm}) × 60, rounded to nearest second
 - sceneDescription is a brief visual note (1 sentence) — NOT the narration

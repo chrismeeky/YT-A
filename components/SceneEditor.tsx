@@ -246,14 +246,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           s.id === scene.id ? { ...s, mediaFiles: [...(s.mediaFiles ?? []), mediaFile] } : s
         ),
       });
-      // Auto-download so the file lands in the user's Downloads folder
-      const blob = new Blob([buffer], { type: isVideo ? 'video/mp4' : 'image/jpeg' });
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = originalName || filename;
-      a.click();
-      URL.revokeObjectURL(blobUrl);
     } finally {
       setSavingPhoto(null);
     }
