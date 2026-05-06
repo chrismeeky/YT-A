@@ -253,17 +253,24 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
       if (!res.ok) { setAssetError(data.error); return; }
       const { assets } = data;
 
-      // DuckDuckGo: server skips image fetching; call the edge route client-side instead
+      // DuckDuckGo only works locally (or via proxy) — server skips it; call the route client-side instead
+      // Run sequentially to avoid DDG rate-limiting parallel requests
       if (settings.realImageProvider === 'duckduckgo' && assets.realImageQueries?.length) {
-        const ddgResults = await Promise.all(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          assets.realImageQueries.map(async ({ query, excerpt }: { query: string; excerpt: string }) => {
+        const ddgResults = [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const { query, excerpt } of assets.realImageQueries as { query: string; excerpt: string }[]) {
+          try {
             const r = await fetch(`/api/ddg-images?q=${encodeURIComponent(query)}&count=6`);
             const d = await r.json();
             if (!r.ok) throw new Error(d.error ?? 'DuckDuckGo image search failed');
-            return { query, narrationExcerpt: excerpt, images: d.images ?? [] };
-          })
-        );
+            ddgResults.push({ query, narrationExcerpt: excerpt, images: d.images ?? [] });
+          } catch (e) {
+            console.warn('DDG failed for query:', query, e);
+            ddgResults.push({ query, narrationExcerpt: excerpt, images: [] });
+          }
+          // Small delay between requests to avoid DDG rate-limiting
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
         assets.realImageSegments = ddgResults;
       }
 
@@ -288,8 +295,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           assets.realImageSegments  ? 'realImages' : null;
         if (firstNewTab) setActiveAssetTab(firstNewTab);
       }
-    } catch {
-      setAssetError('Failed to generate assets');
+    } catch (err) {
+      setAssetError(err instanceof Error ? err.message : 'Failed to generate assets');
     } finally {
       setGeneratingScenes(prev => { const next = new Set(prev); next.delete(sceneId); return next; });
     }

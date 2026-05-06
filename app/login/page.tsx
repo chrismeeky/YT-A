@@ -34,7 +34,7 @@ export default function LoginPage() {
     >
         <div className="text-center space-y-1">
           <div className="text-3xl mb-3">▶</div>
-          <h1 className="text-xl font-semibold">YT Analyzer</h1>
+          <h1 className="text-xl font-semibold">ReelIQ</h1>
           <p className="text-sm" style={{ color: 'var(--text-3)' }}>Sign in to your account</p>
         </div>
 

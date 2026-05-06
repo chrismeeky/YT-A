@@ -34,7 +34,6 @@ export default function ScriptEditorPage() {
       if (!data) { setLoading(false); return; }
       setScript(data);
       setSavedToDisk(data.savedToDisk ?? false);
-      if (data.youtubeDescription) setDescOpen(true);
       const fromUrl = searchParams.get('scene');
       const exists = fromUrl && data.scenes?.some((s: Scene) => s.id === fromUrl);
       setActiveSceneId(exists ? fromUrl : (data.scenes?.[0]?.id ?? null));

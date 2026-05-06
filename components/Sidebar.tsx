@@ -40,7 +40,7 @@ export default function Sidebar() {
       <div className="px-4 py-5 border-b" style={{ borderColor: 'var(--border)' }}>
         <div className="flex items-center gap-2">
           <span className="text-xl">▶</span>
-          <span className="font-semibold text-sm tracking-tight">YT Analyzer</span>
+          <span className="font-semibold text-sm tracking-tight">ReelIQ</span>
         </div>
       </div>
 

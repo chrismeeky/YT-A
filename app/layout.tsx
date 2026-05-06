@@ -3,8 +3,8 @@ import './globals.css';
 import ClientLayout from './ClientLayout';
 
 export const metadata: Metadata = {
-  title: 'YouTube Analyzer',
-  description: 'Analyze YouTube channels and generate scripts',
+  title: 'ReelIQ',
+  description: 'AI-powered YouTube research and script generation',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
