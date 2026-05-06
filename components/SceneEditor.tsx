@@ -47,9 +47,11 @@ interface Props {
   analysis: Analysis | null;
   activeSceneId: string | null;
   onScriptChange: (updated: Script) => void;
+  activeTab: string | null;
+  onTabChange: (tab: string) => void;
 }
 
-export default function SceneEditor({ projectId, script, analysis, activeSceneId, onScriptChange }: Props) {
+export default function SceneEditor({ projectId, script, analysis, activeSceneId, onScriptChange, activeTab, onTabChange }: Props) {
   const storage = useStorage();
   const [showModal, setShowModal] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -60,7 +62,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [audioError, setAudioError] = useState('');
   const [audioSuccess, setAudioSuccess] = useState('');
   const [savingPhoto, setSavingPhoto] = useState<string | null>(null);
-  const [activeAssetTab, setActiveAssetTab] = useState<string | null>(null);
   const [struckItems, setStruckItems] = useState<Set<string>>(new Set());
   const [badgeAnimating, setBadgeAnimating] = useState(false);
   const prevMediaCountRef = useRef<number>(0);
@@ -74,7 +75,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [newImageKeys, setNewImageKeys] = useState<Set<string>>(new Set());
 
   const handleTabClick = (key: string) => {
-    setActiveAssetTab(key);
+    onTabChange(key);
     requestAnimationFrame(() => {
       if (scrollBodyRef.current && tabContentRef.current) {
         const bodyRect = scrollBodyRef.current.getBoundingClientRect();
@@ -87,8 +88,15 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const toggleStruck = (key: string) =>
     setStruckItems(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
-  // Clear struck + active tab when switching scenes
-  useEffect(() => { setStruckItems(new Set()); setActiveAssetTab(null); setAudioSuccess(''); setAudioError(''); setSelectionPopover(null); }, [activeSceneId]);
+  // Clear struck + active tab when switching between scenes (not on initial mount)
+  const prevSceneRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevSceneRef.current;
+    prevSceneRef.current = activeSceneId;
+    if (prev !== null && prev !== activeSceneId) {
+      setStruckItems(new Set()); onTabChange(''); setAudioSuccess(''); setAudioError(''); setSelectionPopover(null);
+    }
+  }, [activeSceneId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dismiss selection popover on outside click — ignore clicks inside the popover itself
   useEffect(() => {
@@ -155,7 +163,12 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         idx === segmentIndex ? { ...seg, images: [...seg.images, ...images] } : seg
       );
       const updatedScene = { ...scene, realImageSegments: updatedSegments };
-      onScriptChange({ ...script, scenes: script.scenes.map(s => s.id === scene.id ? updatedScene : s) });
+      const updatedScript = { ...script, scenes: script.scenes.map(s => s.id === scene.id ? updatedScene : s) };
+      onScriptChange(updatedScript);
+      // Save immediately so the new images survive a page refresh
+      try {
+        await storage.saveScript(projectId, { ...updatedScript, updatedAt: new Date().toISOString() });
+      } catch { /* debounce save in parent will retry */ }
 
       // Track newly added image keys for highlight animation + scroll target
       const keys = new Set(images.map(img => img.full || img.thumb));
@@ -164,7 +177,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
       setTimeout(() => setNewImageKeys(new Set()), 2500);
 
       setSelectionPopover(null);
-      setActiveAssetTab('realImages');
+      onTabChange('realImages');
     } catch (err) {
       setAssetError(err instanceof Error ? err.message : 'Image search failed');
       setSelectionPopover(null);
@@ -284,7 +297,12 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         ...(assets.realImageSegments  !== undefined && { realImageSegments:  assets.realImageSegments }),
         ...(assets.stockVideoSegments !== undefined && { stockVideoSegments: assets.stockVideoSegments }),
       };
-      onScriptChange({ ...script, scenes: script.scenes.map(s => s.id === sceneId ? updatedScene : s) });
+      const updatedScript = { ...script, scenes: script.scenes.map(s => s.id === sceneId ? updatedScene : s) };
+      onScriptChange(updatedScript);
+      // Save immediately so assets survive a page refresh before the debounce fires
+      try {
+        await storage.saveScript(projectId, { ...updatedScript, updatedAt: new Date().toISOString() });
+      } catch { /* debounce save in parent will retry */ }
       // Auto-switch to the first newly populated tab only if still viewing this scene
       if (sceneId === activeSceneId) {
         const firstNewTab =
@@ -293,7 +311,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           assets.stockPhotoSegments ? 'stockPhotos' :
           assets.stockVideoSegments ? 'stockVideos' :
           assets.realImageSegments  ? 'realImages' : null;
-        if (firstNewTab) setActiveAssetTab(firstNewTab);
+        if (firstNewTab) onTabChange(firstNewTab);
       }
     } catch (err) {
       setAssetError(err instanceof Error ? err.message : 'Failed to generate assets');
@@ -397,8 +415,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     { key: 'realImages',  label: '🔍 Real Images',  color: 'text-orange-300',  border: '#f97316', visible: !!scene.realImageSegments?.length  },
   ].filter(t => t.visible);
 
-  const effectiveTab = (activeAssetTab && assetTabs.find(t => t.key === activeAssetTab))
-    ? activeAssetTab
+  const effectiveTab = (activeTab && assetTabs.find(t => t.key === activeTab))
+    ? activeTab
     : assetTabs[0]?.key ?? '';
 
   return (

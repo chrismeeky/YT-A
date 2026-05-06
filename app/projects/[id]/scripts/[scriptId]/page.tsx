@@ -17,6 +17,7 @@ export default function ScriptEditorPage() {
   const [script, setScript] = useState<Script | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>(() => searchParams.get('tab'));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -37,6 +38,8 @@ export default function ScriptEditorPage() {
       const fromUrl = searchParams.get('scene');
       const exists = fromUrl && data.scenes?.some((s: Scene) => s.id === fromUrl);
       setActiveSceneId(exists ? fromUrl : (data.scenes?.[0]?.id ?? null));
+      const tabFromUrl = searchParams.get('tab');
+      if (tabFromUrl) setActiveTab(tabFromUrl);
 
       if (data.analysisId) {
         const a = await storage.getAnalysis(id, data.analysisId);
@@ -48,8 +51,10 @@ export default function ScriptEditorPage() {
 
   useEffect(() => {
     if (!activeSceneId) return;
-    router.replace(`?scene=${activeSceneId}`, { scroll: false });
-  }, [activeSceneId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const params = new URLSearchParams({ scene: activeSceneId });
+    if (activeTab) params.set('tab', activeTab);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [activeSceneId, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const debouncedSave = useCallback(
     (updated: Script) => {
@@ -396,6 +401,8 @@ export default function ScriptEditorPage() {
           analysis={analysis}
           activeSceneId={activeSceneId}
           onScriptChange={handleScriptChange}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
         />
       </div>
 
