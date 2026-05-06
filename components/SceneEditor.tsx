@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Scene, Script, Analysis } from '@/lib/types';
+import type { Scene, Script, Analysis, RealImage, RealImageSegment } from '@/lib/types';
 import MediaUploadModal from './MediaUploadModal';
 import { useStorage } from '@/components/StorageProvider';
 
@@ -66,6 +66,12 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const prevMediaCountRef = useRef<number>(0);
   const scrollBodyRef = useRef<HTMLDivElement>(null);
   const tabContentRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const segmentRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const targetSegmentRef = useRef<number | null>(null);
+  const [selectionPopover, setSelectionPopover] = useState<{ x: number; y: number; text: string; segmentIndex: number } | null>(null);
+  const [searchingSelection, setSearchingSelection] = useState(false);
+  const [newImageKeys, setNewImageKeys] = useState<Set<string>>(new Set());
 
   const handleTabClick = (key: string) => {
     setActiveAssetTab(key);
@@ -82,7 +88,90 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     setStruckItems(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   // Clear struck + active tab when switching scenes
-  useEffect(() => { setStruckItems(new Set()); setActiveAssetTab(null); setAudioSuccess(''); setAudioError(''); }, [activeSceneId]);
+  useEffect(() => { setStruckItems(new Set()); setActiveAssetTab(null); setAudioSuccess(''); setAudioError(''); setSelectionPopover(null); }, [activeSceneId]);
+
+  // Dismiss selection popover on outside click — ignore clicks inside the popover itself
+  useEffect(() => {
+    if (!selectionPopover) return;
+    const dismiss = (e: MouseEvent) => {
+      if (popoverRef.current?.contains(e.target as Node)) return;
+      if (searchingSelection) return;
+      setSelectionPopover(null);
+    };
+    document.addEventListener('mousedown', dismiss);
+    return () => document.removeEventListener('mousedown', dismiss);
+  }, [selectionPopover, searchingSelection]);
+
+  const searchImagesFromSelection = async (query: string, segmentIndex: number) => {
+    if (!scene || searchingSelection) return;
+    setSearchingSelection(true);
+    setAssetError('');
+    try {
+      const settings = await storage.getSettings();
+
+      // Build a context-aware search query using the story topic + segment narration
+      const segment = scene.realImageSegments?.[segmentIndex];
+      let effectiveQuery = query;
+      try {
+        const qr = await fetch('/api/generate-image-query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            selection: query,
+            storyTopic: script.topic || script.title,
+            segmentContext: segment?.narrationExcerpt || segment?.query,
+            anthropicApiKey: settings.anthropicApiKey,
+          }),
+        });
+        if (qr.ok) {
+          const qd = await qr.json() as { query?: string };
+          if (qd.query?.trim()) effectiveQuery = qd.query.trim();
+        }
+      } catch {
+        // Non-critical — fall back to raw selection
+      }
+
+      let images: RealImage[] = [];
+      if (settings.realImageProvider === 'duckduckgo') {
+        const r = await fetch(`/api/ddg-images?q=${encodeURIComponent(effectiveQuery)}&count=6`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? 'Search failed');
+        images = d.images ?? [];
+      } else {
+        const r = await fetch('/api/search-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: effectiveQuery, braveApiKey: settings.braveApiKey, count: 6 }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? 'Search failed');
+        images = d.images ?? [];
+      }
+      if (images.length === 0) throw new Error('No images found for that selection.');
+
+      // Merge new images into the existing segment at segmentIndex
+      const existingSegments = scene.realImageSegments ?? [];
+      const updatedSegments = existingSegments.map((seg, idx) =>
+        idx === segmentIndex ? { ...seg, images: [...seg.images, ...images] } : seg
+      );
+      const updatedScene = { ...scene, realImageSegments: updatedSegments };
+      onScriptChange({ ...script, scenes: script.scenes.map(s => s.id === scene.id ? updatedScene : s) });
+
+      // Track newly added image keys for highlight animation + scroll target
+      const keys = new Set(images.map(img => img.full || img.thumb));
+      targetSegmentRef.current = segmentIndex;
+      setNewImageKeys(keys);
+      setTimeout(() => setNewImageKeys(new Set()), 2500);
+
+      setSelectionPopover(null);
+      setActiveAssetTab('realImages');
+    } catch (err) {
+      setAssetError(err instanceof Error ? err.message : 'Image search failed');
+      setSelectionPopover(null);
+    } finally {
+      setSearchingSelection(false);
+    }
+  };
 
   // Animate badge when media count increases (includes audio file)
   const activeScene = script.scenes.find(s => s.id === activeSceneId);
@@ -91,6 +180,29 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     if (activeMediaCount > prevMediaCountRef.current) setBadgeAnimating(true);
     prevMediaCountRef.current = activeMediaCount;
   }, [activeMediaCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll to the updated segment after new images land in the DOM
+  useEffect(() => {
+    if (newImageKeys.size === 0) return;
+    const segIdx = targetSegmentRef.current;
+    if (segIdx === null) return;
+    const timer = setTimeout(() => {
+      const el = segmentRefs.current.get(segIdx);
+      if (el && scrollBodyRef.current) {
+        const body = scrollBodyRef.current;
+        const bodyRect = body.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        // New images are appended at the bottom of the segment — scroll to reveal the segment bottom
+        const scrollDown = elRect.bottom - bodyRect.bottom + 32;
+        if (scrollDown > 0) {
+          body.scrollBy({ top: scrollDown, behavior: 'smooth' });
+        } else if (elRect.top < bodyRect.top) {
+          body.scrollBy({ top: elRect.top - bodyRect.top - 24, behavior: 'smooth' });
+        }
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [newImageKeys]);
 
   const scene = activeScene;
 
@@ -377,7 +489,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           </div>
           <textarea
             value={scene.narration}
-            onChange={e => updateScene({ narration: e.target.value })}
+            onChange={e => { updateScene({ narration: e.target.value }); setSelectionPopover(null); }}
             rows={6}
             className="w-full rounded-lg px-3 py-2 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
             style={{ background: 'var(--surface-2)', borderColor: 'var(--border-2)', color: 'var(--text)' }}
@@ -733,12 +845,20 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
               {effectiveTab === 'realImages' && !!scene.realImageSegments?.length && (
                 <div className="space-y-5">
                   {scene.realImageSegments.map((seg, si) => (
-                    <div key={si}>
-                      <p className="text-xs mb-0.5">
+                    <div
+                      key={si}
+                      ref={el => { if (el) segmentRefs.current.set(si, el); else segmentRefs.current.delete(si); }}
+                      onMouseUp={e => {
+                        const selected = window.getSelection()?.toString().trim() ?? '';
+                        if (selected.length < 2) return;
+                        setSelectionPopover({ x: e.clientX, y: e.clientY, text: selected, segmentIndex: si });
+                      }}
+                    >
+                      <p className="text-xs mb-0.5 select-text cursor-text">
                         <span className="text-[#71717a]">Segment {si + 1}:</span>{' '}
                         <span className="text-[#52525b]">{seg.query}</span>
                       </p>
-                      <p className="text-xs text-orange-300/70 italic mb-2">{seg.narrationExcerpt}</p>
+                      <p className="text-xs text-orange-300/70 italic mb-2 select-text cursor-text">{seg.narrationExcerpt}</p>
                       {seg.images.length === 0 ? (
                         <p className="text-xs text-[#52525b] italic">No results found — try regenerating.</p>
                       ) : (
@@ -746,11 +866,15 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                           {seg.images.map((img, ii) => {
                             const imgKey = img.full || `real-image-${si}-${ii}`;
                             const isSaved = savedNames.has(imgKey);
+                            const isNewImg = newImageKeys.has(img.full || img.thumb);
                             return (
                               <div
                                 key={ii}
-                                className="group relative rounded-md overflow-hidden border transition-colors"
-                                style={{ borderColor: isSaved ? '#22c55e' : 'var(--border)' }}
+                                className="group relative rounded-md overflow-hidden border transition-all duration-700"
+                                style={{
+                                  borderColor: isSaved ? '#22c55e' : isNewImg ? '#f97316' : 'var(--border)',
+                                  boxShadow: isNewImg ? '0 0 0 2px rgba(249,115,22,0.4)' : undefined,
+                                }}
                               >
                                 <img
                                   src={img.thumb}
@@ -815,6 +939,39 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           )}
 
       </div>{/* end scrollable body */}
+
+      {/* Selection image search popover */}
+      {selectionPopover && (
+        <div
+          ref={popoverRef}
+          className="fixed z-50 flex items-center gap-2 px-3 py-2 rounded-lg border shadow-xl text-xs font-medium"
+          style={{
+            left: Math.min(selectionPopover.x - 10, window.innerWidth - 280),
+            top: selectionPopover.y - 52,
+            background: 'var(--surface)',
+            borderColor: searchingSelection ? '#f97316' : 'var(--border)',
+            color: 'var(--text)',
+            transition: 'border-color 0.2s',
+          }}
+        >
+          {searchingSelection ? (
+            <>
+              <span className="animate-spin inline-block text-orange-400">⟳</span>
+              <span className="text-orange-300">Searching for &ldquo;{selectionPopover.text.length > 24 ? selectionPopover.text.slice(0, 24) + '…' : selectionPopover.text}&rdquo;…</span>
+            </>
+          ) : (
+            <>
+              <span className="text-[#52525b]">🔍</span>
+              <button
+                onClick={() => searchImagesFromSelection(selectionPopover.text, selectionPopover.segmentIndex)}
+                className="hover:text-orange-300 transition-colors"
+              >
+                Search images for &ldquo;{selectionPopover.text.length > 28 ? selectionPopover.text.slice(0, 28) + '…' : selectionPopover.text}&rdquo;
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {lightbox && (
         <div

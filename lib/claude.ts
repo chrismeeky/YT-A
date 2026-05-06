@@ -12,6 +12,34 @@ function client(apiKey: string): Anthropic {
   return new Anthropic({ apiKey });
 }
 
+// Honorifics and abbreviations that end with "." but are NOT sentence terminators.
+const ABBREV = new Set([
+  'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st', 'sgt', 'lt', 'capt', 'gen',
+  'sen', 'rep', 'gov', 'pres', 'corp', 'inc', 'ltd', 'co', 'vs', 'etc', 'no',
+  'vol', 'pp', 'est', 'approx', 'dept', 'ave', 'blvd', 'rd',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+]);
+
+function splitSentences(text: string): string[] {
+  const results: string[] = [];
+  // Match potential sentence boundaries: [.!?] followed by whitespace + uppercase/quote/bracket
+  const boundary = /([.!?])\s+(?=[A-Z"'"‘“(\[])/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = boundary.exec(text)) !== null) {
+    if (m[1] === '.') {
+      // Check the word immediately before this period — skip if it's a known abbreviation
+      const preceding = text.slice(0, m.index + 1).match(/\b([A-Za-z]+)\.$/);
+      if (preceding && ABBREV.has(preceding[1].toLowerCase())) continue;
+    }
+    results.push(text.slice(last, m.index + 1).trim());
+    last = m.index + m[1].length + 1; // skip past the punctuation + one space
+  }
+  const tail = text.slice(last).trim();
+  if (tail) results.push(tail);
+  return results.filter(s => s.length > 0);
+}
+
 // ─── Video Analysis ─────────────────────────────────────────────────────────
 
 export async function analyzeVideo(
@@ -505,11 +533,7 @@ export async function generateSceneAssets(
   const secsPerChunk = [20, 10, 5, 3][Math.max(0, Math.min(3, granularity - 1))];
 
   // Split narration into complete sentences first so we can cap chunk counts.
-  const narrationSentences = (scene.narration || '')
-    .trim()
-    .split(/(?<=[.!?])\s+/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+  const narrationSentences = splitSentences((scene.narration || '').trim());
   if (narrationSentences.length === 0) narrationSentences.push((scene.narration || '').trim());
 
   // Cap chunk count to sentence count — eliminates padding that duplicates the last sentence.
