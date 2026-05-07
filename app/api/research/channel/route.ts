@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     youtubeApiKey: string;
     videoLimit?: number;
   };
-  const clampedLimit = Math.min(50, Math.max(5, videoLimit ?? 15));
+  const clampedLimit = Math.max(5, videoLimit ?? 15);
 
   if (!channelId?.trim()) {
     return NextResponse.json({ error: 'channelId is required' }, { status: 400 });
@@ -40,21 +40,34 @@ export async function POST(request: NextRequest) {
     const subs = parseInt(stats.subscriberCount ?? '0', 10);
     const uploadsId = uploadsPlaylistId ?? (item.contentDetails?.relatedPlaylists?.uploads ?? '');
 
-    // Fetch recent videos from uploads playlist — 1 unit
+    // Fetch videos from uploads playlist with pagination (YouTube max 50/page)
     const recentVideos: ResearchVideo[] = [];
+    let quotaUnits = 1; // channels.list already counted
     if (uploadsId) {
-      const plRes = await fetch(
-        `${YT}/playlistItems?part=snippet&playlistId=${uploadsId}&maxResults=${clampedLimit}&key=${resolvedYoutubeKey}`,
-      );
-      const plData = await plRes.json() as {
-        error?: { message: string };
-        items?: { snippet: { resourceId: { videoId: string }; title: string; publishedAt: string } }[];
-      };
+      let remaining = clampedLimit;
+      let pageToken: string | undefined;
 
-      if (plRes.ok && plData.items?.length) {
+      while (remaining > 0) {
+        const pageSize = Math.min(remaining, 50);
+        const plUrl = new URL(`${YT}/playlistItems`);
+        plUrl.searchParams.set('part', 'snippet');
+        plUrl.searchParams.set('playlistId', uploadsId);
+        plUrl.searchParams.set('maxResults', String(pageSize));
+        plUrl.searchParams.set('key', resolvedYoutubeKey);
+        if (pageToken) plUrl.searchParams.set('pageToken', pageToken);
+
+        const plRes = await fetch(plUrl.toString());
+        const plData = await plRes.json() as {
+          error?: { message: string };
+          nextPageToken?: string;
+          items?: { snippet: { resourceId: { videoId: string }; title: string; publishedAt: string } }[];
+        };
+        quotaUnits++;
+
+        if (!plRes.ok || !plData.items?.length) break;
+
         const videoIds = plData.items.map(i => i.snippet.resourceId.videoId).filter(Boolean);
 
-        // Fetch video stats — 1 unit
         const vidRes = await fetch(
           `${YT}/videos?part=statistics,contentDetails&id=${videoIds.join(',')}&key=${resolvedYoutubeKey}`,
         );
@@ -65,6 +78,7 @@ export async function POST(request: NextRequest) {
             contentDetails?: { duration?: string };
           }[];
         };
+        quotaUnits++;
 
         const vidMap = new Map((vidData.items ?? []).map(v => [v.id, v]));
 
@@ -81,6 +95,10 @@ export async function POST(request: NextRequest) {
             duration: parseIsoDuration(vid?.contentDetails?.duration ?? ''),
           });
         }
+
+        remaining -= plData.items.length;
+        pageToken = plData.nextPageToken;
+        if (!pageToken) break;
       }
     }
 
@@ -108,8 +126,7 @@ export async function POST(request: NextRequest) {
       recentVideos,
     };
 
-    // channels.list (1) + playlistItems.list (1) + videos.list (1) = 3 quota units
-    void trackUsage({ operation: 'research-channel', api: 'youtube', quota_units: 3, key_fingerprint: keyFingerprint(resolvedYoutubeKey) });
+    void trackUsage({ operation: 'research-channel', api: 'youtube', quota_units: quotaUnits, key_fingerprint: keyFingerprint(resolvedYoutubeKey) });
     return NextResponse.json({ channel });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to fetch channel details';

@@ -931,6 +931,7 @@ function ChannelDrawer({
   const [videoSort, setVideoSort]           = useState<'desc' | 'asc'>('desc');
   const [viewsSliderPos, setViewsSliderPos] = useState(0);
   const [dateStepIdx, setDateStepIdx]   = useState(DATE_STEPS.length - 1);
+  const [videoPage, setVideoPage]       = useState(0);
   const prevChannelRef = useRef<string>('');
   const storage = useStorage();
 
@@ -1126,25 +1127,25 @@ function ChannelDrawer({
                 <input
                   type="number"
                   min={1}
-                  max={50}
+                  max={data.videoCount || 9999}
                   value={videoLimit}
                   onChange={e => {
-                    const v = Math.min(50, Math.max(1, parseInt(e.target.value) || 1));
+                    const v = Math.max(1, parseInt(e.target.value) || 1);
                     setVideoLimit(v);
                   }}
                   className="w-10 text-center font-mono text-xs border-x bg-transparent outline-none"
                   style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
                 />
                 <button
-                  onClick={() => setVideoLimit(l => Math.min(50, l + 1))}
-                  disabled={videoLimit >= 50 || loadingDetail}
+                  onClick={() => setVideoLimit(l => l + 1)}
+                  disabled={videoLimit >= (data.videoCount || 9999) || loadingDetail}
                   className="px-2 py-1 hover:bg-white/5 transition-colors disabled:opacity-30"
                   style={{ color: 'var(--text-3)' }}
                 >+</button>
               </div>
               <button
-                onClick={() => setVideoLimit(Math.min(50, data.videoCount || 50))}
-                disabled={videoLimit === Math.min(50, data.videoCount || 50) || loadingDetail}
+                onClick={() => setVideoLimit(data.videoCount || 9999)}
+                disabled={videoLimit === (data.videoCount || 9999) || loadingDetail}
                 className="px-2 py-1 rounded border text-[10px] font-medium hover:bg-white/5 transition-colors disabled:opacity-30"
                 style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
                 title="Fetch maximum available videos"
@@ -1216,7 +1217,7 @@ function ChannelDrawer({
                   <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
                     {/* Sort direction */}
                     <button
-                      onClick={() => setVideoSort(s => s === 'desc' ? 'asc' : 'desc')}
+                      onClick={() => { setVideoSort(s => s === 'desc' ? 'asc' : 'desc'); setVideoPage(0); }}
                       className="px-2 py-1 rounded border text-[10px] hover:bg-white/5 transition-colors"
                       style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
                       title="Toggle sort order"
@@ -1228,7 +1229,7 @@ function ChannelDrawer({
                       {(['recent', 'popular'] as const).map(tab => (
                         <button
                           key={tab}
-                          onClick={() => setVideoTab(tab)}
+                          onClick={() => { setVideoTab(tab); setVideoPage(0); }}
                           className="px-2.5 py-1 transition-colors capitalize"
                           style={videoTab === tab
                             ? { background: '#6366f1', color: '#fff' }
@@ -1250,7 +1251,7 @@ function ChannelDrawer({
                     </div>
                     <input
                       type="range" min={0} max={100} value={viewsSliderPos}
-                      onChange={e => setViewsSliderPos(Number(e.target.value))}
+                      onChange={e => { setViewsSliderPos(Number(e.target.value)); setVideoPage(0); }}
                       className="w-full accent-indigo-500 h-1.5"
                     />
                     <div className="flex justify-between text-[9px] mt-1 opacity-40">
@@ -1268,7 +1269,7 @@ function ChannelDrawer({
                     </div>
                     <input
                       type="range" min={0} max={DATE_STEPS.length - 1} value={dateStepIdx}
-                      onChange={e => setDateStepIdx(Number(e.target.value))}
+                      onChange={e => { setDateStepIdx(Number(e.target.value)); setVideoPage(0); }}
                       className="w-full accent-indigo-500 h-1.5"
                     />
                     <div className="flex justify-between text-[9px] mt-1 opacity-40">
@@ -1284,16 +1285,45 @@ function ChannelDrawer({
                   </p>
                 )}
 
-                {/* Video list */}
-                <div className={`space-y-2 ${loadingDetail ? 'opacity-50' : ''}`}>
-                  {filteredVideos.length === 0 ? (
-                    <p className="text-xs text-center py-4" style={{ color: 'var(--text-3)' }}>
-                      No videos match the current filter.
-                    </p>
-                  ) : (
-                    filteredVideos.map(v => <VideoRow key={v.id} video={v} channelOutlierScore={detail.outlierScore} />)
-                  )}
-                </div>
+                {/* Video list with pagination */}
+                {(() => {
+                  const PAGE_SIZE = 20;
+                  const totalPages = Math.ceil(filteredVideos.length / PAGE_SIZE);
+                  const page = Math.min(videoPage, Math.max(0, totalPages - 1));
+                  const pageVideos = filteredVideos.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+                  return (
+                    <>
+                      <div className={`space-y-2 ${loadingDetail ? 'opacity-50' : ''}`}>
+                        {filteredVideos.length === 0 ? (
+                          <p className="text-xs text-center py-4" style={{ color: 'var(--text-3)' }}>
+                            No videos match the current filter.
+                          </p>
+                        ) : (
+                          pageVideos.map(v => <VideoRow key={v.id} video={v} channelOutlierScore={detail.outlierScore} />)
+                        )}
+                      </div>
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-between pt-3 mt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+                          <button
+                            onClick={() => setVideoPage(p => Math.max(0, p - 1))}
+                            disabled={page === 0}
+                            className="px-3 py-1 rounded border text-xs transition-colors hover:bg-white/5 disabled:opacity-30"
+                            style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+                          >← Prev</button>
+                          <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>
+                            {page + 1} / {totalPages} &nbsp;·&nbsp; {filteredVideos.length} videos
+                          </span>
+                          <button
+                            onClick={() => setVideoPage(p => Math.min(totalPages - 1, p + 1))}
+                            disabled={page >= totalPages - 1}
+                            className="px-3 py-1 rounded border text-xs transition-colors hover:bg-white/5 disabled:opacity-30"
+                            style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+                          >Next →</button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             );
           })()}
