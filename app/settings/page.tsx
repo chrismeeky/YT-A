@@ -217,6 +217,19 @@ export default function SettingsPage() {
             BETA_MODE ? undefined : 'Required for Stock Photos & Videos per scene. Free at pexels.com/api — 200 requests/hour.'
           )}
           {field(
+            'YouTube Data API Key',
+            <SecretInput
+              value={form.youtubeApiKey ?? ''}
+              onChange={v => set('youtubeApiKey', v)}
+              className={inputClass}
+              style={inputStyle}
+              placeholder="AIza…"
+            />,
+            BETA_MODE
+              ? 'Optional — leave blank to use the shared beta key. Add your own if you hit the rate limit.'
+              : 'Required for fetching channel videos. Get a free key at console.cloud.google.com → YouTube Data API v3.'
+          )}
+          {field(
             'Real Images Provider',
             <div className="flex gap-2">
               {(['brave', 'duckduckgo'] as const).map(p => (
@@ -249,19 +262,6 @@ export default function SettingsPage() {
             BETA_MODE
               ? 'Optional — leave blank to use the shared beta key. Add your own for dedicated quota.'
               : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
-          )}
-          {field(
-            'YouTube Data API Key',
-            <SecretInput
-              value={form.youtubeApiKey ?? ''}
-              onChange={v => set('youtubeApiKey', v)}
-              className={inputClass}
-              style={inputStyle}
-              placeholder="AIza…"
-            />,
-            BETA_MODE
-              ? 'Optional — leave blank to use the shared beta key. Add your own if you hit the rate limit.'
-              : 'Required for fetching channel videos. Get a free key at console.cloud.google.com → YouTube Data API v3.'
           )}
         </>)}
 
