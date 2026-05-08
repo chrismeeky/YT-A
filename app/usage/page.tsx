@@ -73,8 +73,8 @@ const OP_LABELS: Record<string, string> = {
   'generate-character-sheet': 'Character Sheet',
 };
 
-function fmt(n: number, decimals = 0) {
-  return n.toLocaleString(undefined, { maximumFractionDigits: decimals });
+function fmt(n: number | undefined | null, decimals = 0) {
+  return (n ?? 0).toLocaleString(undefined, { maximumFractionDigits: decimals });
 }
 
 function fmtCost(usd: number) {
