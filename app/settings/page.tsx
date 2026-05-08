@@ -217,19 +217,6 @@ export default function SettingsPage() {
             BETA_MODE ? undefined : 'Required for Stock Photos & Videos per scene. Free at pexels.com/api — 200 requests/hour.'
           )}
           {field(
-            'Brave Search API Key',
-            <SecretInput
-              value={form.braveApiKey ?? ''}
-              onChange={v => set('braveApiKey', v)}
-              className={inputClass}
-              style={inputStyle}
-              placeholder="…"
-            />,
-            BETA_MODE
-              ? 'Optional — leave blank to use the shared beta key. Add your own for dedicated quota.'
-              : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
-          )}
-          {field(
             'Real Images Provider',
             <div className="flex gap-2">
               {(['brave', 'duckduckgo'] as const).map(p => (
@@ -248,7 +235,20 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>,
-            'Brave Search requires an API key but works on all hosts. DuckDuckGo is free but may be blocked on Vercel/serverless.'
+            'Brave Search requires an API key but works on all hosts.'
+          )}
+          {(form.realImageProvider ?? 'brave') === 'brave' && field(
+            'Brave Search API Key',
+            <SecretInput
+              value={form.braveApiKey ?? ''}
+              onChange={v => set('braveApiKey', v)}
+              className={inputClass}
+              style={inputStyle}
+              placeholder="…"
+            />,
+            BETA_MODE
+              ? 'Optional — leave blank to use the shared beta key. Add your own for dedicated quota.'
+              : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
           )}
           {field(
             'YouTube Data API Key',
