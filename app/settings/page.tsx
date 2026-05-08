@@ -219,14 +219,15 @@ export default function SettingsPage() {
           {field(
             'Brave Search API Key',
             <SecretInput
-              value={BETA_MODE ? '••••••••••••••••••••' : (form.braveApiKey ?? '')}
+              value={form.braveApiKey ?? ''}
               onChange={v => set('braveApiKey', v)}
               className={inputClass}
-              style={BETA_MODE ? disabledInputStyle : inputStyle}
+              style={inputStyle}
               placeholder="…"
-              disabled={BETA_MODE}
             />,
-            BETA_MODE ? undefined : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
+            BETA_MODE
+              ? 'Optional — leave blank to use the shared beta key. Add your own for dedicated quota.'
+              : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
           )}
           {field(
             'Real Images Provider',
