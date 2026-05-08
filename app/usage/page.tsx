@@ -63,12 +63,14 @@ const OP_LABELS: Record<string, string> = {
   'generate-script':  'Script Generation',
   'suggest-topics':   'Topic Suggestions',
   'generate-assets':  'Scene Assets',
-  'generate-description': 'YT Description',
-  'extract-context':  'Context Extraction',
-  'audio':            'Audio Generation',
-  'channel-videos':   'Channel Videos',
-  'research-search':  'Research Search',
-  'research-channel': 'Channel Details',
+  'generate-description':   'YT Description',
+  'extract-context':        'Context Extraction',
+  'audio':                  'Audio Generation',
+  'channel-videos':         'Channel Videos',
+  'research-search':        'Research Search',
+  'research-channel':       'Channel Details',
+  'detect-characters':      'Character Detection',
+  'generate-character-sheet': 'Character Sheet',
 };
 
 function fmt(n: number, decimals = 0) {

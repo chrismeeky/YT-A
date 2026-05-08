@@ -3,7 +3,7 @@ import { generateSceneAssets } from '@/lib/claude';
 import { searchPexels, searchBraveImages, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
-import type { Scene, Analysis, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
+import type { Scene, Analysis, CharacterSheet, PromptDetail, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
 
 export async function POST(
   request: NextRequest,
@@ -23,6 +23,8 @@ export async function POST(
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
+    characters?: CharacterSheet[];
+    promptDetail?: PromptDetail;
   };
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -52,6 +54,8 @@ export async function POST(
       },
       analysis,
       scene.assetGranularity ?? 2,
+      body.characters ?? [],
+      body.promptDetail ?? scene.promptDetail ?? 'auto',
     );
 
     void trackUsage({

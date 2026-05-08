@@ -259,6 +259,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             pexelsApiKey: settings.pexelsApiKey,
             braveApiKey: settings.braveApiKey,
             realImageProvider: settings.realImageProvider,
+            characters: script.characters ?? [],
+            promptDetail: scene.promptDetail ?? 'auto',
           }),
         }
       );
@@ -607,6 +609,39 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                 />
                 <div className="flex justify-between text-[10px] text-[#71717a] mt-1 mb-1.5">
                   {levels.map(l => <span key={l.label}>{l.label}</span>)}
+                </div>
+                <p className="text-[11px] text-[#a1a1aa] leading-relaxed">{current.tip}</p>
+              </div>
+            );
+          })()}
+
+          {/* Prompt Detail slider */}
+          {(() => {
+            const detail = scene.promptDetail ?? 'auto';
+            const levels: Array<{ value: string; label: string; tip: string }> = [
+              { value: 'auto',     label: 'Auto',     tip: 'Let the platform decide the right level of detail based on scene content and duration.' },
+              { value: 'brief',    label: 'Brief',    tip: 'Short, punchy prompts (20–40 words). Fast to process, great for simple visuals.' },
+              { value: 'standard', label: 'Standard', tip: 'Moderately detailed prompts (50–80 words). Balanced quality and clarity.' },
+              { value: 'detailed', label: 'Detailed', tip: 'Rich, specific prompts (80–120 words) with lighting, composition, and atmosphere.' },
+              { value: 'verbose',  label: 'Verbose',  tip: 'Cinematic-grade prompts (120–200 words) with precise specifications for every element.' },
+            ];
+            const idx = levels.findIndex(l => l.value === detail);
+            const current = levels[idx];
+            const pct = (idx / (levels.length - 1)) * 100;
+            return (
+              <div className="px-4 pb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Prompt Detail</span>
+                  <span className="text-xs font-semibold text-indigo-300">{current.label}</span>
+                </div>
+                <input
+                  type="range" min={0} max={levels.length - 1} step={1} value={idx}
+                  onChange={e => updateScene({ promptDetail: levels[Number(e.target.value)].value as import('@/lib/types').PromptDetail })}
+                  className="w-full h-1.5 rounded-full accent-indigo-400"
+                  style={{ background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${pct}%, #27272a ${pct}%, #27272a 100%)` }}
+                />
+                <div className="flex justify-between text-[10px] text-[#71717a] mt-1 mb-1.5">
+                  {levels.map(l => <span key={l.value}>{l.label}</span>)}
                 </div>
                 <p className="text-[11px] text-[#a1a1aa] leading-relaxed">{current.tip}</p>
               </div>

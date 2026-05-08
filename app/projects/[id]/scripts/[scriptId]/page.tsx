@@ -4,9 +4,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { v4 as uuid } from 'uuid';
-import type { Script, Scene, Analysis } from '@/lib/types';
+import type { Script, Scene, Analysis, CharacterSheet } from '@/lib/types';
 import SceneEditor from '@/components/SceneEditor';
 import ConfirmModal from '@/components/ConfirmModal';
+import CharacterConsistencyModal from '@/components/CharacterConsistencyModal';
 import { useStorage } from '@/components/StorageProvider';
 
 export default function ScriptEditorPage() {
@@ -28,6 +29,8 @@ export default function ScriptEditorPage() {
   const [descError, setDescError] = useState('');
   const [descCopied, setDescCopied] = useState(false);
   const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
+  const [characterModalOpen, setCharacterModalOpen] = useState(false);
+  const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -47,6 +50,8 @@ export default function ScriptEditorPage() {
       }
       setLoading(false);
     }).catch(() => setLoading(false));
+
+    storage.getSettings().then(s => setAnthropicApiKey(s.anthropicApiKey ?? ''));
   }, [id, scriptId, storage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -238,6 +243,19 @@ export default function ScriptEditorPage() {
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button
+            onClick={() => setCharacterModalOpen(true)}
+            className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] flex items-center gap-1.5"
+            style={{ borderColor: 'var(--border)' }}
+            title="Manage character sheets for visual consistency"
+          >
+            🎭 Characters
+            {(script.characters?.length ?? 0) > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-500/30 text-indigo-300">
+                {script.characters!.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={generateDescription}
             disabled={generatingDesc}
             className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
@@ -411,6 +429,21 @@ export default function ScriptEditorPage() {
           message="Delete this scene?"
           onConfirm={confirmDeleteScene}
           onCancel={() => setConfirmDeleteSceneId(null)}
+        />
+      )}
+
+      {characterModalOpen && script && (
+        <CharacterConsistencyModal
+          script={script}
+          projectId={id}
+          anthropicApiKey={anthropicApiKey}
+          onClose={() => setCharacterModalOpen(false)}
+          onSave={(characters: CharacterSheet[]) => {
+            handleScriptChange({ ...script, characters });
+          }}
+          onDetected={detected => {
+            handleScriptChange({ ...script, detectedCharacters: detected });
+          }}
         />
       )}
     </div>
