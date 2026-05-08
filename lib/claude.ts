@@ -511,7 +511,9 @@ export async function generateSceneAssets(
   channelInsights: ChannelInsights,
   options: { image: boolean; video: boolean; stock: boolean; stockPhotos: boolean; realImages: boolean; stockVideos: boolean },
   analysis?: Analysis,
-  granularity = 2
+  granularity = 2,
+  characters: import('./types').CharacterSheet[] = [],
+  promptDetail: import('./types').PromptDetail = 'auto'
 ): Promise<{
   result: {
     imagePrompts?: string[];
@@ -612,10 +614,31 @@ CHANNEL VISUAL DNA (match this exactly):
 - Graphics/text overlays: ${analysis.videoAnalyses[0].visualStyleEditing.graphicsAndText}
 - Emotional triggers used: ${analysis.videoAnalyses[0].emotionalTriggers.primaryEmotions.join(', ')}` : ''}
 
+${characters.length > 0 ? `
+CHARACTER SHEETS — VISUAL CONSISTENCY REFERENCE:
+The following characters appear in this story. When any character is mentioned in the narration, use their sheet to ensure visual consistency across all prompts. Their appearance must match these descriptions exactly.
+${characters.map(c => `
+CHARACTER: ${c.name}
+${c.fullDescription}${[
+  c.age && `Age: ${c.age}`,
+  c.gender && `Gender: ${c.gender}`,
+  c.ethnicity && `Ethnicity: ${c.ethnicity}`,
+  c.build && `Build: ${c.build}`,
+  c.hairColor && c.hairStyle && `Hair: ${c.hairColor}, ${c.hairStyle}`,
+  c.eyeColor && `Eyes: ${c.eyeColor}`,
+  c.skinTone && `Skin: ${c.skinTone}`,
+  c.typicalOutfit && `Outfit: ${c.typicalOutfit}`,
+  c.styleNotes && `Notes: ${c.styleNotes}`,
+].filter(Boolean).join('\n')}
+`).join('\n---\n')}` : ''}
+
 INSTRUCTIONS:
 - The narration is already divided into ${chunks} segments above — do NOT re-divide it yourself.
 - ALL asset types (imagePrompts, videoPrompts, stockPhotoQueries, realImageQueries, stockVideoQueries): produce EXACTLY ${chunks} items, one per segment [1]–[${chunks}] in order.
 - "excerpt" for each item MUST be copied verbatim from the corresponding pre-divided segment above (item i → segment [i+1]).
+${characters.length > 0 ? `- CHARACTER CONSISTENCY: When a named character from the CHARACTER SHEETS above appears in the narration segment, their visual description MUST be referenced in the prompt to maintain consistency across scenes. Include key identifying traits (hair, build, outfit, distinctive features).` : ''}
+
+PROMPT DETAIL LEVEL: ${promptDetail === 'auto' ? 'Determine the appropriate level of detail based on the segment content and duration. More complex/emotional segments warrant richer prompts.' : promptDetail === 'brief' ? 'BRIEF — Keep prompts concise: 20–40 words. Essential subject and style only.' : promptDetail === 'standard' ? 'STANDARD — Moderately detailed: 50–80 words. Cover subject, mood, lighting, and composition.' : promptDetail === 'detailed' ? 'DETAILED — Rich and specific: 80–120 words. Include lighting setup, composition, atmosphere, color palette, and texture details.' : 'VERBOSE — Cinematic-grade: 120–200 words. Specify everything: subject, expression, exact lighting, lens characteristics, color grading, mood, texture, background depth, and stylistic references.'}
 
 CRITICAL — SUBJECT vs STYLE:
 - "B-roll heavy" and "no talking head" refer to the CREATOR not appearing on screen. It does NOT mean the documentary's subject (real people, historical figures) should be hidden.

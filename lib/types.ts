@@ -307,6 +307,8 @@ export interface StockVideoSegment {
   videos: StockVideo[];
 }
 
+export type PromptDetail = 'auto' | 'brief' | 'standard' | 'detailed' | 'verbose';
+
 export interface Scene {
   id: string;
   number: number;
@@ -323,6 +325,7 @@ export interface Scene {
   includeRealImages: boolean;
   includeStockVideos: boolean;
   assetGranularity?: number; // 1=Minimal 2=Balanced 3=Detailed 4=Cinematic
+  promptDetail?: PromptDetail; // Controls prompt verbosity; undefined = 'auto'
 
   imagePrompts?: string[];
   imagePromptExcerpts?: string[];
@@ -343,6 +346,40 @@ export interface ScriptSettings {
   targetWordCount: number;
 }
 
+// ─── Character Sheets ───────────────────────────────────────────────────────
+
+export interface CharacterSheet {
+  id: string;
+  name: string;
+  // Physical description
+  age?: string;
+  gender?: string;
+  ethnicity?: string;
+  height?: string;
+  build?: string;
+  hairColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
+  skinTone?: string;
+  facialFeatures?: string;
+  // Style & clothing
+  typicalOutfit?: string;
+  styleNotes?: string;
+  // Full narrative description (used in prompts)
+  fullDescription: string;
+  // How the sheet was created
+  generatedFrom: 'text' | 'image';
+  // Thumbnail of the source image (base64 data URL), if created from image
+  sourceThumbnail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DetectedCharacter {
+  name: string;
+  count: number;
+}
+
 export interface Script {
   id: string;
   projectId: string;
@@ -357,6 +394,8 @@ export interface Script {
   updatedAt: string;
   settings: ScriptSettings;
   scenes: Scene[];
+  characters?: CharacterSheet[];
+  detectedCharacters?: DetectedCharacter[];
   savedToDisk: boolean;
 }
 
