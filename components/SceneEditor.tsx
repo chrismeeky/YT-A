@@ -73,6 +73,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [selectionPopover, setSelectionPopover] = useState<{ x: number; y: number; text: string; segmentIndex: number } | null>(null);
   const [searchingSelection, setSearchingSelection] = useState(false);
   const [newImageKeys, setNewImageKeys] = useState<Set<string>>(new Set());
+  // extend prompt: key = `${sceneId}-${promptIndex}`, value = { open, duration, generating }
+  const [extendState, setExtendState] = useState<Record<string, { open: boolean; duration: number; generating: boolean }>>({});
 
   const handleTabClick = (key: string) => {
     onTabChange(key);
@@ -261,6 +263,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             realImageProvider: settings.realImageProvider,
             characters: script.characters ?? [],
             promptDetail: scene.promptDetail ?? 'auto',
+            scriptTopic: script.topic || script.title,
+            visualStyle: script.visualStyle,
           }),
         }
       );
@@ -720,41 +724,144 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                       ~{Math.ceil(scene.estimatedDurationSeconds / 8)} chunks for {scene.estimatedDurationSeconds}s
                     </p>
                   )}
-                  {(scene.videoPrompts?.length ? scene.videoPrompts : ['']).map((prompt, i) => (
-                    <div key={i} className="flex gap-2">
-                      <span className="text-xs text-[#52525b] pt-2 w-5 text-right flex-shrink-0">{i + 1}</span>
-                      <div className="flex-1 relative group">
-                        {scene.videoPromptExcerpts?.[i] && (
-                          <p
-                            onClick={() => struckItems.has(`vid-${i}`) && toggleStruck(`vid-${i}`)}
-                            title={struckItems.has(`vid-${i}`) ? 'Click to unmark' : undefined}
-                            className={`text-xs italic mb-1 line-clamp-2 select-none transition-all ${
-                              struckItems.has(`vid-${i}`)
-                                ? 'line-through text-yellow-300/30 cursor-pointer'
-                                : 'text-yellow-300/80'
-                            }`}
-                          >
-                            {scene.videoPromptExcerpts[i]}
-                          </p>
-                        )}
-                        <textarea
-                          value={prompt}
-                          onChange={e => {
-                            const updated = [...(scene.videoPrompts ?? [''])];
-                            updated[i] = e.target.value;
-                            updateScene({ videoPrompts: updated });
-                          }}
-                          rows={2}
-                          className="w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
-                          style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                          placeholder="Sora/Runway style prompt…"
-                        />
-                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <CopyButton text={prompt} onCopy={() => toggleStruck(`vid-${i}`)} />
+                  {(scene.videoPrompts?.length ? scene.videoPrompts : ['']).map((prompt, i) => {
+                    const extKey = `${scene.id}-${i}`;
+                    const ext = extendState[extKey];
+                    const isExtension = scene.videoPromptIsExtension?.[i];
+                    return (
+                      <div key={i} className={`flex gap-2 ${isExtension ? 'pl-5' : ''}`}>
+                        <div className="flex flex-col items-center gap-0.5 flex-shrink-0 w-5">
+                          {isExtension
+                            ? <span className="text-[10px] text-yellow-500/60 mt-2">↳</span>
+                            : <span className="text-xs text-[#52525b] pt-2 text-right">{i + 1}</span>
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="relative group">
+                            {scene.videoPromptExcerpts?.[i] && !isExtension && (
+                              <p
+                                onClick={() => struckItems.has(`vid-${i}`) && toggleStruck(`vid-${i}`)}
+                                title={struckItems.has(`vid-${i}`) ? 'Click to unmark' : undefined}
+                                className={`text-xs italic mb-1 line-clamp-2 select-none transition-all ${
+                                  struckItems.has(`vid-${i}`)
+                                    ? 'line-through text-yellow-300/30 cursor-pointer'
+                                    : 'text-yellow-300/80'
+                                }`}
+                              >
+                                {scene.videoPromptExcerpts[i]}
+                              </p>
+                            )}
+                            {isExtension && (
+                              <p className="text-[10px] text-yellow-500/50 mb-1 font-medium tracking-wide uppercase">
+                                Extension
+                              </p>
+                            )}
+                            <textarea
+                              value={prompt}
+                              onChange={e => {
+                                const updated = [...(scene.videoPrompts ?? [''])];
+                                updated[i] = e.target.value;
+                                updateScene({ videoPrompts: updated });
+                              }}
+                              rows={2}
+                              className="w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
+                              style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                              placeholder={isExtension ? 'Continuation prompt…' : 'Sora/Runway style prompt…'}
+                            />
+                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                              <button
+                                onClick={() => setExtendState(prev => ({
+                                  ...prev,
+                                  [extKey]: { open: !prev[extKey]?.open, duration: prev[extKey]?.duration ?? 6, generating: false },
+                                }))}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-yellow-400 border-yellow-900/60 hover:border-yellow-600 hover:text-yellow-300"
+                                style={{ background: 'var(--surface)' }}
+                                title="Extend this prompt"
+                              >
+                                ↗ Extend
+                              </button>
+                              <CopyButton text={prompt} onCopy={() => toggleStruck(`vid-${i}`)} />
+                            </div>
+                          </div>
+
+                          {/* Extend UI */}
+                          {ext?.open && (
+                            <div
+                              className="mt-2 rounded-lg border px-3 py-3 space-y-2"
+                              style={{ borderColor: '#854d0e', background: 'rgba(120,53,15,0.15)' }}
+                            >
+                              <p className="text-[11px] text-yellow-300/70 font-medium">Generate continuation</p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-[#71717a]">Duration</span>
+                                <div className="flex gap-1">
+                                  {[4, 6, 8, 10].map(s => (
+                                    <button
+                                      key={s}
+                                      onClick={() => setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], duration: s } }))}
+                                      className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
+                                        (ext.duration ?? 6) === s
+                                          ? 'bg-yellow-500/20 border-yellow-600 text-yellow-300'
+                                          : 'border-[#333] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa]'
+                                      }`}
+                                    >
+                                      {s}s
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  disabled={ext.generating}
+                                  onClick={async () => {
+                                    setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], generating: true } }));
+                                    try {
+                                      const settings = await storage.getSettings();
+                                      const res = await fetch(
+                                        `/api/projects/${projectId}/scripts/${script.id}/scenes/${scene.id}/extend-prompt`,
+                                        {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({
+                                            originalPrompt: prompt,
+                                            narrationExcerpt: scene.videoPromptExcerpts?.[i],
+                                            durationSeconds: ext.duration ?? 6,
+                                            anthropicApiKey: settings.anthropicApiKey,
+                                          }),
+                                        }
+                                      );
+                                      const data = await res.json();
+                                      if (res.ok && data.prompt) {
+                                        const prompts = [...(scene.videoPrompts ?? [])];
+                                        const excerpts = [...(scene.videoPromptExcerpts ?? [])];
+                                        const extensions = [...(scene.videoPromptIsExtension ?? prompts.map(() => false))];
+                                        prompts.splice(i + 1, 0, data.prompt);
+                                        excerpts.splice(i + 1, 0, '');
+                                        extensions.splice(i + 1, 0, true);
+                                        updateScene({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions });
+                                        setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false, generating: false } }));
+                                      }
+                                    } catch {
+                                      setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], generating: false } }));
+                                    }
+                                  }}
+                                  className="px-3 py-1 rounded text-xs bg-yellow-600/80 hover:bg-yellow-600 disabled:opacity-50 transition-colors font-medium text-white flex items-center gap-1.5"
+                                >
+                                  {ext.generating ? <><span className="animate-pulse">⚡</span> Generating…</> : `⚡ Generate ${ext.duration ?? 6}s continuation`}
+                                </button>
+                                <button
+                                  onClick={() => setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false } }))}
+                                  className="px-3 py-1 rounded text-xs border text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                                  style={{ borderColor: 'var(--border)' }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <button
                     onClick={() => updateScene({ videoPrompts: [...(scene.videoPrompts ?? []), ''] })}
                     className="text-xs text-indigo-300 transition-colors pl-7"

@@ -7,6 +7,7 @@ import type {
   Scene,
   ScriptSettings,
 } from './types';
+import { resolvePromptLock } from './visual-styles';
 
 function client(apiKey: string): Anthropic {
   return new Anthropic({ apiKey });
@@ -296,6 +297,12 @@ export async function synthesizeChannelInsights(
     thumbnailColors: v.thumbnailDesign?.colorAndContrast,
     thumbnailText: v.thumbnailDesign?.textOverlay,
     thumbnailSynergy: v.thumbnailDesign?.titleThumbnailSynergy,
+    // Production medium — critical for AI video prompt generation
+    inferredCameraStyle: v.visualStyleEditing?.inferredCameraStyle,
+    brollEstimate: v.visualStyleEditing?.brollEstimate,
+    graphicsAndText: v.visualStyleEditing?.graphicsAndText,
+    editingPace: v.visualStyleEditing?.editingPace,
+    brandingConsistency: v.visualStyleEditing?.brandingConsistency,
     patternInterrupts: v.retentionMechanics?.patternInterrupts,
     primaryEmotions: v.emotionalTriggers?.primaryEmotions,
     emotionalArc: v.emotionalTriggers?.emotionalArc,
@@ -339,7 +346,8 @@ Return ONLY valid JSON:
     "thumbnailStyle": "Specific repeatable thumbnail formula this channel uses",
     "colorScheme": "Brand colours with purpose",
     "typography": "Text style and placement pattern",
-    "faceInThumbnail": true
+    "faceInThumbnail": true,
+    "productionStyle": "The exact visual production medium — be specific enough for an AI video generator to reproduce it. Examples: 'Pixar-style 3D CGI animation with soft lighting and expressive characters', 'DreamWorks 3D animated feature film style', 'hand-drawn 2D animation with watercolor backgrounds', 'photorealistic cinematic documentary', 'anime-style 2D animation with cel shading', 'live-action talking head with motion-graphic B-roll'. Do NOT use vague terms like '3D animated' or 'animated' alone — always include the studio reference or rendering style so AI generators produce the right output."
   },
   "audienceProfile": {
     "demographics": "Specific age range, background, what they are seeking",
@@ -513,7 +521,9 @@ export async function generateSceneAssets(
   analysis?: Analysis,
   granularity = 2,
   characters: import('./types').CharacterSheet[] = [],
-  promptDetail: import('./types').PromptDetail = 'auto'
+  promptDetail: import('./types').PromptDetail = 'auto',
+  scriptTopic?: string,
+  visualStyle?: string
 ): Promise<{
   result: {
     imagePrompts?: string[];
@@ -588,18 +598,32 @@ export async function generateSceneAssets(
     messages: [
       {
         role: 'user',
-        content: `Generate: ${wantedParts.join(', ')}
+        content: `${(() => {
+          const lock = resolvePromptLock(visualStyle) || channelInsights.visualBrand?.productionStyle;
+          return lock ? `VISUAL STYLE LOCK — This applies to EVERY single prompt in your response without exception:
+${lock}
+Every image prompt and video prompt MUST explicitly name this visual style. Never omit it. Never revert to photorealism or a different medium unless the style lock above is itself photorealistic.
+
+` : '';
+        })()}Generate: ${wantedParts.join(', ')}
 
 SCENE:
 Title: ${scene.title}
 Full Narration: ${scene.narration}
 Visual Description: ${scene.sceneDescription}
 Duration: ~${estimatedSeconds}s
+${scriptTopic ? `Script Topic: ${scriptTopic}` : ''}
+
+STORY WORLD — EVERY prompt must be set inside this world. No exceptions.
+${scriptTopic ? `Topic/Setting: ${scriptTopic}` : ''}
+${scene.sceneDescription ? `Scene Atmosphere: ${scene.sceneDescription}` : ''}
+Infer the time period, geography, architecture, clothing, lighting, and cultural context from the topic and scene description above, and keep them rigidly consistent across ALL ${chunks} segments. Do NOT introduce urban skylines, modern buildings, contemporary clothing, vehicles, or technology unless the narration explicitly requires them. Every visual element — background, props, costumes, lighting — must belong to the same world.
 
 NARRATION PRE-DIVIDED INTO ${chunks} SEQUENTIAL SEGMENTS (all asset types use these same segments):
 ${narrationChunks.map((c, i) => `[${i + 1}] "${c}"`).join('\n')}
 
 CHANNEL VISUAL DNA (match this exactly):
+${channelInsights.visualBrand.productionStyle ? `⚠️ PRODUCTION MEDIUM LOCK — every image and video prompt MUST be rendered in this exact style: ${channelInsights.visualBrand.productionStyle}. Never default to photorealistic or live-action unless that IS the production style. Reject any visual language that belongs to a different medium.` : ''}
 - Thumbnail style: ${channelInsights.visualBrand.thumbnailStyle}
 - Color palette: ${channelInsights.visualBrand.colorScheme}
 - Typography style: ${channelInsights.visualBrand.typography}
@@ -636,6 +660,7 @@ INSTRUCTIONS:
 - The narration is already divided into ${chunks} segments above — do NOT re-divide it yourself.
 - ALL asset types (imagePrompts, videoPrompts, stockPhotoQueries, realImageQueries, stockVideoQueries): produce EXACTLY ${chunks} items, one per segment [1]–[${chunks}] in order.
 - "excerpt" for each item MUST be copied verbatim from the corresponding pre-divided segment above (item i → segment [i+1]).
+- STORY WORLD LOCK: Every prompt must be grounded in the same time period, geography, and atmosphere established by the Story World block above. If the story is a folktale, keep mud-brick walls, earthen paths, fire-lit interiors, traditional clothing — never concrete, neon, cars, or urban skylines unless narration demands it.
 ${characters.length > 0 ? `- CHARACTER CONSISTENCY: When a named character from the CHARACTER SHEETS above appears in the narration segment, their visual description MUST be referenced in the prompt to maintain consistency across scenes. Include key identifying traits (hair, build, outfit, distinctive features).` : ''}
 
 PROMPT DETAIL LEVEL: ${promptDetail === 'auto' ? 'Determine the appropriate level of detail based on the segment content and duration. More complex/emotional segments warrant richer prompts.' : promptDetail === 'brief' ? 'BRIEF — Keep prompts concise: 20–40 words. Essential subject and style only.' : promptDetail === 'standard' ? 'STANDARD — Moderately detailed: 50–80 words. Cover subject, mood, lighting, and composition.' : promptDetail === 'detailed' ? 'DETAILED — Rich and specific: 80–120 words. Include lighting setup, composition, atmosphere, color palette, and texture details.' : 'VERBOSE — Cinematic-grade: 120–200 words. Specify everything: subject, expression, exact lighting, lens characteristics, color grading, mood, texture, background depth, and stylistic references.'}

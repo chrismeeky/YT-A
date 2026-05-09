@@ -11,6 +11,7 @@ interface Props {
   onSave: (characters: CharacterSheet[]) => void;
   onDetected: (detected: DetectedCharacter[]) => void;
   anthropicApiKey: string;
+  visualStyle?: string;
 }
 
 type Mode = 'view' | 'generate' | 'from-image';
@@ -53,7 +54,7 @@ function appearanceAdvisory(count: number): { label: string; color: string; advi
   };
 }
 
-export default function CharacterConsistencyModal({ script, projectId, onClose, onSave, onDetected, anthropicApiKey }: Props) {
+export default function CharacterConsistencyModal({ script, projectId, onClose, onSave, onDetected, anthropicApiKey, visualStyle }: Props) {
   const cached = script.detectedCharacters ?? [];
   const [detectedChars, setDetectedChars] = useState<DetectedCharacter[]>(cached);
   const [detecting, setDetecting] = useState(cached.length === 0);
@@ -137,6 +138,7 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
           characterName: name,
           scenes: script.scenes.map(s => ({ narration: s.narration, title: s.title })),
           scriptTopic: script.topic,
+          visualStyle,
           anthropicApiKey,
         }),
       });
@@ -174,6 +176,7 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
           characterName: name,
           imageBase64: uploadedImage.base64,
           mediaType: uploadedImage.mediaType,
+          visualStyle,
           anthropicApiKey,
         }),
       });
