@@ -211,6 +211,7 @@ export interface VisualBrand {
   colorScheme: string;
   typography: string;
   faceInThumbnail: boolean;
+  productionStyle: string; // the visual medium — e.g. "Pixar-style 3D CGI animation", "photorealistic documentary", "hand-drawn 2D animation"
 }
 
 export interface AudienceProfile {
@@ -331,6 +332,7 @@ export interface Scene {
   imagePromptExcerpts?: string[];
   videoPrompts?: string[];
   videoPromptExcerpts?: string[];
+  videoPromptIsExtension?: boolean[]; // parallel to videoPrompts; true = AI-generated continuation
   stockUrl?: string;
   stockPhotoSegments?: StockPhotoSegment[];
   realImageSegments?: RealImageSegment[];
@@ -396,6 +398,7 @@ export interface Script {
   scenes: Scene[];
   characters?: CharacterSheet[];
   detectedCharacters?: DetectedCharacter[];
+  visualStyle?: string; // preset tag or custom text — injected into every prompt
   savedToDisk: boolean;
 }
 

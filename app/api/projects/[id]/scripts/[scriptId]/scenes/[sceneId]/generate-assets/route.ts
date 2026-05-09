@@ -25,6 +25,8 @@ export async function POST(
     realImageProvider?: 'brave' | 'duckduckgo';
     characters?: CharacterSheet[];
     promptDetail?: PromptDetail;
+    scriptTopic?: string;
+    visualStyle?: string;
   };
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -56,6 +58,8 @@ export async function POST(
       scene.assetGranularity ?? 2,
       body.characters ?? [],
       body.promptDetail ?? scene.promptDetail ?? 'auto',
+      body.scriptTopic,
+      body.visualStyle,
     );
 
     void trackUsage({

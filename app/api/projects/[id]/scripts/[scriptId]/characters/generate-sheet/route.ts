@@ -11,6 +11,7 @@ export async function POST(
     characterName: string;
     scenes: Array<{ narration: string; title: string }>;
     scriptTopic: string;
+    visualStyle?: string;
     anthropicApiKey?: string;
   };
 
@@ -27,7 +28,7 @@ export async function POST(
   const ai = new Anthropic({ apiKey });
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: 'You are a character design expert for fictional stories. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
@@ -35,7 +36,7 @@ export async function POST(
         content: `Create a detailed character sheet for "${body.characterName}" based on how they appear in this script.
 
 SCRIPT TOPIC: ${body.scriptTopic}
-
+${body.visualStyle ? `\nVISUAL STYLE: ${body.visualStyle}\nAll descriptions — especially typicalOutfit, styleNotes, and fullDescription — must be written so they look correct when rendered in this visual style. Describe clothing, hair, and features with the level of stylization, detail, and vocabulary that fits this medium (e.g. for 3D CGI animation, lean into exaggerated proportions and vivid colors; for photorealistic, use precise real-world material descriptions).\n` : ''}
 SCRIPT SCENES:
 ${scriptContext}
 
@@ -55,7 +56,7 @@ Return JSON with this exact structure:
   "facialFeatures": "e.g. sharp jawline, prominent cheekbones, weathered wrinkles",
   "typicalOutfit": "e.g. worn leather jacket and dark jeans, formal Victorian suit",
   "styleNotes": "e.g. always carries a worn notebook, distinctive scar above left eyebrow",
-  "fullDescription": "A single comprehensive paragraph (4-6 sentences) describing this character visually, suitable for use as an AI image generation reference. Include all key visual details in a flowing, descriptive narrative."
+  "fullDescription": "A single comprehensive paragraph (4-6 sentences) describing this character visually in a way that is ready to paste directly into an AI image/video prompt. Bake the visual style into the description — if the style is 3D animated, say so; if photorealistic, reflect that. Include all key visual details in a flowing, descriptive narrative."
 }`,
       },
     ],
@@ -72,7 +73,13 @@ Return JSON with this exact structure:
 
   const raw = response.content[0].type === 'text' ? response.content[0].text : '{}';
   let cleaned = raw.trim();
-  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+  // Strip markdown fences
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
+  // Fallback: extract first {...} block if Claude wrapped JSON in prose
+  if (!cleaned.startsWith('{')) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) cleaned = match[0];
+  }
 
   try {
     const parsed = JSON.parse(cleaned);

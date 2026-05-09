@@ -69,8 +69,9 @@ const OP_LABELS: Record<string, string> = {
   'channel-videos':         'Channel Videos',
   'research-search':        'Research Search',
   'research-channel':       'Channel Details',
-  'detect-characters':      'Character Detection',
+  'detect-characters':        'Character Detection',
   'generate-character-sheet': 'Character Sheet',
+  'extend-prompt':            'Prompt Extension',
 };
 
 function fmt(n: number | undefined | null, decimals = 0) {

@@ -9,6 +9,7 @@ import SceneEditor from '@/components/SceneEditor';
 import ConfirmModal from '@/components/ConfirmModal';
 import CharacterConsistencyModal from '@/components/CharacterConsistencyModal';
 import { useStorage } from '@/components/StorageProvider';
+import { VISUAL_STYLE_PRESETS } from '@/lib/visual-styles';
 
 export default function ScriptEditorPage() {
   const { id, scriptId } = useParams<{ id: string; scriptId: string }>();
@@ -30,6 +31,7 @@ export default function ScriptEditorPage() {
   const [descCopied, setDescCopied] = useState(false);
   const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
   const [characterModalOpen, setCharacterModalOpen] = useState(false);
+  const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -47,6 +49,13 @@ export default function ScriptEditorPage() {
       if (data.analysisId) {
         const a = await storage.getAnalysis(id, data.analysisId);
         setAnalysis(a);
+        // Pre-populate visual style from channel analysis if user hasn't set one yet
+        const detected = a?.channelInsights?.visualBrand?.productionStyle;
+        if (!data.visualStyle && detected) {
+          const prefilled = { ...data, visualStyle: detected };
+          setScript(prefilled);
+          storage.saveScript(id, prefilled);
+        }
       }
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -287,6 +296,95 @@ export default function ScriptEditorPage() {
         </div>
       )}
 
+      {/* Visual Style bar */}
+      <div
+        className="px-6 py-2 border-b flex items-center gap-3 flex-shrink-0 relative"
+        style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
+      >
+        <span className="text-[11px] text-[#52525b] flex-shrink-0">Visual Style</span>
+        {(() => {
+          const detected = analysis?.channelInsights?.visualBrand?.productionStyle;
+          if (!detected) return null;
+          const isActive = script.visualStyle === detected;
+          return (
+            <button
+              onClick={() => handleScriptChange({ ...script, visualStyle: detected })}
+              title={isActive ? `Currently using auto-detected style: "${detected}"` : `Reset to channel-detected style: "${detected}"`}
+              className={`text-[10px] border rounded px-1.5 py-0.5 flex-shrink-0 transition-colors flex items-center gap-1 ${
+                isActive
+                  ? 'border-[#27272a] text-[#3f3f46] cursor-default'
+                  : 'border-[#3f3f46] text-[#52525b] hover:border-indigo-500/60 hover:text-indigo-400'
+              }`}
+            >
+              {!isActive && <span>↺</span>}
+              auto-detected
+            </button>
+          );
+        })()}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {VISUAL_STYLE_PRESETS.map(p => {
+            const active = script.visualStyle === p.tag;
+            return (
+              <button
+                key={p.tag}
+                onClick={() => handleScriptChange({ ...script, visualStyle: active ? undefined : p.tag })}
+                title={p.description}
+                className={`px-2 py-0.5 rounded-full text-[11px] border transition-colors flex items-center gap-1 ${
+                  active
+                    ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-300'
+                    : 'border-[#333] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa]'
+                }`}
+              >
+                <span>{p.emoji}</span> {p.label}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => setStylePickerOpen(v => !v)}
+            className={`px-2 py-0.5 rounded-full text-[11px] border transition-colors ${
+              script.visualStyle && !VISUAL_STYLE_PRESETS.some(p => p.tag === script.visualStyle)
+                ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-300'
+                : 'border-[#333] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa]'
+            }`}
+            title="Enter a custom visual style description"
+          >
+            ✏️ Custom
+          </button>
+        </div>
+
+        {/* Custom style input popover */}
+        {stylePickerOpen && (
+          <div
+            className="absolute top-full left-0 mt-1 z-20 rounded-xl border p-4 shadow-xl w-96"
+            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+          >
+            <p className="text-xs text-[#71717a] mb-2">
+              Describe the visual style in plain text. This is injected into every generated prompt.
+            </p>
+            {analysis?.channelInsights?.visualBrand?.productionStyle && (
+              <p className="text-[10px] text-[#3f3f46] mb-2">
+                Auto-detected from channel analysis — edit freely to override.
+              </p>
+            )}
+            <textarea
+              autoFocus
+              rows={3}
+              value={VISUAL_STYLE_PRESETS.some(p => p.tag === script.visualStyle) ? '' : (script.visualStyle ?? '')}
+              onChange={e => handleScriptChange({ ...script, visualStyle: e.target.value || undefined })}
+              className="w-full rounded-lg px-3 py-2 text-xs border focus:border-indigo-400 resize-none"
+              style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
+              placeholder={analysis?.channelInsights?.visualBrand?.productionStyle ?? 'e.g. Claymation stop-motion style, warm colors, textured clay surfaces…'}
+            />
+            <button
+              onClick={() => setStylePickerOpen(false)}
+              className="mt-2 text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Thumbnail concept */}
       {script.thumbnailConcept && (
         <div
@@ -437,6 +535,7 @@ export default function ScriptEditorPage() {
           script={script}
           projectId={id}
           anthropicApiKey={anthropicApiKey}
+          visualStyle={script.visualStyle}
           onClose={() => setCharacterModalOpen(false)}
           onSave={(characters: CharacterSheet[]) => {
             handleScriptChange({ ...script, characters });

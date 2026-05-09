@@ -11,6 +11,7 @@ export async function POST(
     characterName: string;
     imageBase64: string;  // base64-encoded image data (without data URL prefix)
     mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    visualStyle?: string;
     anthropicApiKey?: string;
   };
 
@@ -28,7 +29,7 @@ export async function POST(
   const ai = new Anthropic({ apiKey });
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: 'You are a character design expert. Analyze images and extract precise visual character descriptions. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
@@ -45,7 +46,7 @@ export async function POST(
           {
             type: 'text',
             text: `Analyze this image and create a detailed character sheet for "${body.characterName}".
-
+${body.visualStyle ? `\nVISUAL STYLE: ${body.visualStyle}\nWrite the fullDescription so it is ready to use as an AI image/video prompt in this exact visual style. Adapt the language and level of detail to fit the medium — for 3D animation use stylized/animated vocabulary; for photorealistic use precise real-world material terms. The character as described must look correct when rendered in this style.\n` : ''}
 Extract every visual detail you can observe. Be precise and specific — this description will be used to maintain visual consistency when generating AI images of this character across multiple scenes.
 
 Return JSON with this exact structure:
@@ -62,7 +63,7 @@ Return JSON with this exact structure:
   "facialFeatures": "notable facial features — jawline, nose shape, distinctive marks, expressions",
   "typicalOutfit": "describe the clothing visible in the image in detail",
   "styleNotes": "any distinctive accessories, props, posture, or other visual identifiers",
-  "fullDescription": "A comprehensive 4-6 sentence paragraph describing this character visually in precise detail, suitable as a reference prompt for AI image generation. Capture their essence — not just features but the overall visual impression they create."
+  "fullDescription": "A comprehensive 4-6 sentence paragraph describing this character visually in precise detail, ready to paste directly into an AI image/video prompt. Bake the visual style into the description. Capture their essence — not just features but the overall visual impression they create."
 }`,
           },
         ],
@@ -81,7 +82,11 @@ Return JSON with this exact structure:
 
   const raw = response.content[0].type === 'text' ? response.content[0].text : '{}';
   let cleaned = raw.trim();
-  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
+  if (!cleaned.startsWith('{')) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) cleaned = match[0];
+  }
 
   try {
     const parsed = JSON.parse(cleaned);
