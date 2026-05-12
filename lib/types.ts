@@ -206,6 +206,17 @@ export interface ContentStyle {
   expertise: string;
 }
 
+export interface WritingStyle {
+  sentenceStructure: string;       // rhythm and length patterns
+  vocabularyLevel: string;         // register, technicality, accessibility
+  directnessLevel: string;         // command-style, conversational, narrative, academic
+  rhetoricalDevices: string[];     // devices with descriptions of how they're used
+  paceAndRhythm: string;           // how language density and speed modulate across the video
+  voiceAndPersonality: string;     // the distinct creator persona and what makes it recognisable
+  openingFormula: string;          // the exact mechanical pattern used to open scripts, with a concrete structural example
+  signatureExpressions?: string[]; // representative language patterns native to this channel — not copied quotes, but structural examples that show vocabulary, rhythm, and tone in action
+}
+
 export interface VisualBrand {
   thumbnailStyle: string;
   colorScheme: string;
@@ -224,7 +235,10 @@ export interface ScriptStructureTemplate {
   intro: string;
   body: string;
   outro: string;
+  loopMechanism?: string; // how carry-forward loops are constructed between scenes, if used
 }
+
+export type ContentNature = 'fictional' | 'non-fictional' | 'mixed';
 
 export interface ChannelInsights {
   channelOverview: string;
@@ -237,6 +251,11 @@ export interface ChannelInsights {
   uniqueValueProposition: string;
   engagementPatterns: string[];
   contentStyle: ContentStyle;
+  writingStyle?: WritingStyle;
+  contentNature?: {
+    classification: ContentNature;
+    reasoning: string; // why this classification was chosen
+  };
   videoLength: { typical: string; reasoning: string };
   replicationFormula: string;
   thingsToSteal: string[];
@@ -333,6 +352,7 @@ export interface Scene {
   videoPrompts?: string[];
   videoPromptExcerpts?: string[];
   videoPromptIsExtension?: boolean[]; // parallel to videoPrompts; true = AI-generated continuation
+  videoPromptPriorVersions?: (string | null)[]; // parallel to videoPrompts; stores pre-tweak original for revert
   stockUrl?: string;
   stockPhotoSegments?: StockPhotoSegment[];
   realImageSegments?: RealImageSegment[];

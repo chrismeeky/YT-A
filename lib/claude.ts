@@ -290,7 +290,13 @@ export async function synthesizeChannelInsights(
     coreIdea: v.topicPositioning?.coreIdea,
     angle: v.topicPositioning?.angle,
     hookType: v.hook?.type,
+    hookOpeningLines: v.hook?.openingLines,
     openLoop: v.hook?.openLoopDescription,
+    retentionIntent: v.hook?.retentionIntent,
+    // Content structure — how body holds attention across scenes
+    usesCarryForwardLoops: v.contentStructure?.usesCarryForwardLoops,
+    loopMechanism: v.contentStructure?.loopMechanism,
+    newStimulusFrequency: v.contentStructure?.newStimulusFrequency,
     titlePattern: v.titleStructure?.formatPattern,
     titleTriggers: v.titleStructure?.emotionalTriggers,
     thumbnailStyle: v.thumbnailDesign?.visualComplexity,
@@ -304,9 +310,25 @@ export async function synthesizeChannelInsights(
     editingPace: v.visualStyleEditing?.editingPace,
     brandingConsistency: v.visualStyleEditing?.brandingConsistency,
     patternInterrupts: v.retentionMechanics?.patternInterrupts,
+    retentionStrengths: v.retentionMechanics?.retentionStrengths,
+    storyProgressionStyle: v.retentionMechanics?.storyProgressionStyle,
     primaryEmotions: v.emotionalTriggers?.primaryEmotions,
     emotionalArc: v.emotionalTriggers?.emotionalArc,
+    emotionalIntensityProgression: v.emotionalTriggers?.intensityProgression,
     targetViewer: v.audienceTargeting?.primaryTargetViewer,
+    assumedKnowledgeLevel: v.audienceTargeting?.assumedKnowledgeLevel,
+    // Writing mechanics — critical for imitating the channel's actual prose
+    sentenceStyle: v.scriptAndLanguage?.sentenceStyle,
+    technicalDepth: v.scriptAndLanguage?.technicalDepth,
+    directnessLevel: v.scriptAndLanguage?.directnessLevel,
+    rhetoricalDevices: v.scriptAndLanguage?.rhetoricalDevices,
+    standoutPhrases: v.scriptAndLanguage?.standoutPhrases,
+    // Pacing at the language level
+    narrativeSpeed: v.pacing?.narrativeSpeed,
+    ideaDensity: v.pacing?.ideaDensity,
+    breathingRoom: v.pacing?.breathingRoom,
+    // Voice
+    voiceAndPersonality: v.differentiation?.voiceAndPersonality,
     uniqueElements: v.differentiation?.uniqueElements,
     defensibleAdvantage: v.differentiation?.defensibleAdvantage,
     ctaTypes: v.callToAction?.ctaTypes,
@@ -318,7 +340,7 @@ export async function synthesizeChannelInsights(
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 5000,
+    max_tokens: 6000,
     system:
       'You are a YouTube content strategy expert. Respond ONLY with valid JSON, no markdown fences, no prose.',
     messages: [
@@ -326,13 +348,18 @@ export async function synthesizeChannelInsights(
         role: 'user',
         content: `Synthesise a channel strategy profile from these ${videoAnalyses.length} detailed video analyses. A creator wants to model their channel on this one.
 
-CRITICAL INSTRUCTION: You are extracting PRINCIPLES and PSYCHOLOGICAL MECHANISMS — not surface-level templates or example sentences. The goal is to describe WHY each technique works and WHAT effect it creates, so a writer can apply the same intent to any topic with fresh language. Never write reusable sentence starters or copy-paste templates — describe the underlying approach so deeply that someone could apply it to a completely different subject and produce a recognisably similar style with entirely original content.
+CRITICAL INSTRUCTION: For most fields, extract PRINCIPLES and PSYCHOLOGICAL MECHANISMS — describe WHY each technique works and WHAT effect it creates, so a writer can apply the same intent to any topic with fresh language. Avoid reusable sentence starters or copy-paste templates for fields like hookStrategies, scriptStructureTemplate, and replicationFormula.
+EXCEPTION: The writingStyle.openingFormula field is deliberately mechanical — for that field only, describe the structural pattern as a formula with slots and show it filled with a placeholder example. This is the one place where structural specificity matters more than abstract principles.
 
 VIDEO ANALYSES:
 ${JSON.stringify(summaries, null, 2)}
 
 Return ONLY valid JSON:
 {
+  "contentNature": {
+    "classification": "fictional | non-fictional | mixed",
+    "reasoning": "1-2 sentences explaining the classification — e.g. 'Channel produces animated folktales and original fictional narratives' or 'Channel covers real documented crimes, historical events, and investigative journalism. All content references verifiable real-world people and events.' or 'Channel mixes fictional drama with real historical context.'"
+  },
   "channelOverview": "3-sentence strategic summary of what makes this channel work — focus on the psychological contract with the viewer",
   "contentPillars": ["Pillar 1: specific theme with the emotional angle it exploits", "Pillar 2", "Pillar 3"],
   "titleFormulas": ["Formula 1: describe the structural pattern and the psychological trigger it activates — e.g. 'contrast between official narrative and hidden truth, creates cognitive dissonance'", "Formula 2"],
@@ -340,7 +367,8 @@ Return ONLY valid JSON:
   "scriptStructureTemplate": {
     "intro": "Describe the INTENT and EFFECT of the opening — what the viewer feels, what question gets planted, what commitment is created. No example sentences.",
     "body": "Describe the pacing rhythm, how tension is built and released, how information is sequenced to maintain curiosity. Focus on the underlying architecture.",
-    "outro": "Describe the emotional resolution the channel typically delivers and how the CTA is integrated into that resolution."
+    "outro": "Describe the emotional resolution the channel typically delivers and how the CTA is integrated into that resolution.",
+    "loopMechanism": "If this channel uses carry-forward loops between scenes: describe exactly how each scene ends (what hook, question, or unresolved tension it plants) and how the next scene opens to pay it off. If the channel does not use carry-forward loops, write null."
   },
   "visualBrand": {
     "thumbnailStyle": "Specific repeatable thumbnail formula this channel uses",
@@ -360,6 +388,16 @@ Return ONLY valid JSON:
     "tone": "Describe the voice character — what adjectives define it, what it deliberately avoids, what relationship it builds with the viewer",
     "energy": "Energy level, delivery pace, and how it modulates across the video",
     "expertise": "What level of prior knowledge the viewer is assumed to have, and how the channel signals its own authority"
+  },
+  "writingStyle": {
+    "sentenceStructure": "Describe the dominant sentence rhythm across the channel — e.g. 'predominantly short declarative sentences under 12 words, with occasional long compound sentences used only at emotional peaks'. Include what effect this creates on the reader/listener.",
+    "vocabularyLevel": "The register and technicality — e.g. 'accessible everyday language with selective use of domain-specific terms to signal authority without alienating casual viewers'. Describe how vocabulary signals the creator's relationship with the audience.",
+    "directnessLevel": "How the channel addresses the viewer — command-style, conversational, narrative, Socratic, academic. Describe the psychological effect of this choice.",
+    "rhetoricalDevices": ["Device name: describe how this channel specifically deploys it and what effect it produces — not a textbook definition", "Device 2", "Device 3"],
+    "paceAndRhythm": "How language density and speed modulate — where the script accelerates, where it slows, and what triggers those shifts. Describe the underlying cadence pattern.",
+    "voiceAndPersonality": "The distinct creator persona — what the voice sounds like on the page, what makes it immediately recognisable, what it projects about the creator's identity and values.",
+    "openingFormula": "The exact mechanical structure this channel uses to open every script — describe the pattern as a formula with slots, then show it filled in with a structural example using placeholder content. E.g. '[Specific date], [named person] [did specific action]. What [they did next / was found / happened after] would [consequence that opens the mystery].' This must be mechanical and structural enough that a writer could follow it to produce an opening that is indistinguishable from the channel's real intros. Note what the channel NEVER does in its openings (e.g. never starts with a concept or question, never addresses the viewer directly, never opens with statistics).",
+    "signatureExpressions": ["A constructed example sentence in this channel's exact voice — not a copied quote, but a freshly written sentence that demonstrates the vocabulary level, rhythm, and personality. Topic: something generic like 'a disappearance in winter'. Write it exactly as this channel would.", "A second example on a different generic topic showing the same voice.", "A third example showing how this channel handles an emotional peak or revelation moment."]
   },
   "videoLength": {
     "typical": "Duration range in minutes",
@@ -430,6 +468,9 @@ export async function generateScript(
     engagementPatterns: analysis.channelInsights.engagementPatterns,
     replicationFormula: analysis.channelInsights.replicationFormula,
     thingsToSteal: analysis.channelInsights.thingsToSteal,
+    writingStyle: analysis.channelInsights.writingStyle,
+    productionStyle: analysis.channelInsights.visualBrand?.productionStyle,
+    contentNature: analysis.channelInsights.contentNature,
   };
 
   const response = await ai.messages.create({
@@ -453,11 +494,53 @@ Narration Speed: ${settings.wpm} words per minute
 Target Word Count: ${settings.targetWordCount} words (±10%)
 Additional Instructions: ${additionalInstructions || 'None'}
 
-STYLE RULES — READ CAREFULLY:
-- The channel strategy above describes PRINCIPLES and PSYCHOLOGICAL MECHANISMS. Your job is to find fresh, topic-specific expressions of those principles — not to copy sentence structures, opening patterns, or templates from the strategy description.
-- FORBIDDEN: reproducing any sentence structures, phrase patterns, or grammatical templates from the strategy description. A reviewer comparing two scripts from this channel should recognise the same STYLE but see completely different creative approaches.
+${strategy.productionStyle ? `PRODUCTION MEDIUM: ${strategy.productionStyle}
+All sceneDescriptions and thumbnailConcept must be written assuming this visual medium. Do not describe scenes using language that belongs to a different medium (e.g. don't say "camera pans" for an animated channel, or "cartoon character" for a photorealistic one).
+
+` : ''}${strategy.writingStyle ? `WRITING STYLE — MATCH THIS EXACTLY IN EVERY SENTENCE OF NARRATION:
+- Sentence structure: ${strategy.writingStyle.sentenceStructure}
+- Vocabulary level: ${strategy.writingStyle.vocabularyLevel}
+- Directness: ${strategy.writingStyle.directnessLevel}
+- Pace and rhythm: ${strategy.writingStyle.paceAndRhythm}
+- Voice and personality: ${strategy.writingStyle.voiceAndPersonality}
+- Rhetorical devices to use: ${strategy.writingStyle.rhetoricalDevices?.join('; ')}
+${strategy.writingStyle.signatureExpressions?.length ? `- Sentences written in this channel's exact voice (study and match these at the word level):
+${strategy.writingStyle.signatureExpressions.map(e => `  "${e}"`).join('\n')}` : ''}
+${strategy.writingStyle.openingFormula ? `
+OPENING FORMULA — the very first words of Scene 1 MUST follow this exact mechanical structure:
+${strategy.writingStyle.openingFormula}
+This overrides the general "no templates" rule below. The opening formula IS the template for Scene 1.` : ''}
+
+The narration must sound indistinguishable from this channel's actual scripts at the sentence level — same rhythm, same vocabulary register, same personality coming through the words. A reader who knows the channel should recognise the voice immediately.
+
+` : ''}${strategy.scriptStructureTemplate?.loopMechanism ? `CARRY-FORWARD LOOPS — this channel uses inter-scene tension hooks. Apply this pattern at the end of every scene except the last:
+${strategy.scriptStructureTemplate.loopMechanism}
+
+` : ''}${strategy.engagementPatterns?.length ? `ENGAGEMENT PATTERNS — embed these mechanisms in the body of the script:
+${strategy.engagementPatterns.map((p: string) => `- ${p}`).join('\n')}
+
+` : ''}${(() => {
+  const nature = strategy.contentNature?.classification;
+  if (!nature || nature === 'fictional') return '';
+  const isStrict = nature === 'non-fictional';
+  return `FACTUAL INTEGRITY — ${isStrict ? 'STRICT' : 'PARTIAL'} MODE:
+This channel covers ${isStrict ? 'real documented events and real people' : 'a mix of real events and fictional content'}.
+${isStrict ? `STRICT RULES — violation of these makes the script dangerous to publish:
+- Do NOT invent any specific person's name, date, case number, exhibit label, court name, quote, or location that is not explicitly provided in the topic or additional instructions above.
+- Instead of inventing specifics, write around them using general language: "a man serving forty years" not a fabricated name; "in the late 1980s" not an invented year; "a prison in the Midwest" not a specific facility unless stated.
+- You may describe documented patterns, systemic failures, emotional truths, and general timelines without inventing the specific details that fill them.
+- The script must be compelling without fabricating a single verifiable fact.
+` : `PARTIAL RULES — apply to real-world segments only:
+- Do not invent specific names, dates, or case details for factual segments. Write around them with general language.
+- For fictional segments, invent freely.
+`}
+`;
+})()}STYLE RULES — READ CAREFULLY:
+- The OPENING FORMULA and CARRY-FORWARD LOOPS above are exceptions — follow those mechanically. Everything else below applies.
+- The channel strategy describes PRINCIPLES and PSYCHOLOGICAL MECHANISMS. Your job is to find fresh, topic-specific expressions of those principles — not to copy phrasing or templates from the strategy description itself.
+- FORBIDDEN: reproducing sentence structures or grammatical templates from the strategy description text. The strategy describes the style; it is not a writing sample to copy from.
 - Every scene must find its own unique entry point into the material. Do NOT open multiple scenes with the same grammatical structure.
-- The hook must be built from what is specifically surprising, counterintuitive, or emotionally charged about THIS topic — not from a generic formula applied to any topic.
+- The hook must be built from what is specifically surprising, counterintuitive, or emotionally charged about THIS topic — not a generic formula applied to any topic.
 - Apply the tone, pacing, and structural intent described in the strategy, but execute them through language that is entirely native to this specific subject.
 - Total narration word count across ALL scenes must total approximately ${settings.targetWordCount} words
 - For each scene: estimatedDurationSeconds = (wordCount / ${settings.wpm}) × 60, rounded to nearest second
@@ -600,9 +683,9 @@ export async function generateSceneAssets(
         role: 'user',
         content: `${(() => {
           const lock = resolvePromptLock(visualStyle) || channelInsights.visualBrand?.productionStyle;
-          return lock ? `VISUAL STYLE LOCK — This applies to EVERY single prompt in your response without exception:
+          return lock ? `VISUAL STYLE — Primary production style for this channel:
 ${lock}
-Every image prompt and video prompt MUST explicitly name this visual style. Never omit it. Never revert to photorealism or a different medium unless the style lock above is itself photorealistic.
+Use this as the default visual language across prompts. Real channels naturally vary their look between scenes — wide establishing shots, tight closeups, different lighting moods, cutaway styles — so let the scene content and emotional tone guide the specific treatment of each prompt. Do NOT copy this description literally into prompt text and do NOT force artificial uniformity. Stay within the medium (e.g. if this is animation, keep all prompts animated) but vary composition, mood, and framing naturally.
 
 ` : '';
         })()}Generate: ${wantedParts.join(', ')}
@@ -623,7 +706,10 @@ NARRATION PRE-DIVIDED INTO ${chunks} SEQUENTIAL SEGMENTS (all asset types use th
 ${narrationChunks.map((c, i) => `[${i + 1}] "${c}"`).join('\n')}
 
 CHANNEL VISUAL DNA (match this exactly):
-${channelInsights.visualBrand.productionStyle ? `⚠️ PRODUCTION MEDIUM LOCK — every image and video prompt MUST be rendered in this exact style: ${channelInsights.visualBrand.productionStyle}. Never default to photorealistic or live-action unless that IS the production style. Reject any visual language that belongs to a different medium.` : ''}
+${(() => {
+  const activeLock = resolvePromptLock(visualStyle) || channelInsights.visualBrand?.productionStyle;
+  return activeLock ? `Primary production style: ${activeLock}\nStay within this medium but vary composition, lighting, and framing per scene — do not force every prompt into an identical visual treatment.` : '';
+})()}
 - Thumbnail style: ${channelInsights.visualBrand.thumbnailStyle}
 - Color palette: ${channelInsights.visualBrand.colorScheme}
 - Typography style: ${channelInsights.visualBrand.typography}
@@ -635,7 +721,6 @@ ${channelInsights.visualBrand.productionStyle ? `⚠️ PRODUCTION MEDIUM LOCK �
 - Camera style (from actual videos): ${analysis.videoAnalyses[0].visualStyleEditing.inferredCameraStyle}
 - Editing pace: ${analysis.videoAnalyses[0].visualStyleEditing.editingPace}
 - B-roll approach: ${analysis.videoAnalyses[0].visualStyleEditing.brollEstimate}
-- Graphics/text overlays: ${analysis.videoAnalyses[0].visualStyleEditing.graphicsAndText}
 - Emotional triggers used: ${analysis.videoAnalyses[0].emotionalTriggers.primaryEmotions.join(', ')}` : ''}
 
 ${characters.length > 0 ? `
@@ -661,9 +746,14 @@ INSTRUCTIONS:
 - ALL asset types (imagePrompts, videoPrompts, stockPhotoQueries, realImageQueries, stockVideoQueries): produce EXACTLY ${chunks} items, one per segment [1]–[${chunks}] in order.
 - "excerpt" for each item MUST be copied verbatim from the corresponding pre-divided segment above (item i → segment [i+1]).
 - STORY WORLD LOCK: Every prompt must be grounded in the same time period, geography, and atmosphere established by the Story World block above. If the story is a folktale, keep mud-brick walls, earthen paths, fire-lit interiors, traditional clothing — never concrete, neon, cars, or urban skylines unless narration demands it.
-${characters.length > 0 ? `- CHARACTER CONSISTENCY: When a named character from the CHARACTER SHEETS above appears in the narration segment, their visual description MUST be referenced in the prompt to maintain consistency across scenes. Include key identifying traits (hair, build, outfit, distinctive features).` : ''}
+${characters.length > 0 ? `- CHARACTER CONSISTENCY: When a named character from the CHARACTER SHEETS above appears in the narration segment, their visual description MUST be referenced in the prompt.
+  - ALWAYS use the character's actual name in the prompt — never substitute with generic pronouns ("a woman", "a man", "the figure", "they", etc.).
+  - Include key identifying traits (hair color/style, build, outfit, skin tone, distinctive features) drawn from their sheet so the output is visually consistent across all scenes.
+  - Example: "Elena — tall woman with auburn hair in a braid, wearing a deep-green wool coat — stands at the edge of the cliff" NOT "a woman stands at the edge of the cliff".` : ''}
 
 PROMPT DETAIL LEVEL: ${promptDetail === 'auto' ? 'Determine the appropriate level of detail based on the segment content and duration. More complex/emotional segments warrant richer prompts.' : promptDetail === 'brief' ? 'BRIEF — Keep prompts concise: 20–40 words. Essential subject and style only.' : promptDetail === 'standard' ? 'STANDARD — Moderately detailed: 50–80 words. Cover subject, mood, lighting, and composition.' : promptDetail === 'detailed' ? 'DETAILED — Rich and specific: 80–120 words. Include lighting setup, composition, atmosphere, color palette, and texture details.' : 'VERBOSE — Cinematic-grade: 120–200 words. Specify everything: subject, expression, exact lighting, lens characteristics, color grading, mood, texture, background depth, and stylistic references.'}
+
+NO TEXT OVERLAYS: Never include text overlays, captions, subtitles, watermarks, title cards, lower thirds, or any typographic elements inside image or video prompts. AI image/video generators render these literally and they ruin the output. Describe only visual scenes, subjects, lighting, and atmosphere.
 
 CRITICAL — SUBJECT vs STYLE:
 - "B-roll heavy" and "no talking head" refer to the CREATOR not appearing on screen. It does NOT mean the documentary's subject (real people, historical figures) should be hidden.

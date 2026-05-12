@@ -12,6 +12,7 @@ interface Props {
   onDetected: (detected: DetectedCharacter[]) => void;
   anthropicApiKey: string;
   visualStyle?: string;
+  initialSelectedName?: string | null;
 }
 
 type Mode = 'view' | 'generate' | 'from-image';
@@ -54,12 +55,12 @@ function appearanceAdvisory(count: number): { label: string; color: string; advi
   };
 }
 
-export default function CharacterConsistencyModal({ script, projectId, onClose, onSave, onDetected, anthropicApiKey, visualStyle }: Props) {
+export default function CharacterConsistencyModal({ script, projectId, onClose, onSave, onDetected, anthropicApiKey, visualStyle, initialSelectedName }: Props) {
   const cached = script.detectedCharacters ?? [];
   const [detectedChars, setDetectedChars] = useState<DetectedCharacter[]>(cached);
   const [detecting, setDetecting] = useState(cached.length === 0);
   const [characters, setCharacters] = useState<CharacterSheet[]>(script.characters ?? []);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [selectedName, setSelectedName] = useState<string | null>(initialSelectedName ?? null);
   const [mode, setMode] = useState<Mode>('view');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
@@ -73,8 +74,27 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
 
   // Editing state for the full description
   const [editingDesc, setEditingDesc] = useState(false);
+  const [copiedSheet, setCopiedSheet] = useState(false);
 
   const selectedSheet = characters.find(c => c.name === selectedName);
+
+  const buildSheetFootnote = (sheet: CharacterSheet): string => {
+    const attrs = FIELD_LABELS
+      .map(([field, label]) => {
+        const val = sheet[field] as string | undefined;
+        return val ? `${label}: ${val}` : null;
+      })
+      .filter(Boolean)
+      .join('\n');
+    return `CHARACTER REFERENCE — ${sheet.name}\n${attrs}\nFull Description: ${sheet.fullDescription ?? ''}`.trim();
+  };
+
+  const copySheet = (sheet: CharacterSheet) => {
+    navigator.clipboard.writeText(buildSheetFootnote(sheet)).then(() => {
+      setCopiedSheet(true);
+      setTimeout(() => setCopiedSheet(false), 2000);
+    });
+  };
 
   const runDetection = useCallback(async (signal: AbortSignal) => {
     setDetecting(true);
@@ -596,12 +616,22 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
                         <label className="text-xs font-medium text-[#71717a] uppercase tracking-wider">
                           Full Description (used in prompts)
                         </label>
-                        <button
-                          onClick={() => setEditingDesc(v => !v)}
-                          className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-                        >
-                          {editingDesc ? 'Done' : 'Edit'}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => copySheet(selectedSheet)}
+                            title="Copy full character sheet as a prompt footnote"
+                            className="text-xs transition-colors flex items-center gap-1"
+                            style={{ color: copiedSheet ? '#4ade80' : '#52525b' }}
+                          >
+                            {copiedSheet ? '✓ Copied' : '⎘ Copy sheet'}
+                          </button>
+                          <button
+                            onClick={() => setEditingDesc(v => !v)}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            {editingDesc ? 'Done' : 'Edit'}
+                          </button>
+                        </div>
                       </div>
                       {editingDesc ? (
                         <textarea

@@ -31,6 +31,7 @@ export default function ScriptEditorPage() {
   const [descCopied, setDescCopied] = useState(false);
   const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
   const [characterModalOpen, setCharacterModalOpen] = useState(false);
+  const [characterModalInitialName, setCharacterModalInitialName] = useState<string | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,6 +63,29 @@ export default function ScriptEditorPage() {
 
     storage.getSettings().then(s => setAnthropicApiKey(s.anthropicApiKey ?? ''));
   }, [id, scriptId, storage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-detect characters in the background when script loads without cached detection
+  useEffect(() => {
+    if (!script || script.detectedCharacters) return;
+    storage.getSettings().then(async settings => {
+      const apiKey = settings.anthropicApiKey;
+      if (!apiKey) return;
+      try {
+        const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/characters/detect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scenes: script.scenes.map((s: Scene) => ({ narration: s.narration, title: s.title })),
+            anthropicApiKey: apiKey,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.characters?.length) {
+          handleScriptChange({ ...script, detectedCharacters: data.characters });
+        }
+      } catch { /* silent — user can re-detect manually */ }
+    });
+  }, [script?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!activeSceneId) return;
@@ -519,6 +543,7 @@ export default function ScriptEditorPage() {
           onScriptChange={handleScriptChange}
           activeTab={activeTab}
           onTabChange={setActiveTab}
+          onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
         />
       </div>
 
@@ -536,7 +561,8 @@ export default function ScriptEditorPage() {
           projectId={id}
           anthropicApiKey={anthropicApiKey}
           visualStyle={script.visualStyle}
-          onClose={() => setCharacterModalOpen(false)}
+          initialSelectedName={characterModalInitialName}
+          onClose={() => { setCharacterModalOpen(false); setCharacterModalInitialName(null); }}
           onSave={(characters: CharacterSheet[]) => {
             handleScriptChange({ ...script, characters });
           }}
