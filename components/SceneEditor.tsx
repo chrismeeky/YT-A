@@ -49,9 +49,10 @@ interface Props {
   onScriptChange: (updated: Script) => void;
   activeTab: string | null;
   onTabChange: (tab: string) => void;
+  onOpenCharacter?: (name: string) => void;
 }
 
-export default function SceneEditor({ projectId, script, analysis, activeSceneId, onScriptChange, activeTab, onTabChange }: Props) {
+export default function SceneEditor({ projectId, script, analysis, activeSceneId, onScriptChange, activeTab, onTabChange, onOpenCharacter }: Props) {
   const storage = useStorage();
   const [showModal, setShowModal] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -220,6 +221,14 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   }, [newImageKeys]);
 
   const scene = activeScene;
+
+  const promptChars = (text: string): string[] => {
+    if (!onOpenCharacter || !script.detectedCharacters?.length || !text.trim()) return [];
+    const lower = text.toLowerCase();
+    return script.detectedCharacters
+      .filter(dc => lower.includes(dc.name.toLowerCase()))
+      .map(dc => dc.name);
+  };
 
   const updateScene = useCallback(
     (patch: Partial<Scene>) => {
@@ -675,35 +684,52 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                   {(scene.imagePrompts?.length ? scene.imagePrompts : ['']).map((prompt, i) => (
                     <div key={i} className="flex gap-2">
                       <span className="text-xs text-[#52525b] pt-2 w-5 text-right flex-shrink-0">{i + 1}</span>
-                      <div className="flex-1 relative group">
-                        {scene.imagePromptExcerpts?.[i] && (
-                          <p
-                            onClick={() => struckItems.has(`img-${i}`) && toggleStruck(`img-${i}`)}
-                            title={struckItems.has(`img-${i}`) ? 'Click to unmark' : undefined}
-                            className={`text-xs italic mb-1 line-clamp-2 select-none transition-all ${
-                              struckItems.has(`img-${i}`)
-                                ? 'line-through text-indigo-300/30 cursor-pointer'
-                                : 'text-indigo-300/80'
-                            }`}
-                          >
-                            {scene.imagePromptExcerpts[i]}
-                          </p>
-                        )}
-                        <textarea
-                          value={prompt}
-                          onChange={e => {
-                            const updated = [...(scene.imagePrompts ?? [''])];
-                            updated[i] = e.target.value;
-                            updateScene({ imagePrompts: updated });
-                          }}
-                          rows={2}
-                          className="w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
-                          style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                          placeholder="Midjourney/DALL-E style prompt --ar 16:9…"
-                        />
-                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <CopyButton text={prompt} onCopy={() => toggleStruck(`img-${i}`)} />
+                      <div className="flex-1 min-w-0">
+                        <div className="relative group">
+                          {scene.imagePromptExcerpts?.[i] && (
+                            <p
+                              onClick={() => struckItems.has(`img-${i}`) && toggleStruck(`img-${i}`)}
+                              title={struckItems.has(`img-${i}`) ? 'Click to unmark' : undefined}
+                              className={`text-xs italic mb-1 line-clamp-2 select-none transition-all ${
+                                struckItems.has(`img-${i}`)
+                                  ? 'line-through text-indigo-300/30 cursor-pointer'
+                                  : 'text-indigo-300/80'
+                              }`}
+                            >
+                              {scene.imagePromptExcerpts[i]}
+                            </p>
+                          )}
+                          <textarea
+                            value={prompt}
+                            onChange={e => {
+                              const updated = [...(scene.imagePrompts ?? [''])];
+                              updated[i] = e.target.value;
+                              updateScene({ imagePrompts: updated });
+                            }}
+                            rows={2}
+                            className="w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
+                            style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                            placeholder="Midjourney/DALL-E style prompt --ar 16:9…"
+                          />
+                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <CopyButton text={prompt} onCopy={() => toggleStruck(`img-${i}`)} />
+                          </div>
                         </div>
+                        {promptChars(prompt).length > 0 && (
+                          <div className="flex gap-1 mt-1.5 flex-wrap">
+                            {promptChars(prompt).map(name => (
+                              <button
+                                key={name}
+                                onClick={() => onOpenCharacter?.(name)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border border-indigo-700/50 text-indigo-300 hover:border-indigo-500 hover:text-indigo-200 transition-colors"
+                                style={{ background: 'rgba(99,102,241,0.08)' }}
+                                title={`Open character sheet for ${name}`}
+                              >
+                                <span className="opacity-60">⬡</span> {name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -752,9 +778,32 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                               </p>
                             )}
                             {isExtension && (
-                              <p className="text-[10px] text-yellow-500/50 mb-1 font-medium tracking-wide uppercase">
-                                Extension
-                              </p>
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-[10px] text-yellow-500/50 font-medium tracking-wide uppercase">Extension</p>
+                                <button
+                                  onClick={() => {
+                                    const prompts = [...(scene.videoPrompts ?? [])];
+                                    const excerpts = [...(scene.videoPromptExcerpts ?? [])];
+                                    const extensions = [...(scene.videoPromptIsExtension ?? [])];
+                                    const priorVersions = [...(scene.videoPromptPriorVersions ?? [])];
+                                    // Restore tweaked original if we saved it
+                                    const prior = priorVersions[i - 1];
+                                    if (prior != null) {
+                                      prompts[i - 1] = prior;
+                                      priorVersions[i - 1] = null;
+                                    }
+                                    prompts.splice(i, 1);
+                                    excerpts.splice(i, 1);
+                                    extensions.splice(i, 1);
+                                    priorVersions.splice(i, 1);
+                                    updateScene({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions });
+                                  }}
+                                  className="text-[10px] text-red-400/60 hover:text-red-400 transition-colors"
+                                  title="Remove this extension and restore the original prompt"
+                                >
+                                  ✕ Revert
+                                </button>
+                              </div>
                             )}
                             <textarea
                               value={prompt}
@@ -783,6 +832,21 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                               <CopyButton text={prompt} onCopy={() => toggleStruck(`vid-${i}`)} />
                             </div>
                           </div>
+                          {!isExtension && promptChars(prompt).length > 0 && (
+                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                              {promptChars(prompt).map(name => (
+                                <button
+                                  key={name}
+                                  onClick={() => onOpenCharacter?.(name)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border border-yellow-700/50 text-yellow-300 hover:border-yellow-500 hover:text-yellow-200 transition-colors"
+                                  style={{ background: 'rgba(234,179,8,0.07)' }}
+                                  title={`Open character sheet for ${name}`}
+                                >
+                                  <span className="opacity-60">⬡</span> {name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
 
                           {/* Extend UI */}
                           {ext?.open && (
@@ -834,10 +898,17 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                         const prompts = [...(scene.videoPrompts ?? [])];
                                         const excerpts = [...(scene.videoPromptExcerpts ?? [])];
                                         const extensions = [...(scene.videoPromptIsExtension ?? prompts.map(() => false))];
+                                        const priorVersions = [...(scene.videoPromptPriorVersions ?? prompts.map(() => null))];
+                                        // Save pre-tweak original so revert can restore it
+                                        if (data.tweakedOriginal) {
+                                          priorVersions[i] = prompts[i];
+                                          prompts[i] = data.tweakedOriginal;
+                                        }
                                         prompts.splice(i + 1, 0, data.prompt);
                                         excerpts.splice(i + 1, 0, '');
                                         extensions.splice(i + 1, 0, true);
-                                        updateScene({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions });
+                                        priorVersions.splice(i + 1, 0, null);
+                                        updateScene({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions });
                                         setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false, generating: false } }));
                                       }
                                     } catch {

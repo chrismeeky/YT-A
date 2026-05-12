@@ -27,26 +27,31 @@ export async function POST(
   const ai = new Anthropic({ apiKey });
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 512,
-    system: 'You are an expert video director specialising in AI video generation prompts for tools like Sora, Runway, and Kling. Return only the prompt text, no explanation or formatting.',
+    max_tokens: 1024,
+    system: 'You are an expert video director specialising in AI video generation prompts for tools like Sora, Runway, and Kling. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
         role: 'user',
-        content: `Generate a smooth ${duration}-second CONTINUATION prompt that picks up exactly where this video prompt ends.
+        content: `You are extending a video prompt with a smooth continuation. You must produce TWO things:
+1. A tweaked version of the original prompt that ends in a way that naturally leads into the continuation (e.g. a subject beginning to move, a camera starting to drift, a moment of transition — something that makes the cut feel motivated).
+2. The continuation prompt itself, picking up from where the tweaked original leaves off.
 
 ORIGINAL PROMPT:
 ${body.originalPrompt}
 ${body.narrationExcerpt ? `\nNARRATION CONTEXT:\n${body.narrationExcerpt}` : ''}
 
-REQUIREMENTS:
-- Feel like the same continuous shot or a natural cinematic cut from the original
-- Match the exact visual style, color palette, lighting conditions, and atmosphere
-- If the original shows a specific subject or character, continue from their position, expression, or action — do not re-introduce them
-- Preserve camera quality, aspect ratio, and any technical specs mentioned in the original
-- This is a continuation, not a remake — do NOT re-describe the setup or backstory
-- Duration: ~${duration} seconds
+REQUIREMENTS FOR BOTH PROMPTS:
+- Match the exact visual style, color palette, lighting, atmosphere, and any technical specs from the original
+- Preserve character appearances and positions — do not re-introduce anyone
+- The tweaked original should be minimal — change only the ending so it implies the transition; keep everything else identical
+- The continuation should feel like the same shot continuing or a natural cinematic cut — NOT a remake or re-introduction
+- Continuation duration: ~${duration} seconds
 
-Return ONLY the continuation prompt text.`,
+Return ONLY valid JSON:
+{
+  "tweakedOriginal": "the original prompt with a subtly adjusted ending that sets up the transition",
+  "continuation": "the ${duration}-second continuation prompt"
+}`,
       },
     ],
   });
@@ -60,6 +65,19 @@ Return ONLY the continuation prompt text.`,
     estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
   });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
-  return NextResponse.json({ prompt: text });
+  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+  let cleaned = raw;
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
+  if (!cleaned.startsWith('{')) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) cleaned = match[0];
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned) as { tweakedOriginal: string; continuation: string };
+    return NextResponse.json({ prompt: parsed.continuation, tweakedOriginal: parsed.tweakedOriginal });
+  } catch {
+    // Fallback: treat raw text as continuation only, no tweak
+    return NextResponse.json({ prompt: raw, tweakedOriginal: null });
+  }
 }
