@@ -77,7 +77,11 @@ async function nestedDir(
   create = true,
 ): Promise<FileSystemDirectoryHandle> {
   let cur = root;
-  for (const p of parts) cur = await cur.getDirectoryHandle(p, { create });
+  for (const raw of parts) {
+    // Ensure no part is empty or contains chars the FSAA API rejects
+    const p = raw.replace(/[\x00-\x1f\x7f/\\]/g, '-').trim() || '_';
+    cur = await cur.getDirectoryHandle(p, { create });
+  }
   return cur;
 }
 
@@ -459,8 +463,17 @@ export class ClientStorage {
     if (!this.canSaveToDisk || !this.root) {
       throw new Error('Save to Disk requires a picked storage folder (not supported in this browser).');
     }
-    const safe   = (s: string) => s.replace(/[/\\?%*:|"<>]/g, '-').slice(0, 50);
-    const folder = `${safe(projectName)} — ${safe(script.title)}`;
+    // Strip control chars, then replace FSAA-illegal chars, trim edges, cap length
+    const safe = (s: string) =>
+      s
+        .replace(/[\x00-\x1f\x7f]/g, '')          // control characters
+        .replace(/[/\\?%*:|"<>.]/g, '-')           // FSAA-illegal + dot (can't start with .)
+        .replace(/\s+/g, ' ')                      // collapse whitespace
+        .trim()
+        .slice(0, 50)
+        .trim()                                    // re-trim after slice
+        || 'untitled';
+    const folder = `${safe(projectName)} - ${safe(script.title)}`;
 
     for (const scene of script.scenes) {
       const sceneDir = `scene_${String(scene.number).padStart(3, '0')}_${safe(scene.title)}`;
