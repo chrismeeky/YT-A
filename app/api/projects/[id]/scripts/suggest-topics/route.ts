@@ -35,7 +35,7 @@ export async function POST(
     ? `For each topic, indicate whether it is fictional or based on real events. For real-world topics, describe the documented situation and note that the writer must research and verify all facts independently. For fictional topics, describe the creative premise freely.`
     : `For each topic, describe the documented real-world situation in broad strokes — the general case type, the documented outcome or conflict, and what makes it compelling. DO NOT invent specific names, dates, case numbers, or people — those must come from the writer's own research. The context should guide research, not replace it.`;
 
-  const prompt = `You are a YouTube video strategist. Based on the following channel analysis, suggest 5 compelling video topic ideas that would perform well on this channel.
+  const prompt = `You are a YouTube video strategist. Based on the following channel analysis, suggest 10 compelling video topic ideas that would perform well on this channel.
 
 Channel: ${analysis.channelName}
 Content nature: ${nature}${insights.contentNature?.reasoning ? ` (${insights.contentNature.reasoning})` : ''}
@@ -53,7 +53,7 @@ Respond with a raw JSON array only. No markdown, no code fences, no explanation.
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
+    max_tokens: 4096,
     system: 'You are a JSON API. Always respond with valid raw JSON only. Never use markdown or code fences.',
     messages: [{ role: 'user', content: prompt }],
   });
