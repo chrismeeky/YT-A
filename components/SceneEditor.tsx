@@ -76,6 +76,16 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [newImageKeys, setNewImageKeys] = useState<Set<string>>(new Set());
   // extend prompt: key = `${sceneId}-${promptIndex}`, value = { open, duration, generating }
   const [extendState, setExtendState] = useState<Record<string, { open: boolean; duration: number; generating: boolean }>>({});
+  const [dirtyImageIndices, setDirtyImageIndices] = useState<Set<number>>(new Set());
+  const [dirtyVideoIndices, setDirtyVideoIndices] = useState<Set<number>>(new Set());
+  const [regenLoadingKeys, setRegenLoadingKeys] = useState<Set<string>>(new Set());
+  const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Live refs — reassigned every render so interval callbacks always read fresh values
+  const sceneRef = useRef<Scene | undefined>(undefined);
+  const scriptRef = useRef(script);
+  scriptRef.current = script;
+  const onScriptChangeRef = useRef(onScriptChange);
+  onScriptChangeRef.current = onScriptChange;
 
   const handleTabClick = (key: string) => {
     onTabChange(key);
@@ -91,6 +101,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const toggleStruck = (key: string) =>
     setStruckItems(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
+  // Clear interval on unmount
+  useEffect(() => () => { if (holdIntervalRef.current) clearInterval(holdIntervalRef.current); }, []);
+
   // Clear struck + active tab when switching between scenes (not on initial mount)
   const prevSceneRef = useRef<string | null>(null);
   useEffect(() => {
@@ -98,6 +111,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     prevSceneRef.current = activeSceneId;
     if (prev !== null && prev !== activeSceneId) {
       setStruckItems(new Set()); onTabChange(''); setAudioSuccess(''); setAudioError(''); setSelectionPopover(null);
+      setDirtyImageIndices(new Set()); setDirtyVideoIndices(new Set());
     }
   }, [activeSceneId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -221,6 +235,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   }, [newImageKeys]);
 
   const scene = activeScene;
+  sceneRef.current = scene; // keep live ref current for interval callbacks
 
   const promptChars = (text: string): string[] => {
     if (!onOpenCharacter || !script.detectedCharacters?.length || !text.trim()) return [];
@@ -250,6 +265,149 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene?.narration]);
+
+  const startHold = (type: 'image' | 'video', idx: number, dir: 'left' | 'right') => {
+    const tick = () => {
+      const s = sceneRef.current;
+      if (!s) return;
+      const excerpts = type === 'image'
+        ? [...(s.imagePromptExcerpts ?? [])]
+        : [...(s.videoPromptExcerpts ?? [])];
+      if (!excerpts[idx]) return;
+
+      // For video prompts, skip over extension segments to find the real neighbor
+      const isExt = type === 'video' ? (s.videoPromptIsExtension ?? []) : [];
+      let neighbor: number;
+      if (dir === 'right') {
+        neighbor = idx + 1;
+        while (neighbor < excerpts.length && isExt[neighbor]) neighbor++;
+        if (neighbor >= excerpts.length) return;
+        const ch = excerpts[idx].slice(-1);
+        if (!ch) return;
+        excerpts[idx] = excerpts[idx].slice(0, -1);
+        excerpts[neighbor] = ch + (excerpts[neighbor] ?? '');
+      } else {
+        neighbor = idx - 1;
+        while (neighbor >= 0 && isExt[neighbor]) neighbor--;
+        if (neighbor < 0) return;
+        const ch = excerpts[idx][0];
+        excerpts[idx] = excerpts[idx].slice(1);
+        excerpts[neighbor] = (excerpts[neighbor] ?? '') + ch;
+      }
+
+      const excerptKey = type === 'image' ? 'imagePromptExcerpts' : 'videoPromptExcerpts';
+      const sc = scriptRef.current;
+      onScriptChangeRef.current({
+        ...sc,
+        scenes: sc.scenes.map(scene => scene.id === s.id ? { ...scene, [excerptKey]: excerpts } : scene),
+      });
+      if (type === 'image') {
+        setDirtyImageIndices(prev => new Set([...prev, idx, neighbor]));
+      } else {
+        setDirtyVideoIndices(prev => new Set([...prev, idx, neighbor]));
+      }
+    };
+    tick();
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+    holdIntervalRef.current = setInterval(tick, 80);
+  };
+
+  const stopHold = () => {
+    if (holdIntervalRef.current) { clearInterval(holdIntervalRef.current); holdIntervalRef.current = null; }
+  };
+
+  const regenPrompt = async (type: 'image' | 'video', idx: number) => {
+    const sceneSnap = sceneRef.current;
+    if (!sceneSnap) return;
+    const key = type === 'image' ? `img-${idx}` : `vid-${idx}`;
+    setRegenLoadingKeys(prev => new Set([...prev, key]));
+    setAssetError('');
+    try {
+      const settings = await storage.getSettings();
+      const excerpt = type === 'image'
+        ? (sceneSnap.imagePromptExcerpts?.[idx] ?? '')
+        : (sceneSnap.videoPromptExcerpts?.[idx] ?? '');
+      if (!excerpt.trim()) return;
+
+      const sc = scriptRef.current;
+      const res = await fetch(
+        `/api/projects/${projectId}/scripts/${sc.id}/scenes/${sceneSnap.id}/regen-prompt`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            excerpt,
+            sceneTitle: sceneSnap.title,
+            sceneDescription: sceneSnap.sceneDescription,
+            sceneNarration: sceneSnap.narration,
+            visualStyle: sc.visualStyle,
+            characters: sc.characters ?? [],
+            promptDetail: sceneSnap.promptDetail ?? 'auto',
+            scriptTopic: sc.topic || sc.title,
+            anthropicApiKey: settings.anthropicApiKey,
+            analysis,
+            // Pass sibling prompts so the model can avoid repeating the same visuals
+            siblingPrompts: type === 'image'
+              ? (sceneSnap.imagePrompts ?? []).filter((_, i) => i !== idx)
+              : (sceneSnap.videoPrompts ?? []).filter((_, i) => i !== idx),
+          }),
+        }
+      );
+      const data = await res.json() as { prompt?: string; error?: string };
+      if (!res.ok || !data.prompt) { setAssetError(data.error ?? 'Regeneration failed'); return; }
+
+      // Use live refs post-await — captured scene/script may be stale by now
+      const liveScene = sceneRef.current;
+      const liveScript = scriptRef.current;
+      if (!liveScene) return;
+
+      const applyPatch = (patch: Partial<Scene>) => {
+        onScriptChangeRef.current({
+          ...liveScript,
+          scenes: liveScript.scenes.map(s => s.id === liveScene.id ? { ...s, ...patch } : s),
+        });
+      };
+
+      if (type === 'image') {
+        const prompts = [...(liveScene.imagePrompts ?? [])];
+        prompts[idx] = data.prompt;
+        applyPatch({ imagePrompts: prompts });
+        setDirtyImageIndices(prev => { const n = new Set(prev); n.delete(idx); return n; });
+      } else {
+        const prompts = [...(liveScene.videoPrompts ?? [])];
+        prompts[idx] = data.prompt;
+
+        const existingExtensions = liveScene.videoPromptIsExtension?.length
+          ? liveScene.videoPromptIsExtension : null;
+        let removeCount = 0;
+        if (existingExtensions) {
+          while (existingExtensions[idx + 1 + removeCount] === true) removeCount++;
+        }
+
+        if (removeCount > 0) {
+          const excerpts = [...(liveScene.videoPromptExcerpts ?? [])];
+          const extensions = [...existingExtensions!];
+          const priorVersions = liveScene.videoPromptPriorVersions?.length
+            ? [...liveScene.videoPromptPriorVersions]
+            : prompts.map(() => null as null);
+          if (priorVersions[idx] != null) priorVersions[idx] = null;
+          prompts.splice(idx + 1, removeCount);
+          excerpts.splice(idx + 1, removeCount);
+          extensions.splice(idx + 1, removeCount);
+          priorVersions.splice(idx + 1, removeCount);
+          applyPatch({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions });
+        } else {
+          applyPatch({ videoPrompts: prompts });
+        }
+        setDirtyVideoIndices(prev => { const n = new Set(prev); n.delete(idx); return n; });
+      }
+    } catch {
+      setAssetError('Regeneration failed');
+    } finally {
+      setRegenLoadingKeys(prev => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  };
 
   const generateAssets = async () => {
     if (!scene) return;
@@ -302,12 +460,19 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         assets.realImageSegments = ddgResults;
       }
 
+      const newVideoPrompts = assets.videoPrompts ?? scene.videoPrompts;
       const updatedScene = {
         ...scene,
         imagePrompts:        assets.imagePrompts        ?? scene.imagePrompts,
         imagePromptExcerpts: assets.imagePromptExcerpts ?? scene.imagePromptExcerpts,
-        videoPrompts:        assets.videoPrompts        ?? scene.videoPrompts,
+        videoPrompts:        newVideoPrompts,
         videoPromptExcerpts: assets.videoPromptExcerpts ?? scene.videoPromptExcerpts,
+        // Reset extension metadata whenever fresh video prompts arrive so stale
+        // extension flags from a previous run don't corrupt the new prompt list.
+        ...(assets.videoPrompts && {
+          videoPromptIsExtension:   (newVideoPrompts ?? []).map(() => false as false),
+          videoPromptPriorVersions: (newVideoPrompts ?? []).map(() => null as null),
+        }),
         ...(assets.stockPhotoSegments !== undefined && { stockPhotoSegments: assets.stockPhotoSegments }),
         ...(assets.realImageSegments  !== undefined && { realImageSegments:  assets.realImageSegments }),
         ...(assets.stockVideoSegments !== undefined && { stockVideoSegments: assets.stockVideoSegments }),
@@ -687,17 +852,52 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                       <div className="flex-1 min-w-0">
                         <div className="relative group">
                           {scene.imagePromptExcerpts?.[i] && (
-                            <p
-                              onClick={() => struckItems.has(`img-${i}`) && toggleStruck(`img-${i}`)}
-                              title={struckItems.has(`img-${i}`) ? 'Click to unmark' : undefined}
-                              className={`text-xs italic mb-1 line-clamp-2 select-none transition-all ${
-                                struckItems.has(`img-${i}`)
-                                  ? 'line-through text-indigo-300/30 cursor-pointer'
-                                  : 'text-indigo-300/80'
-                              }`}
-                            >
-                              {scene.imagePromptExcerpts[i]}
-                            </p>
+                            <div className="flex items-start gap-1 mb-1">
+                              <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
+                                <button
+                                  onMouseDown={() => startHold('image', i, 'left')}
+                                  onMouseUp={stopHold}
+                                  onMouseLeave={stopHold}
+                                  className={`w-4 h-4 flex items-center justify-center rounded text-[10px] border select-none transition-colors ${
+                                    i === 0 ? 'opacity-0 pointer-events-none border-transparent' : 'border-[#2a2a2a] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa] cursor-pointer'
+                                  }`}
+                                  title="Shift first character to previous segment"
+                                >←</button>
+                                <button
+                                  onClick={() => regenPrompt('image', i)}
+                                  disabled={regenLoadingKeys.has(`img-${i}`)}
+                                  className={`h-4 px-1 flex items-center rounded text-[10px] border transition-colors select-none ${
+                                    dirtyImageIndices.has(i)
+                                      ? 'border-indigo-700/50 text-indigo-300 hover:border-indigo-500 hover:text-indigo-200 disabled:opacity-50'
+                                      : 'invisible pointer-events-none border-transparent'
+                                  }`}
+                                  style={{ background: dirtyImageIndices.has(i) ? 'rgba(99,102,241,0.08)' : 'transparent' }}
+                                  title="Regenerate prompt for this segment"
+                                >
+                                  {regenLoadingKeys.has(`img-${i}`) ? '…' : '↺'}
+                                </button>
+                                <button
+                                  onMouseDown={() => startHold('image', i, 'right')}
+                                  onMouseUp={stopHold}
+                                  onMouseLeave={stopHold}
+                                  className={`w-4 h-4 flex items-center justify-center rounded text-[10px] border select-none transition-colors ${
+                                    i >= (scene.imagePrompts?.length ?? 1) - 1 ? 'opacity-0 pointer-events-none border-transparent' : 'border-[#2a2a2a] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa] cursor-pointer'
+                                  }`}
+                                  title="Shift last character to next segment"
+                                >→</button>
+                              </div>
+                              <p
+                                onClick={() => struckItems.has(`img-${i}`) && toggleStruck(`img-${i}`)}
+                                title={struckItems.has(`img-${i}`) ? 'Click to unmark' : undefined}
+                                className={`flex-1 text-xs italic select-none transition-all ${dirtyImageIndices.has(i) ? '' : 'line-clamp-2'} ${
+                                  struckItems.has(`img-${i}`)
+                                    ? 'line-through text-indigo-300/30 cursor-pointer'
+                                    : dirtyImageIndices.has(i) ? 'text-amber-300/70' : 'text-indigo-300/80'
+                                }`}
+                              >
+                                {scene.imagePromptExcerpts[i]}
+                              </p>
+                            </div>
                           )}
                           <textarea
                             value={prompt}
@@ -707,10 +907,15 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                               updateScene({ imagePrompts: updated });
                             }}
                             rows={2}
-                            className="w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
+                            className={`w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400 transition-opacity ${regenLoadingKeys.has(`img-${i}`) ? 'opacity-30' : ''}`}
                             style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
                             placeholder="Midjourney/DALL-E style prompt --ar 16:9…"
                           />
+                          {regenLoadingKeys.has(`img-${i}`) && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded-md">
+                              <span className="text-[11px] text-indigo-300 animate-pulse font-medium">Regenerating…</span>
+                            </div>
+                          )}
                           <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyButton text={prompt} onCopy={() => toggleStruck(`img-${i}`)} />
                           </div>
@@ -765,17 +970,65 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                         <div className="flex-1 min-w-0">
                           <div className="relative group">
                             {scene.videoPromptExcerpts?.[i] && !isExtension && (
-                              <p
-                                onClick={() => struckItems.has(`vid-${i}`) && toggleStruck(`vid-${i}`)}
-                                title={struckItems.has(`vid-${i}`) ? 'Click to unmark' : undefined}
-                                className={`text-xs italic mb-1 line-clamp-2 select-none transition-all ${
-                                  struckItems.has(`vid-${i}`)
-                                    ? 'line-through text-yellow-300/30 cursor-pointer'
-                                    : 'text-yellow-300/80'
-                                }`}
-                              >
-                                {scene.videoPromptExcerpts[i]}
-                              </p>
+                              <div className="flex items-start gap-1 mb-1">
+                                <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
+                                  {(() => {
+                                    const extFlags = scene.videoPromptIsExtension ?? [];
+                                    // Find nearest non-extension neighbor in each direction
+                                    let prevNeighbor = i - 1;
+                                    while (prevNeighbor >= 0 && extFlags[prevNeighbor]) prevNeighbor--;
+                                    let nextNeighbor = i + 1;
+                                    const totalPrompts = scene.videoPrompts?.length ?? 1;
+                                    while (nextNeighbor < totalPrompts && extFlags[nextNeighbor]) nextNeighbor++;
+                                    const noLeft = prevNeighbor < 0;
+                                    const noRight = nextNeighbor >= totalPrompts;
+                                    return (<>
+                                      <button
+                                        onMouseDown={() => startHold('video', i, 'left')}
+                                        onMouseUp={stopHold}
+                                        onMouseLeave={stopHold}
+                                        className={`w-4 h-4 flex items-center justify-center rounded text-[10px] border select-none transition-colors ${
+                                          noLeft ? 'opacity-0 pointer-events-none border-transparent' : 'border-[#2a2a2a] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa] cursor-pointer'
+                                        }`}
+                                        title="Shift first character to previous segment"
+                                      >←</button>
+                                      <button
+                                        onClick={() => regenPrompt('video', i)}
+                                        disabled={regenLoadingKeys.has(`vid-${i}`)}
+                                        className={`h-4 px-1 flex items-center rounded text-[10px] border transition-colors select-none ${
+                                          dirtyVideoIndices.has(i)
+                                            ? 'border-yellow-700/50 text-yellow-300 hover:border-yellow-500 hover:text-yellow-200 disabled:opacity-50'
+                                            : 'invisible pointer-events-none border-transparent'
+                                        }`}
+                                        style={{ background: dirtyVideoIndices.has(i) ? 'rgba(234,179,8,0.07)' : 'transparent' }}
+                                        title="Regenerate prompt for this segment"
+                                      >
+                                        {regenLoadingKeys.has(`vid-${i}`) ? '…' : '↺'}
+                                      </button>
+                                      <button
+                                        onMouseDown={() => startHold('video', i, 'right')}
+                                        onMouseUp={stopHold}
+                                        onMouseLeave={stopHold}
+                                        className={`w-4 h-4 flex items-center justify-center rounded text-[10px] border select-none transition-colors ${
+                                          noRight ? 'opacity-0 pointer-events-none border-transparent' : 'border-[#2a2a2a] text-[#52525b] hover:border-[#555] hover:text-[#a1a1aa] cursor-pointer'
+                                        }`}
+                                        title="Shift last character to next segment"
+                                      >→</button>
+                                    </>);
+                                  })()}
+                                </div>
+                                <p
+                                  onClick={() => struckItems.has(`vid-${i}`) && toggleStruck(`vid-${i}`)}
+                                  title={struckItems.has(`vid-${i}`) ? 'Click to unmark' : undefined}
+                                  className={`flex-1 text-xs italic select-none transition-all ${dirtyVideoIndices.has(i) ? '' : 'line-clamp-2'} ${
+                                    struckItems.has(`vid-${i}`)
+                                      ? 'line-through text-yellow-300/30 cursor-pointer'
+                                      : dirtyVideoIndices.has(i) ? 'text-amber-300/70' : 'text-yellow-300/80'
+                                  }`}
+                                >
+                                  {scene.videoPromptExcerpts[i]}
+                                </p>
+                              </div>
                             )}
                             {isExtension && (
                               <div className="flex items-center gap-2 mb-1">
@@ -784,8 +1037,12 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                   onClick={() => {
                                     const prompts = [...(scene.videoPrompts ?? [])];
                                     const excerpts = [...(scene.videoPromptExcerpts ?? [])];
-                                    const extensions = [...(scene.videoPromptIsExtension ?? [])];
-                                    const priorVersions = [...(scene.videoPromptPriorVersions ?? [])];
+                                    const extensions = scene.videoPromptIsExtension?.length
+                                      ? [...scene.videoPromptIsExtension]
+                                      : prompts.map(() => false as false);
+                                    const priorVersions = scene.videoPromptPriorVersions?.length
+                                      ? [...scene.videoPromptPriorVersions]
+                                      : prompts.map(() => null as null);
                                     // Restore tweaked original if we saved it
                                     const prior = priorVersions[i - 1];
                                     if (prior != null) {
@@ -813,10 +1070,15 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                 updateScene({ videoPrompts: updated });
                               }}
                               rows={2}
-                              className="w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400"
+                              className={`w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400 transition-opacity ${regenLoadingKeys.has(`vid-${i}`) ? 'opacity-30' : ''}`}
                               style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
                               placeholder={isExtension ? 'Continuation prompt…' : 'Sora/Runway style prompt…'}
                             />
+                            {regenLoadingKeys.has(`vid-${i}`) && (
+                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded-md">
+                                <span className="text-[11px] text-yellow-300 animate-pulse font-medium">Regenerating…</span>
+                              </div>
+                            )}
                             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                               <button
                                 onClick={() => setExtendState(prev => ({
@@ -897,8 +1159,12 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                       if (res.ok && data.prompt) {
                                         const prompts = [...(scene.videoPrompts ?? [])];
                                         const excerpts = [...(scene.videoPromptExcerpts ?? [])];
-                                        const extensions = [...(scene.videoPromptIsExtension ?? prompts.map(() => false))];
-                                        const priorVersions = [...(scene.videoPromptPriorVersions ?? prompts.map(() => null))];
+                                        const extensions = scene.videoPromptIsExtension?.length
+                                          ? [...scene.videoPromptIsExtension]
+                                          : prompts.map(() => false as false);
+                                        const priorVersions = scene.videoPromptPriorVersions?.length
+                                          ? [...scene.videoPromptPriorVersions]
+                                          : prompts.map(() => null as null);
                                         // Save pre-tweak original so revert can restore it
                                         if (data.tweakedOriginal) {
                                           priorVersions[i] = prompts[i];
