@@ -48,7 +48,8 @@ REQUIREMENTS:
 
 Return ONLY valid JSON:
 {
-  "prompt": "the rewritten continuation prompt"
+  "prompt": "the rewritten continuation prompt",
+  "fingerprint": "shot_distance | subject/action | location | color+mood"
 }`;
   } else {
     userContent = `You are extending a video prompt with a smooth continuation. You must produce TWO things:
@@ -70,7 +71,8 @@ REQUIREMENTS FOR BOTH PROMPTS:
 Return ONLY valid JSON:
 {
   "tweakedOriginal": "the original prompt with a subtly adjusted ending that sets up the transition",
-  "continuation": "the ${duration}-second continuation prompt"
+  "continuation": "the ${duration}-second continuation prompt",
+  "continuationFingerprint": "shot_distance | subject/action | location | color+mood"
 }`;
   }
 
@@ -119,12 +121,12 @@ Return ONLY valid JSON:
 
   try {
     if (body.replaceInPlace) {
-      const parsed = JSON.parse(cleaned) as { prompt: string };
-      return NextResponse.json({ prompt: parsed.prompt, tweakedOriginal: null });
+      const parsed = JSON.parse(cleaned) as { prompt: string; fingerprint?: string };
+      return NextResponse.json({ prompt: parsed.prompt, tweakedOriginal: null, fingerprint: parsed.fingerprint ?? '' });
     }
-    const parsed = JSON.parse(cleaned) as { tweakedOriginal: string; continuation: string };
-    return NextResponse.json({ prompt: parsed.continuation, tweakedOriginal: parsed.tweakedOriginal });
+    const parsed = JSON.parse(cleaned) as { tweakedOriginal: string; continuation: string; continuationFingerprint?: string };
+    return NextResponse.json({ prompt: parsed.continuation, tweakedOriginal: parsed.tweakedOriginal, continuationFingerprint: parsed.continuationFingerprint ?? '' });
   } catch {
-    return NextResponse.json({ prompt: raw, tweakedOriginal: null });
+    return NextResponse.json({ prompt: raw, tweakedOriginal: null, fingerprint: '', continuationFingerprint: '' });
   }
 }

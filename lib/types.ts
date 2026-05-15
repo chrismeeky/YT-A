@@ -358,6 +358,9 @@ export interface Scene {
   realImageSegments?: RealImageSegment[];
   stockVideoSegments?: StockVideoSegment[];
 
+  videoPromptFingerprints?: string[]; // compact visual tags parallel to videoPrompts — cross-scene variety
+  imagePromptFingerprints?: string[]; // compact visual tags parallel to imagePrompts
+
   audioFile?: string;
   mediaFiles: MediaFile[];
 }

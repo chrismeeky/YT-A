@@ -27,6 +27,7 @@ export async function POST(
     promptDetail?: PromptDetail;
     scriptTopic?: string;
     visualStyle?: string;
+    usedFingerprints?: string[];
   };
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -60,6 +61,7 @@ export async function POST(
       body.promptDetail ?? scene.promptDetail ?? 'auto',
       body.scriptTopic,
       body.visualStyle,
+      body.usedFingerprints,
     );
 
     void trackUsage({

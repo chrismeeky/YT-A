@@ -332,6 +332,13 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
       if (!excerpt.trim()) return;
 
       const sc = scriptRef.current;
+      // Collect all fingerprints across the whole script; exclude the one being regenerated
+      const usedFingerprints = sc.scenes.flatMap(s => {
+        if (s.id !== sceneSnap.id) return [...(s.videoPromptFingerprints ?? []), ...(s.imagePromptFingerprints ?? [])];
+        const vidFps = (s.videoPromptFingerprints ?? []).filter((_, j) => !(type === 'video' && j === idx));
+        const imgFps = (s.imagePromptFingerprints ?? []).filter((_, j) => !(type === 'image' && j === idx));
+        return [...vidFps, ...imgFps];
+      }).filter(Boolean);
       const res = await fetch(
         `/api/projects/${projectId}/scripts/${sc.id}/scenes/${sceneSnap.id}/regen-prompt`,
         {
@@ -349,14 +356,14 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             scriptTopic: sc.topic || sc.title,
             anthropicApiKey: settings.anthropicApiKey,
             analysis,
-            // Pass sibling prompts so the model can avoid repeating the same visuals
             siblingPrompts: type === 'image'
               ? (sceneSnap.imagePrompts ?? []).filter((_, i) => i !== idx)
               : (sceneSnap.videoPrompts ?? []).filter((_, i) => i !== idx),
+            usedFingerprints,
           }),
         }
       );
-      const data = await res.json() as { prompt?: string; error?: string };
+      const data = await res.json() as { prompt?: string; fingerprint?: string; error?: string };
       if (!res.ok || !data.prompt) { setAssetError(data.error ?? 'Regeneration failed'); return; }
 
       // Use live refs post-await — captured scene/script may be stale by now
@@ -373,12 +380,18 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
 
       if (type === 'image') {
         const prompts = [...(liveScene.imagePrompts ?? [])];
-        prompts[idx] = data.prompt;
-        applyPatch({ imagePrompts: prompts });
+        prompts[idx] = data.prompt!;
+        const imgFps = data.fingerprint
+          ? (() => { const fps = [...(liveScene.imagePromptFingerprints ?? prompts.map(() => ''))]; fps[idx] = data.fingerprint!; return fps; })()
+          : liveScene.imagePromptFingerprints;
+        applyPatch({ imagePrompts: prompts, ...(imgFps && { imagePromptFingerprints: imgFps }) });
         setDirtyImageIndices(prev => { const n = new Set(prev); n.delete(idx); return n; });
       } else {
         const prompts = [...(liveScene.videoPrompts ?? [])];
-        prompts[idx] = data.prompt;
+        prompts[idx] = data.prompt!;
+        const vidFps = data.fingerprint
+          ? (() => { const fps = [...(liveScene.videoPromptFingerprints ?? prompts.map(() => ''))]; fps[idx] = data.fingerprint!; return fps; })()
+          : liveScene.videoPromptFingerprints;
 
         const existingExtensions = liveScene.videoPromptIsExtension?.length
           ? liveScene.videoPromptIsExtension : null;
@@ -398,9 +411,10 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           excerpts.splice(idx + 1, removeCount);
           extensions.splice(idx + 1, removeCount);
           priorVersions.splice(idx + 1, removeCount);
-          applyPatch({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions });
+          const fpsSpliced = vidFps ? [...vidFps.slice(0, idx + 1), ...vidFps.slice(idx + 1 + removeCount)] : undefined;
+          applyPatch({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions, ...(fpsSpliced && { videoPromptFingerprints: fpsSpliced }) });
         } else {
-          applyPatch({ videoPrompts: prompts });
+          applyPatch({ videoPrompts: prompts, ...(vidFps && { videoPromptFingerprints: vidFps }) });
         }
         setDirtyVideoIndices(prev => { const n = new Set(prev); n.delete(idx); return n; });
       }
@@ -418,6 +432,11 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     setAssetError('');
     try {
       const settings = await storage.getSettings();
+      // Collect fingerprints from all OTHER scenes (current scene is being fully regenerated)
+      const usedFingerprints = script.scenes
+        .filter(s => s.id !== sceneId)
+        .flatMap(s => [...(s.videoPromptFingerprints ?? []), ...(s.imagePromptFingerprints ?? [])])
+        .filter(Boolean);
       const res = await fetch(
         `/api/projects/${projectId}/scripts/${script.id}/scenes/${sceneId}/generate-assets`,
         {
@@ -434,6 +453,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             promptDetail: scene.promptDetail ?? 'auto',
             scriptTopic: script.topic || script.title,
             visualStyle: script.visualStyle,
+            usedFingerprints,
           }),
         }
       );
@@ -467,8 +487,10 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         ...scene,
         imagePrompts:        assets.imagePrompts        ?? scene.imagePrompts,
         imagePromptExcerpts: assets.imagePromptExcerpts ?? scene.imagePromptExcerpts,
-        videoPrompts:        newVideoPrompts,
-        videoPromptExcerpts: assets.videoPromptExcerpts ?? scene.videoPromptExcerpts,
+        videoPrompts:             newVideoPrompts,
+        videoPromptExcerpts:      assets.videoPromptExcerpts      ?? scene.videoPromptExcerpts,
+        videoPromptFingerprints:  assets.videoPromptFingerprints  ?? scene.videoPromptFingerprints,
+        imagePromptFingerprints:  assets.imagePromptFingerprints  ?? scene.imagePromptFingerprints,
         // Reset extension metadata whenever fresh video prompts arrive so stale
         // extension flags from a previous run don't corrupt the new prompt list.
         ...(assets.videoPrompts && {
@@ -1184,7 +1206,10 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                             : prompts.map(() => null as null);
                                           priorVersions[i] = prompts[i];
                                           prompts[i] = data.prompt;
-                                          updateScene({ videoPrompts: prompts, videoPromptPriorVersions: priorVersions });
+                                          const fps = data.fingerprint
+                                            ? (() => { const f = [...(scene.videoPromptFingerprints ?? prompts.map(() => ''))]; f[i] = data.fingerprint; return f; })()
+                                            : scene.videoPromptFingerprints;
+                                          updateScene({ videoPrompts: prompts, videoPromptPriorVersions: priorVersions, ...(fps && { videoPromptFingerprints: fps }) });
                                           setRegenState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false, generating: false } }));
                                         }
                                       } catch {
@@ -1270,7 +1295,11 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                         excerpts.splice(i + 1, 0, '');
                                         extensions.splice(i + 1, 0, true);
                                         priorVersions.splice(i + 1, 0, null);
-                                        updateScene({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions });
+                                        const fps = scene.videoPromptFingerprints?.length
+                                          ? [...scene.videoPromptFingerprints]
+                                          : prompts.map(() => '');
+                                        fps.splice(i + 1, 0, data.continuationFingerprint ?? '');
+                                        updateScene({ videoPrompts: prompts, videoPromptExcerpts: excerpts, videoPromptIsExtension: extensions, videoPromptPriorVersions: priorVersions, videoPromptFingerprints: fps });
                                         setExtendState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false, generating: false } }));
                                       }
                                     } catch {
