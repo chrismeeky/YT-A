@@ -22,6 +22,7 @@ export async function POST(
     anthropicApiKey?: string;
     analysis?: Analysis;
     siblingPrompts?: string[];
+    usedFingerprints?: string[];
   };
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -52,39 +53,41 @@ export async function POST(
 
   const siblings = (body.siblingPrompts ?? []).filter(p => p?.trim());
   const siblingBlock = siblings.length > 0
-    ? `\nEXISTING PROMPTS FOR THIS SCENE (already in use — do NOT repeat their subjects, compositions, or camera moves):\n${siblings.map((p, n) => `${n + 1}. ${p.slice(0, 120)}…`).join('\n')}\n`
+    ? `\nOTHER PROMPTS IN THIS SCENE (already in use — vary away from these):\n${siblings.map((p, n) => `${n + 1}. ${p.slice(0, 120)}`).join('\n')}\n`
     : '';
 
-  const userPrompt = `Generate a single ${isImage ? 'Midjourney/DALL-E image prompt (append --ar 16:9)' : 'Sora/Runway video prompt (~8s)'} for the narration segment below.
+  const allFingerprints = (body.usedFingerprints ?? []).filter(Boolean);
+  const fingerprintBlock = allFingerprints.length > 0
+    ? `\nVISUAL HISTORY — Every shot already committed across this script (${allFingerprints.length} shots). Do NOT repeat their visual territory:\n${allFingerprints.join('\n')}\nDIRECTOR'S MANDATE: Vary what you SHOW, not just camera angle. If history shows a desk → show the person who used it. If it shows a location → show who inhabits it with emotion. Surprise within the channel's visual DNA.\n`
+    : '';
+
+  const userPrompt = `Generate a single ${isImage ? 'Midjourney/DALL-E image prompt (append --ar 16:9)' : 'Sora/Runway video prompt (~8s)'} for the narration segment below. Return ONLY valid JSON: { "prompt": "...", "fingerprint": "shot_distance | subject/action | location | color+mood" }
 
 ${lock ? `VISUAL STYLE: ${lock}\n` : ''}SCENE CONTEXT:
 Title: ${body.sceneTitle}
 Visual Description: ${body.sceneDescription}
 ${body.scriptTopic ? `Topic: ${body.scriptTopic}` : ''}${characterBlock}
-${siblingBlock}
+${siblingBlock}${fingerprintBlock}
 NARRATION SEGMENT:
 "${body.excerpt}"
 
 DETAIL LEVEL: ${detailInstruction}
 
 RULES:
-- Subject-first: if the narration describes a person, depict that person or their actions
+- Subject-first: if narration describes a person, depict that person or their actions
 - Stay within the scene's time period, geography, and atmosphere
 - No text overlays, captions, subtitles, watermarks, or lower thirds
 - Never add "no people" phrases when narration describes humans
-- Choose a different primary subject, camera angle, or composition than the existing prompts above
-${isImage ? '- End with --ar 16:9' : '- Describe motion and camera movement naturally'}
-
-Return ONLY the prompt text — no JSON, no explanation, no markdown.`;
+- Stake out different visual territory from the history and sibling prompts above
+${isImage ? '- Prompt must end with --ar 16:9' : '- Describe motion and camera movement naturally'}
+- fingerprint format: one of [extreme_close/close/medium/wide/aerial] | primary subject + action | location | dominant color + mood (max 15 tokens)`;
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 512,
-    system: 'You are an expert visual prompt writer for YouTube video production. Return ONLY the prompt text.',
+    max_tokens: 600,
+    system: 'You are a film director crafting visual prompts for a YouTube production. Return ONLY valid JSON: { "prompt": "...", "fingerprint": "..." }',
     messages: [{ role: 'user', content: userPrompt }],
   });
-
-  const prompt = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
 
   void trackUsage({
     operation: 'regen-prompt',
@@ -95,5 +98,15 @@ Return ONLY the prompt text — no JSON, no explanation, no markdown.`;
     estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
   });
 
-  return NextResponse.json({ prompt });
+  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+  let cleaned = raw;
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
+  if (!cleaned.startsWith('{')) { const m = cleaned.match(/\{[\s\S]*\}/); if (m) cleaned = m[0]; }
+
+  try {
+    const parsed = JSON.parse(cleaned) as { prompt?: string; fingerprint?: string };
+    return NextResponse.json({ prompt: parsed.prompt ?? raw, fingerprint: parsed.fingerprint ?? '' });
+  } catch {
+    return NextResponse.json({ prompt: raw, fingerprint: '' });
+  }
 }

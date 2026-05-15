@@ -606,13 +606,16 @@ export async function generateSceneAssets(
   characters: import('./types').CharacterSheet[] = [],
   promptDetail: import('./types').PromptDetail = 'auto',
   scriptTopic?: string,
-  visualStyle?: string
+  visualStyle?: string,
+  usedFingerprints?: string[]
 ): Promise<{
   result: {
     imagePrompts?: string[];
     imagePromptExcerpts?: string[];
+    imagePromptFingerprints?: string[];
     videoPrompts?: string[];
     videoPromptExcerpts?: string[];
+    videoPromptFingerprints?: string[];
     stockUrl?: string;
     stockPhotoQueries?: Array<{ query: string; excerpt: string }>;
     realImageQueries?: Array<{ query: string; excerpt: string }>;
@@ -644,7 +647,7 @@ export async function generateSceneAssets(
   });
 
   const segObj = `{ "query": "search term", "excerpt": "verbatim narration sentence(s) this segment covers" }`;
-  const promptObj = `{ "prompt": "detailed prompt text", "excerpt": "verbatim narration this segment covers" }`;
+  const promptObj = `{ "prompt": "detailed prompt text", "excerpt": "verbatim narration this segment covers", "fingerprint": "shot_distance | subject/action | location | color+mood" }`;
 
   const wantedParts = [
     options.image && `imagePrompts (${chunks} objects with prompt + excerpt, one per ~${secsPerChunk}s segment, prompts --ar 16:9)`,
@@ -677,7 +680,7 @@ export async function generateSceneAssets(
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 8192,
-    system: 'You are an expert YouTube content creator. Respond ONLY with valid JSON, no markdown.',
+    system: 'You are a film director building a visual sequence for a YouTube production. Your mandate is compelling variety — each shot must show the audience something they have not yet seen in this script. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
         role: 'user',
@@ -723,7 +726,12 @@ ${(() => {
 - B-roll approach: ${analysis.videoAnalyses[0].visualStyleEditing.brollEstimate}
 - Emotional triggers used: ${analysis.videoAnalyses[0].emotionalTriggers.primaryEmotions.join(', ')}` : ''}
 
-${characters.length > 0 ? `
+${usedFingerprints?.length ? `VISUAL HISTORY — Every shot already committed in this script (${usedFingerprints.length} shots total). You MUST avoid repeating their visual territory:
+${usedFingerprints.join('\n')}
+
+DIRECTOR'S MANDATE: Do not merely vary camera angle — vary what you SHOW. If history shows a desk of documents, show the person who wrote them. If it shows a location, show who inhabits it with emotion. If it shows an action, show its consequence on a face. A room of evidence → the suspect's cold eyes. A crime scene → the investigator's hands trembling. A battlefield → a single soldier's silent grief. You are building visual tension through contrast. Surprise within the channel's visual DNA — never outside it.
+
+` : ''}${characters.length > 0 ? `
 CHARACTER SHEETS — VISUAL CONSISTENCY REFERENCE:
 The following characters appear in this story. When any character is mentioned in the narration, use their sheet to ensure visual consistency across all prompts. Their appearance must match these descriptions exactly.
 ${characters.map(c => `
@@ -745,6 +753,7 @@ INSTRUCTIONS:
 - The narration is already divided into ${chunks} segments above — do NOT re-divide it yourself.
 - ALL asset types (imagePrompts, videoPrompts, stockPhotoQueries, realImageQueries, stockVideoQueries): produce EXACTLY ${chunks} items, one per segment [1]–[${chunks}] in order.
 - "excerpt" for each item MUST be copied verbatim from the corresponding pre-divided segment above (item i → segment [i+1]).
+- "fingerprint" (imagePrompts and videoPrompts only): compact visual tag — exactly this format: "{shot_distance} | {primary subject + action} | {location/environment} | {dominant color + mood}". Shot distance must be one of: extreme_close / close / medium / wide / aerial. Keep total fingerprint under 15 tokens. Example: "close | trembling hand signing document | mahogany desk | harsh fluorescent white".
 - STORY WORLD LOCK: Every prompt must be grounded in the same time period, geography, and atmosphere established by the Story World block above. If the story is a folktale, keep mud-brick walls, earthen paths, fire-lit interiors, traditional clothing — never concrete, neon, cars, or urban skylines unless narration demands it.
 ${characters.length > 0 ? `- CHARACTER CONSISTENCY: When a named character from the CHARACTER SHEETS above appears in the narration segment, their visual description MUST be referenced in the prompt.
   - ALWAYS use the character's actual name in the prompt — never substitute with generic pronouns ("a woman", "a man", "the figure", "they", etc.).
@@ -813,25 +822,30 @@ Return ONLY valid JSON:
   }
 
   // Unpack prompt objects into parallel arrays (handle legacy string[] gracefully)
-  const unpack = (arr: Array<{ prompt: string; excerpt: string }> | string[] | undefined) => {
-    if (!arr?.length) return { prompts: undefined, excerpts: undefined };
-    if (typeof arr[0] === 'string') return { prompts: arr as string[], excerpts: narrationChunks.length ? narrationChunks : undefined };
-    const objs = arr as Array<{ prompt: string; excerpt: string }>;
+  type PromptItem = { prompt: string; excerpt: string; fingerprint?: string };
+  const unpack = (arr: PromptItem[] | string[] | undefined) => {
+    if (!arr?.length) return { prompts: undefined, excerpts: undefined, fingerprints: undefined };
+    if (typeof arr[0] === 'string') return { prompts: arr as string[], excerpts: narrationChunks.length ? narrationChunks : undefined, fingerprints: undefined };
+    const objs = arr as PromptItem[];
+    const fps = objs.map(o => o.fingerprint ?? '').filter(Boolean);
     return {
       prompts: objs.map(o => o.prompt),
       excerpts: objs.map((o, i) => narrationChunks[i] ?? o.excerpt),
+      fingerprints: fps.length === objs.length ? fps : undefined,
     };
   };
 
-  const img = unpack(parsed.imagePrompts);
-  const vid = unpack(parsed.videoPrompts);
+  const img = unpack(parsed.imagePrompts as PromptItem[] | string[] | undefined);
+  const vid = unpack(parsed.videoPrompts as PromptItem[] | string[] | undefined);
 
   return {
     result: {
       imagePrompts: img.prompts,
       imagePromptExcerpts: img.excerpts,
+      imagePromptFingerprints: img.fingerprints,
       videoPrompts: vid.prompts,
       videoPromptExcerpts: vid.excerpts,
+      videoPromptFingerprints: vid.fingerprints,
       stockUrl: parsed.stockUrl,
       stockPhotoQueries: parsed.stockPhotoQueries,
       realImageQueries: parsed.realImageQueries,
