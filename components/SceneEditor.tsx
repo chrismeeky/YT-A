@@ -76,6 +76,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [newImageKeys, setNewImageKeys] = useState<Set<string>>(new Set());
   // extend prompt: key = `${sceneId}-${promptIndex}`, value = { open, duration, generating }
   const [extendState, setExtendState] = useState<Record<string, { open: boolean; duration: number; generating: boolean }>>({});
+  // regenerate prompt: key = `${sceneId}-${promptIndex}`, value = { open, referencePrev, generating }
+  const [regenState, setRegenState] = useState<Record<string, { open: boolean; referencePrev: boolean; generating: boolean }>>({});
   const [dirtyImageIndices, setDirtyImageIndices] = useState<Set<number>>(new Set());
   const [dirtyVideoIndices, setDirtyVideoIndices] = useState<Set<number>>(new Set());
   const [regenLoadingKeys, setRegenLoadingKeys] = useState<Set<string>>(new Set());
@@ -1081,13 +1083,24 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                             )}
                             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                               <button
+                                onClick={() => setRegenState(prev => ({
+                                  ...prev,
+                                  [extKey]: { open: !prev[extKey]?.open, referencePrev: prev[extKey]?.referencePrev ?? false, generating: false },
+                                }))}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-sky-400 border-sky-900/60 hover:border-sky-600 hover:text-sky-300"
+                                style={{ background: 'var(--surface)' }}
+                                title="Regenerate this prompt"
+                              >
+                                ↻ Regen
+                              </button>
+                              <button
                                 onClick={() => setExtendState(prev => ({
                                   ...prev,
                                   [extKey]: { open: !prev[extKey]?.open, duration: prev[extKey]?.duration ?? 6, generating: false },
                                 }))}
                                 className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-yellow-400 border-yellow-900/60 hover:border-yellow-600 hover:text-yellow-300"
                                 style={{ background: 'var(--surface)' }}
-                                title="Extend this prompt"
+                                title="Extend this prompt with a continuation"
                               >
                                 ↗ Extend
                               </button>
@@ -1109,6 +1122,90 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                               ))}
                             </div>
                           )}
+
+                          {/* Regenerate UI */}
+                          {regenState[extKey]?.open && (() => {
+                            const regen = regenState[extKey];
+                            return (
+                              <div
+                                className="mt-2 rounded-lg border px-3 py-3 space-y-2"
+                                style={{ borderColor: '#0e4d85', background: 'rgba(14,78,133,0.15)' }}
+                              >
+                                <p className="text-[11px] text-sky-300/70 font-medium">Regenerate prompt</p>
+                                {i > 0 && (
+                                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={regen.referencePrev}
+                                      onChange={e => setRegenState(prev => ({ ...prev, [extKey]: { ...prev[extKey], referencePrev: e.target.checked } }))}
+                                      className="rounded accent-sky-400"
+                                    />
+                                    <span className="text-[11px] text-[#a1a1aa]">Reference previous segment <span className="text-[#52525b]">(smooth flow, no new cut)</span></span>
+                                  </label>
+                                )}
+                                <div className="flex gap-2">
+                                  <button
+                                    disabled={regen.generating}
+                                    onClick={async () => {
+                                      setRegenState(prev => ({ ...prev, [extKey]: { ...prev[extKey], generating: true } }));
+                                      try {
+                                        const settings = await storage.getSettings();
+                                        let previousPrompt: string | undefined;
+                                        if (regen.referencePrev && i > 0) {
+                                          const exts = scene.videoPromptIsExtension ?? [];
+                                          const vp = scene.videoPrompts ?? [];
+                                          // Find the start of the current prompt's group, then take
+                                          // the entry just before it — that's the last prompt
+                                          // (including extensions) of the preceding group.
+                                          let groupStart = i;
+                                          while (groupStart > 0 && exts[groupStart]) groupStart--;
+                                          if (groupStart > 0) previousPrompt = vp[groupStart - 1];
+                                        }
+                                        const res = await fetch(
+                                          `/api/projects/${projectId}/scripts/${script.id}/scenes/${scene.id}/extend-prompt`,
+                                          {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                              originalPrompt: prompt,
+                                              narrationExcerpt: scene.videoPromptExcerpts?.[i],
+                                              durationSeconds: scene.estimatedDurationSeconds ?? 6,
+                                              anthropicApiKey: settings.anthropicApiKey,
+                                              previousPrompt,
+                                              replaceInPlace: true,
+                                            }),
+                                          }
+                                        );
+                                        const data = await res.json();
+                                        if (res.ok && data.prompt) {
+                                          const prompts = [...(scene.videoPrompts ?? [])];
+                                          const priorVersions = scene.videoPromptPriorVersions?.length
+                                            ? [...scene.videoPromptPriorVersions]
+                                            : prompts.map(() => null as null);
+                                          priorVersions[i] = prompts[i];
+                                          prompts[i] = data.prompt;
+                                          updateScene({ videoPrompts: prompts, videoPromptPriorVersions: priorVersions });
+                                          setRegenState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false, generating: false } }));
+                                        }
+                                      } catch {
+                                        setRegenState(prev => ({ ...prev, [extKey]: { ...prev[extKey], generating: false } }));
+                                      }
+                                    }}
+                                    className="px-3 py-1 rounded text-xs bg-sky-700/80 hover:bg-sky-700 disabled:opacity-50 transition-colors font-medium text-white flex items-center gap-1.5"
+                                  >
+                                    {regen.generating ? <><span className="animate-pulse">↻</span> Regenerating…</> : '↻ Regenerate'}
+                                  </button>
+                                  <button
+                                    onClick={() => setRegenState(prev => ({ ...prev, [extKey]: { ...prev[extKey], open: false } }))}
+                                    className="px-3 py-1 rounded text-xs border text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                                    style={{ borderColor: 'var(--border)' }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Extend UI */}
                           {ext?.open && (
@@ -1165,7 +1262,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                         const priorVersions = scene.videoPromptPriorVersions?.length
                                           ? [...scene.videoPromptPriorVersions]
                                           : prompts.map(() => null as null);
-                                        // Save pre-tweak original so revert can restore it
                                         if (data.tweakedOriginal) {
                                           priorVersions[i] = prompts[i];
                                           prompts[i] = data.tweakedOriginal;

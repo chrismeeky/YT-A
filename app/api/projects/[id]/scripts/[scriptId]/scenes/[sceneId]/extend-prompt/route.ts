@@ -12,6 +12,8 @@ export async function POST(
     narrationExcerpt?: string;
     durationSeconds: number;
     anthropicApiKey?: string;
+    previousPrompt?: string;
+    replaceInPlace?: boolean;
   };
 
   const apiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
@@ -25,19 +27,37 @@ export async function POST(
   const duration = Math.min(10, Math.max(2, body.durationSeconds ?? 6));
 
   const ai = new Anthropic({ apiKey });
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    system: 'You are an expert video director specialising in AI video generation prompts for tools like Sora, Runway, and Kling. Respond ONLY with valid JSON, no markdown.',
-    messages: [
-      {
-        role: 'user',
-        content: `You are extending a video prompt with a smooth continuation. You must produce TWO things:
+
+  let userContent: string;
+  if (body.replaceInPlace && body.previousPrompt) {
+    userContent = `Rewrite the following video prompt so it is a smooth continuation of the PREVIOUS SEGMENT. The rewritten prompt should feel like a natural flow from the previous shot — not a new scene introduction, not a re-cut, but a continuation of the same story moment.
+
+PREVIOUS SEGMENT (the shot that comes immediately before):
+${body.previousPrompt}
+
+CURRENT PROMPT TO REWRITE:
+${body.originalPrompt}
+${body.narrationExcerpt ? `\nNARRATION CONTEXT:\n${body.narrationExcerpt}` : ''}
+
+REQUIREMENTS:
+- Match the exact visual style, color palette, lighting, and atmosphere of the current prompt
+- The rewritten prompt should pick up naturally from where the previous segment ends
+- Preserve all character appearances — do not re-introduce anyone
+- Keep the same duration intent (~${duration} seconds)
+- Do NOT describe the previous segment's content — only write the current segment's continuation
+
+Return ONLY valid JSON:
+{
+  "prompt": "the rewritten continuation prompt"
+}`;
+  } else {
+    userContent = `You are extending a video prompt with a smooth continuation. You must produce TWO things:
 1. A tweaked version of the original prompt that ends in a way that naturally leads into the continuation (e.g. a subject beginning to move, a camera starting to drift, a moment of transition — something that makes the cut feel motivated).
 2. The continuation prompt itself, picking up from where the tweaked original leaves off.
 
 ORIGINAL PROMPT:
 ${body.originalPrompt}
+${body.previousPrompt ? `\nPREVIOUS SEGMENT (for visual flow context):\n${body.previousPrompt}` : ''}
 ${body.narrationExcerpt ? `\nNARRATION CONTEXT:\n${body.narrationExcerpt}` : ''}
 
 REQUIREMENTS FOR BOTH PROMPTS:
@@ -51,10 +71,34 @@ Return ONLY valid JSON:
 {
   "tweakedOriginal": "the original prompt with a subtly adjusted ending that sets up the transition",
   "continuation": "the ${duration}-second continuation prompt"
-}`,
-      },
-    ],
-  });
+}`;
+  }
+
+  let response: Awaited<ReturnType<typeof ai.messages.create>>;
+  try {
+    response = await ai.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: 'You are an expert video director specialising in AI video generation prompts for tools like Sora, Runway, and Kling. Respond ONLY with valid JSON, no markdown.',
+      messages: [{ role: 'user', content: userContent }],
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = (err as { status?: number }).status ?? 0;
+    if (status === 529 || msg.includes('overloaded') || msg.includes('Overloaded')) {
+      return NextResponse.json(
+        { error: 'Anthropic API is temporarily overloaded. Wait a few seconds and try again.' },
+        { status: 503 }
+      );
+    }
+    if (status === 429 || msg.includes('rate limit') || msg.includes('rate_limit')) {
+      return NextResponse.json(
+        { error: 'Anthropic rate limit reached. Wait a moment and try again.' },
+        { status: 429 }
+      );
+    }
+    return NextResponse.json({ error: `API error: ${msg}` }, { status: 502 });
+  }
 
   void trackUsage({
     operation: 'extend-prompt',
@@ -74,10 +118,13 @@ Return ONLY valid JSON:
   }
 
   try {
+    if (body.replaceInPlace) {
+      const parsed = JSON.parse(cleaned) as { prompt: string };
+      return NextResponse.json({ prompt: parsed.prompt, tweakedOriginal: null });
+    }
     const parsed = JSON.parse(cleaned) as { tweakedOriginal: string; continuation: string };
     return NextResponse.json({ prompt: parsed.continuation, tweakedOriginal: parsed.tweakedOriginal });
   } catch {
-    // Fallback: treat raw text as continuation only, no tweak
     return NextResponse.json({ prompt: raw, tweakedOriginal: null });
   }
 }
