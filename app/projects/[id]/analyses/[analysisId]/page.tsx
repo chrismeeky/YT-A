@@ -437,6 +437,135 @@ export default function AnalysisDetailPage() {
     })),
   ];
 
+  const handleExportPDF = () => {
+    const ci = analysis.channelInsights;
+
+    const section = (title: string, content: string) =>
+      content ? `<div class="section"><div class="section-title">${title}</div>${content}</div>` : '';
+
+    const list = (items?: string[]) =>
+      items?.length ? `<ul>${items.map(i => `<li>${i.replace(/</g,'&lt;')}</li>`).join('')}</ul>` : '';
+
+    const tags = (items?: string[]) =>
+      items?.length ? `<div class="tags">${items.map(i => `<span class="tag">${i.replace(/</g,'&lt;')}</span>`).join('')}</div>` : '';
+
+    const row = (label: string, value?: string | boolean | null) =>
+      value != null && value !== '' ? `<div class="row"><span class="row-label">${label}</span><span class="row-value">${String(value).replace(/</g,'&lt;')}</span></div>` : '';
+
+    const scoreBar = (v: VideoAnalysis) => {
+      const s = v.overallScores;
+      const scores = [
+        ['Hook', s?.hookStrength], ['Retention', s?.retentionPotential],
+        ['Script', s?.scriptQuality], ['Thumbnail', s?.thumbnailEffectiveness],
+        ['Algorithm', s?.algorithmOptimization], ['Production', s?.productionValue],
+        ['Overall', s?.overall],
+      ] as [string, number][];
+      return `<div class="scores">${scores.map(([l, n]) => {
+        const color = n >= 8 ? '#22c55e' : n >= 6 ? '#eab308' : '#ef4444';
+        return `<div class="score-pill" style="border-color:${color};color:${color}"><strong>${n}</strong><span>${l}</span></div>`;
+      }).join('')}</div>`;
+    };
+
+    const videoSections = analysis.videoAnalyses.map((v, idx) => `
+      <div class="page-break">
+        <h2 style="font-size:18px;margin:0 0 4px">Video ${idx + 1}: ${v.videoTitle.replace(/</g,'&lt;')}</h2>
+        <a href="${v.videoUrl}" style="font-size:12px;color:#6366f1;">${v.videoUrl}</a>
+        <div style="margin-top:16px">${scoreBar(v)}</div>
+        ${v.overallScores?.keyStrengths?.length ? `<div class="section"><div class="section-title">Key Strengths</div>${list(v.overallScores.keyStrengths)}</div>` : ''}
+        ${v.overallScores?.keyWeaknesses?.length ? `<div class="section"><div class="section-title">Weaknesses</div>${list(v.overallScores.keyWeaknesses)}</div>` : ''}
+        ${v.overallScores?.topRecommendation ? `<div class="callout">${v.overallScores.topRecommendation.replace(/</g,'&lt;')}</div>` : ''}
+        <div class="grid2">
+          ${section('Hook', row('Type', v.hook?.type) + row('Opening Lines', v.hook?.openingLines) + row('Loop Description', v.hook?.openLoopDescription))}
+          ${section('Title Structure', row('Format Pattern', v.titleStructure?.formatPattern) + row('Search Intent', v.titleStructure?.searchIntentAlignment) + tags(v.titleStructure?.keywords))}
+          ${section('Content Structure', row('Loop Mechanism', v.contentStructure?.loopMechanism) + row('Stimulus Frequency', v.contentStructure?.newStimulusFrequency))}
+          ${section('Script & Language', row('Sentence Style', v.scriptAndLanguage?.sentenceStyle) + row('Technical Depth', v.scriptAndLanguage?.technicalDepth) + (v.scriptAndLanguage?.standoutPhrases?.length ? `<ul>${v.scriptAndLanguage.standoutPhrases.map(p => `<li><em>"${p.replace(/</g,'&lt;')}"</em></li>`).join('')}</ul>` : ''))}
+          ${section('Emotional Triggers', row('Arc', v.emotionalTriggers?.emotionalArc) + tags(v.emotionalTriggers?.primaryEmotions))}
+          ${section('Audience', row('Target Viewer', v.audienceTargeting?.primaryTargetViewer) + row('Knowledge Level', v.audienceTargeting?.assumedKnowledgeLevel))}
+        </div>
+      </div>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${analysis.name.replace(/</g,'&lt;')} — Analysis Report</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; background: #fff; padding: 36px; font-size: 13px; line-height: 1.6; }
+  h1 { font-size: 24px; font-weight: 700; }
+  h2 { font-size: 16px; font-weight: 700; margin: 24px 0 12px; }
+  .meta { color: #6b7280; font-size: 12px; margin-top: 4px; }
+  .header-bar { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 2px solid #111; padding-bottom: 20px; margin-bottom: 24px; }
+  .section { margin-bottom: 14px; }
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; border-bottom: 1px solid #e5e7eb; margin-bottom: 8px; padding-bottom: 3px; }
+  .callout { background: #eef2ff; border-left: 4px solid #6366f1; padding: 10px 14px; font-size: 12px; margin: 12px 0; border-radius: 4px; }
+  .callout-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6366f1; margin-bottom: 4px; }
+  .row { display: flex; gap: 12px; margin-bottom: 4px; }
+  .row-label { font-size: 11px; color: #9ca3af; flex-shrink: 0; width: 130px; padding-top: 1px; }
+  .row-value { font-size: 12px; color: #374151; flex: 1; }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .tag { font-size: 11px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 2px 7px; color: #374151; }
+  ul { padding-left: 16px; }
+  ul li { font-size: 12px; color: #374151; margin-bottom: 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .scores { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .score-pill { display: flex; flex-direction: column; align-items: center; border: 2px solid; border-radius: 8px; padding: 6px 12px; min-width: 60px; }
+  .score-pill strong { font-size: 20px; font-weight: 700; line-height: 1; }
+  .score-pill span { font-size: 10px; margin-top: 2px; opacity: 0.8; }
+  .page-break { margin-top: 40px; padding-top: 32px; border-top: 2px solid #e5e7eb; }
+  .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; display: flex; justify-content: space-between; }
+  @media print { body { padding: 16px; } .page-break { page-break-before: always; } }
+</style>
+</head>
+<body>
+
+<div class="header-bar">
+  <div>
+    <h1>${analysis.name.replace(/</g,'&lt;')}</h1>
+    <div class="meta">${analysis.channelName} · ${analysis.videoAnalyses.length} video${analysis.videoAnalyses.length !== 1 ? 's' : ''} · ${new Date(analysis.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+    ${analysis.channelUrl ? `<div class="meta" style="margin-top:4px">${analysis.channelUrl}</div>` : ''}
+  </div>
+  <div style="font-size:20px;font-weight:700;color:#6366f1">ReelIQ</div>
+</div>
+
+<h2 style="font-size:18px;margin:0 0 16px">Channel Strategy</h2>
+
+<div class="section">
+  <div class="section-title">Channel Overview</div>
+  <p style="font-size:13px;color:#374151;">${(ci.channelOverview ?? '').replace(/</g,'&lt;')}</p>
+</div>
+
+${ci.replicationFormula ? `<div class="callout"><div class="callout-label">Replication Formula</div>${ci.replicationFormula.replace(/</g,'&lt;')}</div>` : ''}
+
+<div class="grid2">
+  ${ci.thingsToSteal?.length ? section('Things to Steal', `<ol style="padding-left:16px">${ci.thingsToSteal.map(t => `<li style="margin-bottom:6px;font-size:12px;color:#374151">${t.replace(/</g,'&lt;')}</li>`).join('')}</ol>`) : ''}
+  ${ci.contentPillars?.length ? section('Content Pillars', tags(ci.contentPillars)) : ''}
+  ${ci.titleFormulas?.length ? section('Title Formulas', list(ci.titleFormulas)) : ''}
+  ${ci.hookStrategies?.length ? section('Hook Strategies', list(ci.hookStrategies)) : ''}
+  ${section('Script Structure', row('Intro', ci.scriptStructureTemplate?.intro) + row('Body', ci.scriptStructureTemplate?.body) + row('Outro', ci.scriptStructureTemplate?.outro))}
+  ${section('Visual Brand', row('Thumbnail Style', ci.visualBrand?.thumbnailStyle) + row('Color Scheme', ci.visualBrand?.colorScheme) + row('Typography', ci.visualBrand?.typography))}
+  ${section('Audience Profile', row('Demographics', ci.audienceProfile?.demographics) + tags(ci.audienceProfile?.painPoints) + tags(ci.audienceProfile?.desiredOutcomes))}
+  ${section('Content Style', row('Tone', ci.contentStyle?.tone) + row('Energy', ci.contentStyle?.energy) + row('Expertise', ci.contentStyle?.expertise) + row('Typical Length', ci.videoLength?.typical))}
+  ${ci.uniqueValueProposition ? section('Unique Value Proposition', `<p style="font-size:12px;color:#374151">${ci.uniqueValueProposition.replace(/</g,'&lt;')}</p>`) : ''}
+</div>
+
+${videoSections}
+
+<div class="footer">
+  <span>Generated by ReelIQ · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+  <span>${analysis.channelName}</span>
+</div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('Please allow pop-ups for this site to export PDF.'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 600);
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* Breadcrumb */}
@@ -454,12 +583,21 @@ export default function AnalysisDetailPage() {
             {analysis.channelName} · {analysis.videoAnalyses.length} videos · {new Date(analysis.createdAt).toLocaleDateString()}
           </p>
         </div>
-        <Link
-          href={`/projects/${id}/scripts/new?analysisId=${analysisId}`}
-          className="flex items-center gap-1 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
-        >
-          ✍️ Write Script from This
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportPDF}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)' }}
+          >
+            ⬇ Export PDF
+          </button>
+          <Link
+            href={`/projects/${id}/scripts/new?analysisId=${analysisId}`}
+            className="flex items-center gap-1 px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
+          >
+            ✍️ Write Script from This
+          </Link>
+        </div>
       </div>
 
       {/* Tabs */}

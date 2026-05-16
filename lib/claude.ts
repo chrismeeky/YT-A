@@ -52,7 +52,7 @@ export async function analyzeVideo(
   const ai = client(apiKey);
 
   const transcriptExcerpt = transcript
-    ? `${transcript.slice(0, 8000)}${transcript.length > 8000 ? '\n...[transcript truncated]' : ''}`
+    ? `${transcript.slice(0, 60000)}${transcript.length > 60000 ? '\n...[transcript truncated]' : ''}`
     : 'No transcript available — infer from title, description, and thumbnail.';
 
   const contentBlocks: Anthropic.ContentBlockParam[] = [];

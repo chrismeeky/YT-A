@@ -6,26 +6,44 @@ import type { ResearchChannel, ResearchVideo } from '@/lib/types';
 const YT = 'https://www.googleapis.com/youtube/v3';
 
 export async function POST(request: NextRequest) {
-  const { channelId, uploadsPlaylistId, youtubeApiKey, videoLimit } = (await request.json()) as {
-    channelId: string;
+  const { channelId, forHandle, forUsername, uploadsPlaylistId, youtubeApiKey, videoLimit } = (await request.json()) as {
+    channelId?: string;
+    forHandle?: string;    // e.g. "@MrBeast"
+    forUsername?: string;  // legacy /user/ URLs
     uploadsPlaylistId?: string;
     youtubeApiKey: string;
     videoLimit?: number;
   };
   const clampedLimit = Math.max(5, videoLimit ?? 15);
 
-  if (!channelId?.trim()) {
-    return NextResponse.json({ error: 'channelId is required' }, { status: 400 });
-  }
   const resolvedYoutubeKey = resolveKeyWithFallback(youtubeApiKey, 'NEXT_PUBLIC_YOUTUBE_API_KEY');
   if (!resolvedYoutubeKey) {
     return NextResponse.json({ error: 'YouTube API key is required.' }, { status: 400 });
   }
 
+  // Resolve handle/username to a channel ID first.
+  let resolvedChannelId = channelId?.trim() ?? '';
+  try {
+    if (!resolvedChannelId && forHandle) {
+      const r = await fetch(`${YT}/channels?part=id&forHandle=${encodeURIComponent(forHandle)}&key=${resolvedYoutubeKey}`);
+      const d = await r.json() as { items?: { id: string }[] };
+      resolvedChannelId = d.items?.[0]?.id ?? '';
+    }
+    if (!resolvedChannelId && forUsername) {
+      const r = await fetch(`${YT}/channels?part=id&forUsername=${encodeURIComponent(forUsername)}&key=${resolvedYoutubeKey}`);
+      const d = await r.json() as { items?: { id: string }[] };
+      resolvedChannelId = d.items?.[0]?.id ?? '';
+    }
+  } catch { /* fall through to error below */ }
+
+  if (!resolvedChannelId) {
+    return NextResponse.json({ error: 'Channel not found. Try searching by keyword instead.' }, { status: 404 });
+  }
+
   try {
     // Fetch full channel details — 1 unit
     const chanRes = await fetch(
-      `${YT}/channels?part=snippet,statistics,contentDetails,brandingSettings&id=${channelId}&key=${resolvedYoutubeKey}`,
+      `${YT}/channels?part=snippet,statistics,contentDetails,brandingSettings&id=${resolvedChannelId}&key=${resolvedYoutubeKey}`,
     );
     const chanData = await chanRes.json() as {
       error?: { message: string };
