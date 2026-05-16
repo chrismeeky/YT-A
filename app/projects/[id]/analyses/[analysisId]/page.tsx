@@ -437,6 +437,16 @@ export default function AnalysisDetailPage() {
     })),
   ];
 
+  const handleExportJSON = () => {
+    const blob = new Blob([JSON.stringify(analysis, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${analysis.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.reeliq.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportPDF = () => {
     const ci = analysis.channelInsights;
 
@@ -584,6 +594,14 @@ ${videoSections}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportJSON}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)' }}
+            title="Download analysis as JSON — can be re-imported into any project"
+          >
+            ⬇ Export JSON
+          </button>
           <button
             onClick={handleExportPDF}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
