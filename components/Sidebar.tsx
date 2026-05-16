@@ -10,7 +10,10 @@ export default function Sidebar() {
   const { user, signOut } = useAuth();
 
   const navItem = (href: string, label: string, icon: string) => {
-    const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+    const active =
+      pathname === href ||
+      (href === '/dashboard' && pathname.startsWith('/projects')) ||
+      (href !== '/dashboard' && pathname.startsWith(href));
     return (
       <Link
         href={href}
@@ -46,7 +49,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-1">
-        {navItem('/', 'Projects', '📁')}
+        {navItem('/dashboard', 'Projects', '📁')}
         {navItem('/research', 'Research', '🔍')}
         {navItem('/usage', 'Usage', '📊')}
         {navItem('/settings', 'Settings', '⚙️')}

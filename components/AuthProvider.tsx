@@ -10,11 +10,14 @@ interface AuthContext {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
+  signUp: (email: string, password: string) => Promise<string | null>;
+  signInWithGoogle: () => Promise<string | null>;
 }
 
 const Ctx = createContext<AuthContext>({
   user: null, session: null, loading: true,
   signIn: async () => null, signOut: async () => {},
+  signUp: async () => null, signInWithGoogle: async () => null,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -52,7 +55,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (db) await db.auth.signOut();
   };
 
-  return <Ctx.Provider value={{ user, session, loading, signIn, signOut }}>{children}</Ctx.Provider>;
+  const signUp = async (email: string, password: string): Promise<string | null> => {
+    const db = getBrowserSupabase();
+    if (!db) return 'Supabase not configured';
+    const { error } = await db.auth.signUp({ email, password });
+    return error?.message ?? null;
+  };
+
+  const signInWithGoogle = async (): Promise<string | null> => {
+    const db = getBrowserSupabase();
+    if (!db) return 'Supabase not configured';
+    const { error } = await db.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/dashboard` },
+    });
+    return error?.message ?? null;
+  };
+
+  return (
+    <Ctx.Provider value={{ user, session, loading, signIn, signOut, signUp, signInWithGoogle }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export const useAuth = () => useContext(Ctx);

@@ -5,12 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 
-export default function LoginPage() {
-  const { user, loading, signIn, signInWithGoogle } = useAuth();
+export default function SignupPage() {
+  const { user, loading, signUp, signInWithGoogle } = useAuth();
   const router = useRouter();
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm]   = useState('');
   const [error, setError]       = useState('');
+  const [success, setSuccess]   = useState(false);
   const [busy, setBusy]         = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
 
@@ -20,11 +22,17 @@ export default function LoginPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    if (password.length < 6)  { setError('Password must be at least 6 characters.'); return; }
     setBusy(true);
     setError('');
-    const err = await signIn(email, password);
-    if (err) { setError(err); setBusy(false); }
-    else router.replace('/dashboard');
+    const err = await signUp(email, password);
+    if (err) {
+      setError(err);
+      setBusy(false);
+    } else {
+      setSuccess(true);
+    }
   };
 
   const handleGoogle = async () => {
@@ -36,6 +44,27 @@ export default function LoginPage() {
 
   if (loading) return null;
 
+  if (success) {
+    return (
+      <div
+        className="w-full max-w-sm rounded-2xl border p-6 sm:p-8 space-y-4 text-center mx-4"
+        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+      >
+        <div className="text-4xl">📬</div>
+        <h2 className="text-lg font-semibold">Check your email</h2>
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+          We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account, then sign in.
+        </p>
+        <Link
+          href="/login"
+          className="inline-block w-full py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors text-center"
+        >
+          Go to Sign In
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div
       className="w-full max-w-sm rounded-2xl border p-6 sm:p-8 space-y-6 mx-4"
@@ -43,8 +72,8 @@ export default function LoginPage() {
     >
       <div className="text-center space-y-1">
         <div className="text-3xl mb-3">▶</div>
-        <h1 className="text-xl font-semibold">ReelIQ</h1>
-        <p className="text-sm" style={{ color: 'var(--text-3)' }}>Sign in to your account</p>
+        <h1 className="text-xl font-semibold">Create your account</h1>
+        <p className="text-sm" style={{ color: 'var(--text-3)' }}>Start analyzing channels and scripting videos</p>
       </div>
 
       {/* Google */}
@@ -89,6 +118,18 @@ export default function LoginPage() {
             required
             value={password}
             onChange={e => setPassword(e.target.value)}
+            placeholder="Min. 6 characters"
+            className="w-full rounded-lg px-4 py-2.5 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none"
+            style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1.5">Confirm Password</label>
+          <input
+            type="password"
+            required
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
             placeholder="••••••••"
             className="w-full rounded-lg px-4 py-2.5 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none"
             style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
@@ -106,14 +147,14 @@ export default function LoginPage() {
           disabled={busy || googleBusy}
           className="w-full py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 text-sm font-medium transition-colors"
         >
-          {busy ? 'Signing in…' : 'Sign In'}
+          {busy ? 'Creating account…' : 'Create Account'}
         </button>
       </form>
 
       <p className="text-center text-sm" style={{ color: 'var(--text-3)' }}>
-        Don&apos;t have an account?{' '}
-        <Link href="/signup" className="text-indigo-400 hover:text-indigo-300 transition-colors">
-          Sign up
+        Already have an account?{' '}
+        <Link href="/login" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+          Sign in
         </Link>
       </p>
     </div>
