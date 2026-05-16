@@ -78,7 +78,6 @@ async function nestedDir(
 ): Promise<FileSystemDirectoryHandle> {
   let cur = root;
   for (const raw of parts) {
-    // Ensure no part is empty or contains chars the FSAA API rejects
     const p = raw.replace(/[\x00-\x1f\x7f/\\]/g, '-').trim() || '_';
     cur = await cur.getDirectoryHandle(p, { create });
   }
@@ -153,24 +152,60 @@ async function fsaaGetObjectUrl(
   } catch { return null; }
 }
 
+// ─── Owner file ────────────────────────────────────────────────────────────
+
+interface OwnerFile { userId: string; email: string; }
+
 // ─── ClientStorage class ───────────────────────────────────────────────────
 
 export class ClientStorage {
   private db:   IDBDatabase | null = null;
   private root: FileSystemDirectoryHandle | null = null;
-  private _mode:  'fsaa' | 'idb' = 'idb';
+  private _mode:   'fsaa' | 'idb' = 'idb';
   private _ready = false;
+  private _userId    = '';
+  private _idbPrefix = '';  // userId + '/'
 
   get isReady()      { return this._ready; }
   get mode()         { return this._mode; }
   get canSaveToDisk(){ return this._mode === 'fsaa'; }
 
-  // Call once on app start. Returns true if storage is immediately usable.
-  async init(): Promise<boolean> {
+  // Prefix all FILE_STORE keys so each account's data is isolated.
+  private k(path: string): string { return this._idbPrefix + path; }
+
+  // Per-user localStorage settings key, with legacy fallback.
+  private get settingsLsKey(): string {
+    return this._userId ? `yt-analyzer-settings:${this._userId}` : 'yt-analyzer-settings';
+  }
+
+  // Call once on app start with the authenticated user's ID.
+  // Returns true if storage is immediately usable.
+  async init(userId: string): Promise<boolean> {
+    // Reset all state so re-init with a different user is clean.
+    this._userId    = userId;
+    this._idbPrefix = userId ? userId + '/' : '';
+    this.root       = null;
+    this._mode      = 'idb';
+    this._ready     = false;
+
     this.db = await openIDB();
 
     if (fsaaSupported()) {
-      const saved = await idbGet<FileSystemDirectoryHandle>(this.db, HANDLE_STORE, 'root');
+      const userKey = userId ? 'root:' + userId : 'root';
+      let saved = await idbGet<FileSystemDirectoryHandle>(this.db, HANDLE_STORE, userKey);
+
+      // Backward compat: migrate legacy 'root' handle to this user's key.
+      if (!saved && userId) {
+        const legacy = await idbGet<FileSystemDirectoryHandle>(this.db, HANDLE_STORE, 'root');
+        if (legacy) {
+          saved = await this._claimLegacyFsaaHandle(legacy, userId);
+          if (saved) {
+            await idbPut(this.db, HANDLE_STORE, userKey, saved);
+            await idbDelete(this.db, HANDLE_STORE, 'root');
+          }
+        }
+      }
+
       if (saved) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -183,29 +218,110 @@ export class ClientStorage {
             this._ready = true;
             return true;
           }
-        } catch { /* fall through to IDB */ }
+        } catch { /* fall through to folder picker */ }
       }
-      // FSAA available but no handle yet — caller shows folder picker
       return false;
     }
 
-    // FSAA not supported → use IDB automatically
+    // IDB fallback mode — no folder picker needed.
     this._mode  = 'idb';
+    this._ready = true;
+    // Migrate legacy (un-prefixed) keys to this user's namespace.
+    if (userId) await this._migrateIdbLegacy();
+    return true;
+  }
+
+  // Shows the native directory picker.
+  // Throws an Error with message starting with 'OWNER:' if the folder belongs to another account.
+  // Returns true on success, false if user cancelled.
+  async pickDirectory(userEmail = ''): Promise<boolean> {
+    if (!fsaaSupported() || !this.db) return false;
+    let handle: FileSystemDirectoryHandle;
+    try {
+      handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch {
+      return false; // user cancelled or browser blocked
+    }
+
+    const ownerMsg = await this._checkFolderOwnership(handle);
+    if (ownerMsg) throw new Error('OWNER:' + ownerMsg);
+
+    // Claim the folder.
+    await fsaaWriteText(handle, [], '.reeliq-owner',
+      JSON.stringify({ userId: this._userId, email: userEmail } satisfies OwnerFile));
+
+    const userKey = this._userId ? 'root:' + this._userId : 'root';
+    await idbPut(this.db, HANDLE_STORE, userKey, handle);
+    this.root   = handle;
+    this._mode  = 'fsaa';
     this._ready = true;
     return true;
   }
 
-  // Shows the native directory picker. Returns true on success.
-  async pickDirectory(): Promise<boolean> {
-    if (!fsaaSupported() || !this.db) return false;
+  // ─── Ownership helpers ────────────────────────────────────────────────
+
+  private async _checkFolderOwnership(handle: FileSystemDirectoryHandle): Promise<string | null> {
     try {
-      const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      await idbPut(this.db, HANDLE_STORE, 'root', handle);
-      this.root   = handle;
-      this._mode  = 'fsaa';
-      this._ready = true;
-      return true;
-    } catch { return false; }
+      const f = await (await handle.getFileHandle('.reeliq-owner')).getFile();
+      const data = JSON.parse(await f.text()) as Partial<OwnerFile>;
+      if (data.userId && data.userId !== this._userId) {
+        const who = data.email ? `the account "${data.email}"` : 'another account';
+        return `This folder is already used by ${who}. Please choose or create a different folder.`;
+      }
+    } catch { /* no owner file — folder is unclaimed */ }
+    return null;
+  }
+
+  // Attempt to claim the legacy (un-owned) FSAA handle for the current user.
+  // Returns the handle if claimed, null if already owned by someone else.
+  private async _claimLegacyFsaaHandle(
+    handle: FileSystemDirectoryHandle,
+    userId: string,
+  ): Promise<FileSystemDirectoryHandle | null> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let perm = await (handle as any).queryPermission({ mode: 'readwrite' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (perm === 'prompt') perm = await (handle as any).requestPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') return null;
+
+      const ownerRaw = await fsaaReadText(handle, [], '.reeliq-owner');
+      if (ownerRaw) {
+        const data = JSON.parse(ownerRaw) as Partial<OwnerFile>;
+        // If owned by a different user, don't claim it.
+        if (data.userId && data.userId !== userId) return null;
+      }
+
+      // Write/update the owner file.
+      await fsaaWriteText(handle, [], '.reeliq-owner',
+        JSON.stringify({ userId, email: '' } satisfies OwnerFile));
+      return handle;
+    } catch { return null; }
+  }
+
+  // Migrate legacy IDB file keys (e.g. `projects/...`) to the user-namespaced form.
+  private async _migrateIdbLegacy(): Promise<void> {
+    if (!this.db || !this._idbPrefix) return;
+    const allKeys = await idbAllKeys(this.db, FILE_STORE);
+    // If the user already has namespaced data, skip migration.
+    if (allKeys.some(k => k.startsWith(this._idbPrefix))) return;
+
+    const LEGACY = ['projects/', 'research/', 'media:', 'audio:'];
+    const legacyKeys = allKeys.filter(k => LEGACY.some(p => k.startsWith(p)));
+    for (const key of legacyKeys) {
+      const val = await idbGet<unknown>(this.db, FILE_STORE, key);
+      if (val !== null) {
+        await idbPut(this.db, FILE_STORE, this.k(key), val);
+        await idbDelete(this.db, FILE_STORE, key);
+      }
+    }
+
+    // Migrate localStorage settings.
+    const legacySettings = localStorage.getItem('yt-analyzer-settings');
+    if (legacySettings && !localStorage.getItem(this.settingsLsKey)) {
+      localStorage.setItem(this.settingsLsKey, legacySettings);
+      localStorage.removeItem('yt-analyzer-settings');
+    }
   }
 
   // ─── Settings ─────────────────────────────────────────────────────────
@@ -215,7 +331,16 @@ export class ClientStorage {
     if (this._mode === 'fsaa' && this.root) {
       raw = await fsaaReadText(this.root, [], 'settings.json');
     } else {
-      raw = localStorage.getItem('yt-analyzer-settings');
+      raw = localStorage.getItem(this.settingsLsKey);
+      // Backward compat: if no user-scoped key, check and migrate the legacy key.
+      if (!raw && this._userId) {
+        const legacy = localStorage.getItem('yt-analyzer-settings');
+        if (legacy) {
+          localStorage.setItem(this.settingsLsKey, legacy);
+          localStorage.removeItem('yt-analyzer-settings');
+          raw = legacy;
+        }
+      }
     }
     if (!raw) return { ...DEFAULT_SETTINGS };
     try { return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }; }
@@ -227,7 +352,7 @@ export class ClientStorage {
     if (this._mode === 'fsaa' && this.root) {
       await fsaaWriteText(this.root, [], 'settings.json', json);
     } else {
-      localStorage.setItem('yt-analyzer-settings', json);
+      localStorage.setItem(this.settingsLsKey, json);
     }
   }
 
@@ -344,7 +469,7 @@ export class ClientStorage {
         filename, buffer,
       );
     } else {
-      await idbPut(this.db!, FILE_STORE, `media:${projectId}/${scriptId}/${sceneId}/${filename}`, buffer);
+      await idbPut(this.db!, FILE_STORE, this.k(`media:${projectId}/${scriptId}/${sceneId}/${filename}`), buffer);
     }
     return mediaFile;
   }
@@ -359,7 +484,7 @@ export class ClientStorage {
         filename,
       );
     } else {
-      await idbDelete(this.db!, FILE_STORE, `media:${projectId}/${scriptId}/${sceneId}/${filename}`);
+      await idbDelete(this.db!, FILE_STORE, this.k(`media:${projectId}/${scriptId}/${sceneId}/${filename}`));
     }
   }
 
@@ -373,7 +498,7 @@ export class ClientStorage {
         filename,
       );
     }
-    const buf = await idbGet<ArrayBuffer>(this.db!, FILE_STORE, `media:${projectId}/${scriptId}/${sceneId}/${filename}`);
+    const buf = await idbGet<ArrayBuffer>(this.db!, FILE_STORE, this.k(`media:${projectId}/${scriptId}/${sceneId}/${filename}`));
     if (!buf) return null;
     return URL.createObjectURL(new Blob([buf]));
   }
@@ -391,7 +516,7 @@ export class ClientStorage {
         filename, buffer,
       );
     } else {
-      await idbPut(this.db!, FILE_STORE, `audio:${projectId}/${scriptId}/${sceneId}/${filename}`, buffer);
+      await idbPut(this.db!, FILE_STORE, this.k(`audio:${projectId}/${scriptId}/${sceneId}/${filename}`), buffer);
     }
   }
 
@@ -405,7 +530,7 @@ export class ClientStorage {
         filename,
       );
     } else {
-      await idbDelete(this.db!, FILE_STORE, `audio:${projectId}/${scriptId}/${sceneId}/${filename}`);
+      await idbDelete(this.db!, FILE_STORE, this.k(`audio:${projectId}/${scriptId}/${sceneId}/${filename}`));
     }
   }
 
@@ -419,7 +544,7 @@ export class ClientStorage {
         filename,
       );
     }
-    const buf = await idbGet<ArrayBuffer>(this.db!, FILE_STORE, `audio:${projectId}/${scriptId}/${sceneId}/${filename}`);
+    const buf = await idbGet<ArrayBuffer>(this.db!, FILE_STORE, this.k(`audio:${projectId}/${scriptId}/${sceneId}/${filename}`));
     if (!buf) return null;
     return URL.createObjectURL(new Blob([buf]));
   }
@@ -458,20 +583,18 @@ export class ClientStorage {
 
   // ─── Export (Save to Disk) ────────────────────────────────────────────
 
-  // Returns the export folder name. Only works in FSAA mode.
   async saveScriptToDisk(projectId: string, script: Script, projectName: string): Promise<string> {
     if (!this.canSaveToDisk || !this.root) {
       throw new Error('Save to Disk requires a picked storage folder (not supported in this browser).');
     }
-    // Strip control chars, then replace FSAA-illegal chars, trim edges, cap length
     const safe = (s: string) =>
       s
-        .replace(/[\x00-\x1f\x7f]/g, '')          // control characters
-        .replace(/[/\\?%*:|"<>.]/g, '-')           // FSAA-illegal + dot (can't start with .)
-        .replace(/\s+/g, ' ')                      // collapse whitespace
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        .replace(/[/\\?%*:|"<>.]/g, '-')
+        .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 50)
-        .trim()                                    // re-trim after slice
+        .trim()
         || 'untitled';
     const folder = `${safe(projectName)} - ${safe(script.title)}`;
 
@@ -519,37 +642,46 @@ export class ClientStorage {
 
   private async _idbReadJson<T>(key: string): Promise<T | null> {
     if (!this.db) return null;
-    const raw = await idbGet<string>(this.db, FILE_STORE, key);
+    const raw = await idbGet<string>(this.db, FILE_STORE, this.k(key));
     if (!raw) return null;
     try { return JSON.parse(raw) as T; } catch { return null; }
   }
 
   private async _idbWriteJson(key: string, data: unknown): Promise<void> {
     if (!this.db) return;
-    await idbPut(this.db, FILE_STORE, key, JSON.stringify(data));
+    await idbPut(this.db, FILE_STORE, this.k(key), JSON.stringify(data));
   }
 
   private async _idbDeleteKey(key: string): Promise<void> {
     if (!this.db) return;
-    await idbDelete(this.db, FILE_STORE, key);
+    await idbDelete(this.db, FILE_STORE, this.k(key));
   }
 
   private async _idbDeletePrefix(prefix: string): Promise<void> {
     if (!this.db) return;
-    const keys = await idbAllKeys(this.db, FILE_STORE);
-    await Promise.all(keys.filter(k => k.startsWith(prefix)).map(k => idbDelete(this.db!, FILE_STORE, k)));
+    const full  = this.k(prefix);
+    const keys  = await idbAllKeys(this.db, FILE_STORE);
+    await Promise.all(keys.filter(k => k.startsWith(full)).map(k => idbDelete(this.db!, FILE_STORE, k)));
   }
 
-  // Lists JSON files whose keys match: prefix + <anything> + suffix
   private async _idbListJson<T>(prefix: string, suffix: string): Promise<T[]> {
     if (!this.db) return [];
+    const full = this.k(prefix);
     const keys = await idbAllKeys(this.db, FILE_STORE);
-    const hits  = keys.filter(k => k.startsWith(prefix) && k.endsWith(suffix));
-    return (await Promise.all(hits.map(k => this._idbReadJson<T>(k)))).filter(Boolean) as T[];
+    const hits  = keys.filter(k => k.startsWith(full) && k.endsWith(suffix));
+    return (await Promise.all(hits.map(k => this._idbReadJsonRaw<T>(k)))).filter(Boolean) as T[];
   }
 
   private async _idbListJsonWithSuffix<T>(prefix: string, suffix: string): Promise<T[]> {
     return this._idbListJson<T>(prefix, suffix);
+  }
+
+  // Reads a raw (already-prefixed) IDB key directly.
+  private async _idbReadJsonRaw<T>(rawKey: string): Promise<T | null> {
+    if (!this.db) return null;
+    const raw = await idbGet<string>(this.db, FILE_STORE, rawKey);
+    if (!raw) return null;
+    try { return JSON.parse(raw) as T; } catch { return null; }
   }
 }
 

@@ -1,11 +1,8 @@
 'use client';
 
-// Wire this up in app/layout.tsx during Phase 3.
-// Usage:  <StorageProvider>{children}</StorageProvider>
-// Access: const s = useStorage();  await s.listProjects(); etc.
-
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { storage, ClientStorage } from '@/lib/client-storage';
+import { useAuth } from '@/components/AuthProvider';
 
 const StorageContext = createContext<ClientStorage | null>(null);
 
@@ -18,15 +15,27 @@ export function useStorage(): ClientStorage {
 type Status = 'loading' | 'needs-folder' | 'ready';
 
 export function StorageProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<Status>('loading');
+  const { user } = useAuth();
+  const [status, setStatus]       = useState<Status>('loading');
+  const [ownerError, setOwnerError] = useState('');
 
   useEffect(() => {
-    storage.init().then(ready => setStatus(ready ? 'ready' : 'needs-folder'));
-  }, []);
+    if (!user) return;
+    setStatus('loading');
+    setOwnerError('');
+    storage.init(user.id).then(ready => setStatus(ready ? 'ready' : 'needs-folder'));
+  }, [user]);
 
   const pickFolder = async () => {
-    const ok = await storage.pickDirectory();
-    if (ok) setStatus('ready');
+    setOwnerError('');
+    try {
+      const ok = await storage.pickDirectory(user?.email ?? '');
+      if (ok) setStatus('ready');
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('OWNER:')) {
+        setOwnerError(err.message.replace('OWNER:', ''));
+      }
+    }
   };
 
   if (status === 'loading') {
@@ -53,18 +62,30 @@ export function StorageProvider({ children }: { children: ReactNode }) {
             <p className="text-sm text-[#71717a] leading-relaxed">
               All your projects, scripts, and media will be saved to a folder on your computer.
               Pick any folder — or create a new one called{' '}
-              <span className="font-mono text-[#a1a1aa]">YoutubeAnalyzer</span>.
+              <span className="font-mono text-[#a1a1aa]">ReelIQ</span>.
             </p>
+            {user?.email && (
+              <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>
+                Signed in as <span className="font-medium">{user.email}</span>
+              </p>
+            )}
           </div>
+
+          {ownerError && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-left text-sm text-red-400">
+              {ownerError}
+            </div>
+          )}
+
           <button
             onClick={pickFolder}
             className="w-full py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
           >
-            Pick Folder
+            {ownerError ? 'Pick a Different Folder' : 'Pick Folder'}
           </button>
           <p className="text-xs text-[#52525b]">
             Your browser will ask for permission to read and write to that folder.
-            You only need to do this once.
+            You only need to do this once per account.
           </p>
           {!isFsaaAvailable() && (
             <div
