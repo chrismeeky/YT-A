@@ -54,6 +54,7 @@ export default function AnalyzePage() {
   const [uploadsPlaylistId, setUploadsPlaylistId] = useState<string | undefined>();
   const [bookmarks, setBookmarks] = useState<ChannelBookmark[]>([]);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<'newest' | 'popular'>('newest');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -364,9 +365,25 @@ export default function AnalyzePage() {
                 Step 2 — Select Videos{' '}
                 <span className="text-[#52525b]">({selected.size}/3 selected)</span>
               </h2>
-              {selected.size === 3 && (
-                <span className="text-xs text-yellow-500">Maximum reached</span>
-              )}
+              <div className="flex items-center gap-2">
+                {selected.size === 3 && (
+                  <span className="text-xs text-yellow-500">Maximum reached</span>
+                )}
+                <div className="flex rounded-lg border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
+                  {(['newest', 'popular'] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setSortBy(s)}
+                      className="px-3 py-1.5 font-medium capitalize transition-colors"
+                      style={sortBy === s
+                        ? { background: '#6366f1', color: '#fff' }
+                        : { background: 'var(--surface-2)', color: 'var(--text-3)' }}
+                    >
+                      {s === 'newest' ? '🕐 Newest' : '🔥 Popular'}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="flex gap-3 items-center">
               <input
@@ -389,7 +406,11 @@ export default function AnalyzePage() {
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-6">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-2">
-              {videos.map(video => {
+              {[...videos].sort((a, b) =>
+                sortBy === 'popular'
+                  ? b.viewCount - a.viewCount
+                  : new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()
+              ).map(video => {
                 const isSelected = selected.has(video.id);
                 const isDisabled = !isSelected && selected.size >= 3;
                 return (

@@ -5,7 +5,7 @@ import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { ChannelVideo } from '@/lib/types';
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(
   request: NextRequest,

@@ -63,6 +63,37 @@ function timeAgo(iso: string): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
+// ─── YouTube URL → channel lookup params ─────────────────────────────────
+
+interface ChannelRef {
+  channelId?: string;
+  forHandle?: string;
+  forUsername?: string;
+}
+
+function parseYouTubeChannelUrl(input: string): ChannelRef | null {
+  const s = input.trim();
+  // Bare handle: @name
+  if (/^@[\w.-]+$/.test(s)) return { forHandle: s };
+  try {
+    const url = new URL(s);
+    const host = url.hostname.replace(/^www\./, '');
+    if (host !== 'youtube.com' && host !== 'youtu.be') return null;
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts[0] === 'channel' && parts[1]) return { channelId: parts[1] };
+    if (parts[0]?.startsWith('@')) return { forHandle: parts[0] };
+    if (parts[0] === 'c' && parts[1]) return { forHandle: '@' + parts[1] };
+    if (parts[0] === 'user' && parts[1]) return { forUsername: parts[1] };
+  } catch { /* not a URL */ }
+  return null;
+}
+
+function fmtMoney(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${Math.round(n)}`;
+}
+
 // ─── Country list (ISO 3166-1 alpha-2) ───────────────────────────────────
 
 const WORLD_COUNTRIES: { code: string; name: string }[] = [
@@ -890,6 +921,104 @@ function ChannelCard({
   );
 }
 
+// ─── Earnings Estimate ────────────────────────────────────────────────────
+
+const RPM_PRESETS = [
+  { label: '$2 (Low)',  rpm: 2  },
+  { label: '$5 (Mid)',  rpm: 5  },
+  { label: '$12 (High)', rpm: 12 },
+];
+
+function EarningsEstimate({ channel, videos }: { channel: ResearchChannel; videos: ResearchVideo[] }) {
+  const [rpm, setRpm] = useState(5);
+
+  // Derive upload cadence from the video sample
+  const sorted = [...videos].sort(
+    (a, b) => new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime(),
+  );
+  const spanMs = sorted.length >= 2
+    ? new Date(sorted[sorted.length - 1].publishedAt).getTime() - new Date(sorted[0].publishedAt).getTime()
+    : 0;
+  const spanMonths = spanMs > 0 ? Math.max(0.5, spanMs / (1000 * 60 * 60 * 24 * 30)) : 1;
+  const uploadsPerMonth = videos.length > 1 ? videos.length / spanMonths : 4;
+  const monthlyViews    = channel.avgRecentViews * uploadsPerMonth;
+  const monthlyEarnings = (monthlyViews / 1000) * rpm;
+  const annualEarnings  = monthlyEarnings * 12;
+
+  // Estimated CPM-based range (low $2, high $12)
+  const low  = (monthlyViews / 1000) * 2;
+  const high = (monthlyViews / 1000) * 12;
+
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-3)' }}>
+        Estimated Earnings
+      </p>
+      <div className="rounded-xl border p-4 space-y-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+        {/* RPM selector */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-3)' }}>RPM:</span>
+          {RPM_PRESETS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => setRpm(p.rpm)}
+              className="px-2.5 py-0.5 rounded-full text-xs transition-colors border"
+              style={rpm === p.rpm
+                ? { background: '#6366f1', color: '#fff', borderColor: '#6366f1' }
+                : { background: 'transparent', color: 'var(--text-3)', borderColor: 'var(--border)' }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Estimates */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5" style={{ color: 'var(--text-3)' }}>Monthly</p>
+            <p className="text-xl font-bold" style={{ color: 'var(--text)' }}>{fmtMoney(monthlyEarnings)}</p>
+            <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>{fmt(Math.round(monthlyViews))} views/mo</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5" style={{ color: 'var(--text-3)' }}>Annual</p>
+            <p className="text-xl font-bold" style={{ color: '#22c55e' }}>{fmtMoney(annualEarnings)}</p>
+            <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>{uploadsPerMonth.toFixed(1)} videos/mo avg</p>
+          </div>
+        </div>
+
+        {/* Range bar */}
+        <div>
+          <div className="flex items-center justify-between text-[10px] mb-1" style={{ color: 'var(--text-3)' }}>
+            <span>Low ({fmtMoney(low)}/mo)</span>
+            <span>High ({fmtMoney(high)}/mo)</span>
+          </div>
+          <div className="relative h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+            <div
+              className="absolute inset-y-0 rounded-full"
+              style={{
+                background: 'linear-gradient(to right, #6366f1, #22c55e)',
+                left: `${(low / (high || 1)) * 10}%`,
+                right: 0,
+              }}
+            />
+            {/* Current RPM marker */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-white"
+              style={{ left: `${Math.min(99, ((rpm - 2) / 10) * 100)}%` }}
+            />
+          </div>
+        </div>
+
+        <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-3)', opacity: 0.7 }}>
+          Based on {fmt(Math.round(channel.avgRecentViews))} avg views/video × ~{uploadsPerMonth.toFixed(1)} uploads/month.
+          RPM varies by niche, geography, and ad demand. Finance &amp; tech channels often earn $8–$20 RPM;
+          gaming &amp; entertainment typically $2–$5. These are illustrative estimates, not actual YouTube revenue.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Channel Detail Drawer ────────────────────────────────────────────────
 
 const DATE_STEPS = [
@@ -968,6 +1097,154 @@ function ChannelDrawer({
   const data = detail ?? channel;
   const ol = outlierLabel(data.outlierScore);
 
+  const handleExportPDF = () => {
+    const videos = detail?.recentVideos ?? [];
+    const sorted = [...videos].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+    // Insights
+    const withDur = videos.filter(v => parseDurSecs(v.duration) > 0);
+    const shortsPct = withDur.length > 0 ? Math.round(withDur.filter(v => parseDurSecs(v.duration) <= 60).length / withDur.length * 100) : 0;
+    const withViews = videos.filter(v => v.viewCount > 0);
+    const avgEng = withViews.length > 0 ? withViews.reduce((s, v) => s + (v.likeCount + v.commentCount) / v.viewCount * 100, 0) / withViews.length : 0;
+    const avgLike = withViews.length > 0 ? withViews.reduce((s, v) => s + v.likeCount / v.viewCount * 100, 0) / withViews.length : 0;
+    const n = Math.min(5, Math.floor(sorted.length / 2));
+    const newestAvg = sorted.slice(0, n).filter(v => v.viewCount > 0).reduce((s, v, _, a) => s + v.viewCount / a.length, 0);
+    const oldestAvg = sorted.slice(-n).filter(v => v.viewCount > 0).reduce((s, v, _, a) => s + v.viewCount / a.length, 0);
+    const trendPct = oldestAvg > 0 ? ((newestAvg - oldestAvg) / oldestAvg * 100) : 0;
+    const latest = sorted[0];
+    const daysSince = latest ? Math.max(1, (Date.now() - new Date(latest.publishedAt).getTime()) / 86_400_000) : 1;
+    const velocity = latest ? Math.round(latest.viewCount / daysSince) : 0;
+
+    // Earnings (mid RPM $5)
+    const chronoSorted = [...videos].sort((a, b) => new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime());
+    const spanMs = videos.length >= 2 ? new Date(chronoSorted[chronoSorted.length - 1].publishedAt).getTime() - new Date(chronoSorted[0].publishedAt).getTime() : 0;
+    const spanMonths = spanMs > 0 ? Math.max(0.5, spanMs / (1000 * 60 * 60 * 24 * 30)) : 1;
+    const uploadsPerMonth = videos.length > 1 ? videos.length / spanMonths : 4;
+    const monthlyViews = data.avgRecentViews * uploadsPerMonth;
+    const midMonthly = (monthlyViews / 1000) * 5;
+    const midAnnual = midMonthly * 12;
+    const lowMonthly = (monthlyViews / 1000) * 2;
+    const highMonthly = (monthlyViews / 1000) * 12;
+
+    // Avg length
+    const validDur = withDur;
+    const avgSecs = validDur.length > 0 ? validDur.reduce((s, v) => s + parseDurSecs(v.duration), 0) / validDur.length : 0;
+
+    const ol2 = outlierLabel(data.outlierScore);
+
+    const videoRows = sorted.slice(0, 30).map(v => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v.title.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap;">${fmt(v.viewCount)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap;">${fmt(v.likeCount)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap;">${v.duration || '—'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap;">${fmtDate(v.publishedAt)}</td>
+      </tr>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${data.title} — Channel Report</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; background: #fff; padding: 32px; font-size: 13px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
+  h2 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin-bottom: 10px; margin-top: 24px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
+  .header { display: flex; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 2px solid #111; margin-bottom: 4px; }
+  .header img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; }
+  .meta { color: #6b7280; font-size: 12px; margin-top: 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+  .card-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #9ca3af; margin-bottom: 4px; }
+  .card-value { font-size: 20px; font-weight: 700; }
+  .card-sub { font-size: 10px; color: #9ca3af; margin-top: 2px; }
+  .highlight { border-color: #6366f1; background: #f5f3ff; }
+  .highlight .card-label { color: #6366f1; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { padding: 6px 8px; text-align: left; border-bottom: 2px solid #111; font-weight: 600; font-size: 11px; }
+  th:not(:first-child) { text-align: right; }
+  tr:nth-child(even) td { background: #f9fafb; }
+  .earnings-row { display: flex; gap: 10px; }
+  .earnings-card { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+  .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; display: flex; justify-content: space-between; }
+  @media print { body { padding: 16px; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  ${data.thumbnail ? `<img src="${data.thumbnail}" alt="" onerror="this.style.display='none'">` : ''}
+  <div>
+    <h1>${data.title.replace(/</g,'&lt;')}</h1>
+    <div class="meta">
+      ${data.customUrl ? `${data.customUrl} &nbsp;·&nbsp; ` : ''}
+      ${data.country ? `${data.country} &nbsp;·&nbsp; ` : ''}
+      Created ${fmtDate(data.publishedAt)}
+    </div>
+    ${data.description ? `<div class="meta" style="margin-top:6px;max-width:560px;line-height:1.5;">${data.description.slice(0, 200).replace(/</g,'&lt;')}${data.description.length > 200 ? '…' : ''}</div>` : ''}
+  </div>
+</div>
+
+<h2>Key Metrics</h2>
+<div class="grid3">
+  <div class="card"><div class="card-label">Subscribers</div><div class="card-value">${fmt(data.subscriberCount)}</div></div>
+  <div class="card"><div class="card-label">Total Views</div><div class="card-value">${fmt(data.viewCount)}</div></div>
+  <div class="card"><div class="card-label">Videos Published</div><div class="card-value">${fmt(data.videoCount)}</div></div>
+  <div class="card"><div class="card-label">Recent Avg Views</div><div class="card-value">${fmt(data.avgRecentViews)}</div><div class="card-sub">last ${videos.length || 15} videos</div></div>
+  ${avgSecs > 0 ? `<div class="card"><div class="card-label">Avg Video Length</div><div class="card-value">${fmtAvgDur(Math.round(avgSecs))}</div></div>` : ''}
+  <div class="card highlight"><div class="card-label">Outlier Score</div><div class="card-value" style="color:${ol2.color}">${data.outlierScore.toFixed(2)}×</div><div class="card-sub" style="color:${ol2.color}">${ol2.label}</div></div>
+</div>
+
+${videos.length >= 3 ? `
+<h2>Content Insights</h2>
+<div class="grid2">
+  <div class="card"><div class="card-label">Engagement Rate</div><div class="card-value">${avgEng.toFixed(2)}%</div><div class="card-sub">${avgLike.toFixed(2)}% likes · ${(avgEng - avgLike).toFixed(2)}% comments</div></div>
+  <div class="card"><div class="card-label">Content Mix</div><div class="card-value">${shortsPct}% Shorts</div><div class="card-sub">${100 - shortsPct}% long-form</div></div>
+  <div class="card"><div class="card-label">Trend (newest vs oldest)</div><div class="card-value" style="color:${trendPct > 10 ? '#16a34a' : trendPct < -10 ? '#dc2626' : '#ca8a04'}">${trendPct > 10 ? '↑' : trendPct < -10 ? '↓' : '→'} ${Math.abs(Math.round(trendPct))}%</div><div class="card-sub">newest 5 vs oldest 5 avg views</div></div>
+  <div class="card"><div class="card-label">View Velocity</div><div class="card-value">${fmt(velocity)}/day</div><div class="card-sub">latest video pace</div></div>
+</div>` : ''}
+
+${videos.length >= 3 ? `
+<h2>Estimated Earnings (Mid RPM $5)</h2>
+<div class="earnings-row">
+  <div class="earnings-card"><div class="card-label">Monthly</div><div class="card-value">${fmtMoney(midMonthly)}</div><div class="card-sub">${fmt(Math.round(monthlyViews))} views/mo · ${uploadsPerMonth.toFixed(1)} uploads/mo</div></div>
+  <div class="earnings-card"><div class="card-label">Annual</div><div class="card-value" style="color:#16a34a">${fmtMoney(midAnnual)}</div></div>
+  <div class="earnings-card"><div class="card-label">Low–High Range (monthly)</div><div class="card-value">${fmtMoney(lowMonthly)} – ${fmtMoney(highMonthly)}</div><div class="card-sub">$2 RPM to $12 RPM</div></div>
+</div>
+<p style="font-size:10px;color:#9ca3af;margin-top:8px;">RPM varies by niche, geography, and ad demand. These are illustrative estimates only.</p>` : ''}
+
+${sorted.length > 0 ? `
+<h2>Recent Videos (${Math.min(sorted.length, 30)} of ${videos.length})</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th style="text-align:right">Views</th>
+      <th style="text-align:right">Likes</th>
+      <th style="text-align:right">Duration</th>
+      <th style="text-align:right">Published</th>
+    </tr>
+  </thead>
+  <tbody>${videoRows}</tbody>
+</table>` : ''}
+
+<div class="footer">
+  <span>Generated by ReelIQ · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+  <span>youtube.com/${data.customUrl || `channel/${data.id}`}</span>
+</div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('Please allow pop-ups for this site to export PDF.'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 600);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div
@@ -990,6 +1267,14 @@ function ChannelDrawer({
               : { background: 'var(--surface-2)', color: 'var(--text)' }}
           >
             {bookmarked ? '★ Saved' : '☆ Save'}
+          </button>
+          <button
+            onClick={handleExportPDF}
+            title="Export channel report as PDF"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+            style={{ background: 'var(--surface-2)', color: 'var(--text)' }}
+          >
+            ⬇ PDF
           </button>
           <button
             onClick={() => {
@@ -1167,6 +1452,10 @@ function ChannelDrawer({
 
           {detail && !loadingDetail && (
             <PostingPattern videos={detail.recentVideos} />
+          )}
+
+          {detail && !loadingDetail && detail.recentVideos.length >= 3 && (
+            <EarningsEstimate channel={data} videos={detail.recentVideos} />
           )}
 
           {/* Description */}
@@ -1844,8 +2133,36 @@ export default function ResearchPage() {
     doSearch(buildEffectiveQuery(query, filters.countries));
   }, [filters.countries, query, apiKey, doSearch, buildEffectiveQuery]);
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // If the user pasted a YouTube channel URL, fetch that channel directly.
+    const ref = parseYouTubeChannelUrl(query.trim());
+    if (ref) {
+      setSearching(true);
+      setSearchError('');
+      setResults([]);
+      try {
+        const res = await fetch('/api/research/channel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...ref, youtubeApiKey: apiKey, videoLimit: 15 }),
+        });
+        const data = await res.json() as { channel?: ResearchChannel; error?: string };
+        if (!res.ok || data.error) throw new Error(data.error ?? 'Channel not found');
+        if (data.channel) {
+          setResults([data.channel]);
+          setLastQuery(query);
+          openDrawer(data.channel);
+        }
+      } catch (err) {
+        setSearchError(err instanceof Error ? err.message : 'Could not find that channel. Try searching by keyword.');
+      } finally {
+        setSearching(false);
+      }
+      return;
+    }
+
     doSearch(buildEffectiveQuery(query, filters.countries));
   };
 
@@ -1922,7 +2239,7 @@ export default function ResearchPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>Channel Research</h1>
-            <p className="text-sm mt-0.5" style={{ color: 'var(--text-3)' }}>Find and analyze YouTube channels by niche or keyword</p>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--text-3)' }}>Search by niche or keyword — or paste any channel URL / @handle directly</p>
           </div>
           {/* Tabs */}
           <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
@@ -1950,9 +2267,8 @@ export default function ResearchPage() {
         </div>
       )}
 
-      {/* Search tab */}
-      {tab === 'search' && (
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* Search tab — always mounted so state (results, filters) survives tab switches */}
+      <div className={`flex-1 flex flex-col min-h-0 overflow-hidden${tab !== 'search' ? ' hidden' : ''}`}>
           {/* Search bar */}
           <div className="px-6 py-4 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
             <form onSubmit={handleSearch} className="flex gap-3">
@@ -1960,7 +2276,7 @@ export default function ResearchPage() {
                 ref={inputRef}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Search by niche, keyword, or topic (e.g. personal finance, fitness, cooking)…"
+                placeholder="Search by niche or keyword — or paste a channel URL / @handle…"
                 className="flex-1 rounded-lg px-4 py-2.5 text-sm border outline-none focus:border-[#6366f1] transition-colors"
                 style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
                 disabled={searching || noApiKey}
@@ -2130,11 +2446,9 @@ export default function ResearchPage() {
             )}
           </div>
         </div>
-      )}
 
-      {/* Bookmarks tab */}
-      {tab === 'bookmarks' && (
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+      {/* Bookmarks tab — always mounted so bookmark edits aren't lost */}
+      <div className={`flex-1 overflow-y-auto px-6 py-4${tab !== 'bookmarks' ? ' hidden' : ''}`}>
           {bookmarks.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
               <div className="text-5xl opacity-20">★</div>
@@ -2168,8 +2482,7 @@ export default function ResearchPage() {
                 ))}
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Channel detail drawer */}
       {selectedChannel && (
