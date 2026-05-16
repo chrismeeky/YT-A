@@ -15,7 +15,7 @@ export function useStorage(): ClientStorage {
 type Status = 'loading' | 'needs-folder' | 'ready';
 
 export function StorageProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [status, setStatus]       = useState<Status>('loading');
   const [ownerError, setOwnerError] = useState('');
 
@@ -87,6 +87,13 @@ export function StorageProvider({ children }: { children: ReactNode }) {
             Your browser will ask for permission to read and write to that folder.
             You only need to do this once per account.
           </p>
+          <button
+            onClick={signOut}
+            className="text-xs transition-colors hover:text-white"
+            style={{ color: 'var(--text-3)' }}
+          >
+            Sign out / switch account
+          </button>
           {!isFsaaAvailable() && (
             <div
               className="rounded-lg border px-4 py-3 text-left text-xs space-y-1"
