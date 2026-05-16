@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
@@ -22,6 +22,9 @@ export default function ProjectPage() {
   const [tab, setTab] = useState<'analyses' | 'scripts'>('analyses');
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'analysis' | 'script'; id: string } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([
@@ -46,6 +49,34 @@ export default function ProjectPage() {
     await storage.deleteScript(id, scriptId);
     setScripts(s => s.filter(x => x.id !== scriptId));
     setConfirmDelete(null);
+  };
+
+  const handleImportAnalysis = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImportError('');
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text) as Analysis;
+      if (!data.channelInsights || !data.videoAnalyses || !data.name) {
+        throw new Error('Invalid analysis file — missing required fields.');
+      }
+      const imported: Analysis = {
+        ...data,
+        id: crypto.randomUUID(),
+        projectId: id,
+        createdAt: data.createdAt ?? new Date().toISOString(),
+      };
+      await storage.saveAnalysis(id, imported);
+      setAnalyses(prev => [imported, ...prev]);
+      setTab('analyses');
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import analysis.');
+    } finally {
+      setImporting(false);
+    }
   };
 
   if (loading) {
@@ -79,7 +110,23 @@ export default function ProjectPage() {
             {analyses.length} {analyses.length === 1 ? 'analysis' : 'analyses'} · {scripts.length} {scripts.length === 1 ? 'script' : 'scripts'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <input
+            ref={importRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImportAnalysis}
+          />
+          <button
+            onClick={() => importRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-1 px-4 py-2 rounded-lg border text-sm transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40"
+            style={{ borderColor: 'var(--border)' }}
+            title="Import a .reeliq.json analysis file"
+          >
+            {importing ? '⟳ Importing…' : '⬆ Import Analysis'}
+          </button>
           <Link
             href={analyzeHref}
             className="flex items-center gap-1 px-4 py-2 rounded-lg border text-sm transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
@@ -97,6 +144,13 @@ export default function ProjectPage() {
           )}
         </div>
       </div>
+
+      {importError && (
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {importError}
+          <button onClick={() => setImportError('')} className="ml-3 opacity-60 hover:opacity-100">✕</button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b" style={{ borderColor: 'var(--border)' }}>
