@@ -7,7 +7,7 @@ import { AuthProvider, useAuth } from '@/components/AuthProvider';
 import Sidebar from '@/components/Sidebar';
 
 const AUTH_PAGES   = ['/login', '/signup'];
-const PUBLIC_PAGES = ['/', '/login', '/signup'];
+const PUBLIC_PAGES = ['/', '/login', '/signup', '/docs'];
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -26,8 +26,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (loading) return null;
 
-  // Landing page — full-width scrollable, no sidebar
-  if (pathname === '/') {
+  // Public full-width pages — no sidebar
+  if (pathname === '/' || pathname === '/docs') {
     return <div className="flex-1 overflow-y-auto">{children}</div>;
   }
 

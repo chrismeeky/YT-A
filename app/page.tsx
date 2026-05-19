@@ -115,6 +115,13 @@ export default function LandingPage() {
             </div>
             <div className="flex items-center gap-3">
               <Link
+                href="/docs"
+                className="text-sm px-4 py-2 rounded-lg transition-colors hover:text-white"
+                style={{ color: 'var(--text-2)' }}
+              >
+                Docs
+              </Link>
+              <Link
                 href="/login"
                 className="text-sm px-4 py-2 rounded-lg transition-colors hover:text-white"
                 style={{ color: 'var(--text-2)' }}
@@ -280,6 +287,7 @@ export default function LandingPage() {
               © {new Date().getFullYear()} ReelIQ. Built for YouTube creators.
             </p>
             <div className="flex gap-4 text-sm" style={{ color: 'var(--text-3)' }}>
+              <Link href="/docs" className="hover:text-white transition-colors">Docs</Link>
               <Link href="/login" className="hover:text-white transition-colors">Sign In</Link>
               <Link href="/signup" className="hover:text-white transition-colors">Sign Up</Link>
             </div>
