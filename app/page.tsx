@@ -288,6 +288,8 @@ export default function LandingPage() {
             </p>
             <div className="flex gap-4 text-sm" style={{ color: 'var(--text-3)' }}>
               <Link href="/docs" className="hover:text-white transition-colors">Docs</Link>
+              <Link href="/about" className="hover:text-white transition-colors">About</Link>
+              <Link href="/tos" className="hover:text-white transition-colors">Terms</Link>
               <Link href="/login" className="hover:text-white transition-colors">Sign In</Link>
               <Link href="/signup" className="hover:text-white transition-colors">Sign Up</Link>
             </div>
