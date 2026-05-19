@@ -334,40 +334,75 @@ export default function SettingsPage() {
         </div>
       </form>
 
-      <div
-        className="mt-8 rounded-xl border p-5"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-      >
-        <h3 className="font-medium text-sm mb-3">Prerequisites</h3>
-        <ul className="space-y-2 text-sm text-[#71717a]">
-          <li className="flex items-start gap-2">
-            <span className="text-green-500 mt-0.5">▶</span>
-            <span>
-              <strong className="text-[#a1a1aa]">YouTube Data API key</strong> needed for fetching channel videos.{' '}
-              Enable the YouTube Data API v3 at{' '}
-              <span className="font-mono text-xs bg-[#1a1a1a] px-1.5 py-0.5 rounded">console.cloud.google.com</span>
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-500 mt-0.5">▶</span>
-            <span>
-              <strong className="text-[#a1a1aa]">Anthropic API key</strong> needed for analysis and script generation.
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-500 mt-0.5">▶</span>
-            <span>
-              <strong className="text-[#a1a1aa]">ElevenLabs API key</strong> needed for scene audio generation (optional).
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-green-500 mt-0.5">▶</span>
-            <span>
-              <strong className="text-[#a1a1aa]">Pexels API key</strong> needed for stock photo search per scene (optional, free at pexels.com/api).
-            </span>
-          </li>
-        </ul>
-      </div>
+      {(() => {
+        const checks = [
+          {
+            label: 'Anthropic',
+            ok: BETA_MODE || !!form.anthropicApiKey,
+            betaProvided: true,
+            description: 'Channel analysis and script generation',
+            critical: true,
+          },
+          {
+            label: 'YouTube Data API',
+            ok: !!form.youtubeApiKey,
+            betaProvided: false,
+            description: 'Fetching channel videos for analysis',
+            critical: true,
+          },
+          {
+            label: 'ElevenLabs',
+            ok: BETA_MODE || !!form.elevenLabsApiKey,
+            betaProvided: true,
+            description: 'Scene audio generation',
+            critical: false,
+          },
+          {
+            label: 'Pexels',
+            ok: BETA_MODE || !!form.pexelsApiKey,
+            betaProvided: true,
+            description: 'Stock photos and videos per scene',
+            critical: false,
+          },
+        ];
+        const pendingCount = checks.filter(c => !c.ok).length;
+        return (
+          <div
+            className="mt-8 rounded-xl border p-5"
+            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <h3 className="font-medium text-sm">Integrations</h3>
+              {pendingCount > 0 ? (
+                <span className="text-[10px] font-bold bg-amber-500 text-black rounded-full px-1.5 py-0.5">{pendingCount} pending</span>
+              ) : (
+                <span className="text-[10px] font-bold bg-green-500/20 text-green-400 rounded-full px-1.5 py-0.5">All set</span>
+              )}
+            </div>
+            <div className="space-y-3">
+              {checks.map(c => (
+                <div key={c.label} className="flex items-start gap-3">
+                  <span className={`mt-0.5 text-sm flex-shrink-0 ${c.ok ? 'text-green-400' : c.critical ? 'text-red-400' : 'text-amber-400'}`}>
+                    {c.ok ? '✓' : c.critical ? '✕' : '○'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${c.ok ? 'text-[#a1a1aa]' : 'text-white'}`}>{c.label}</span>
+                      {c.ok && BETA_MODE && c.betaProvided && (
+                        <span className="text-[10px] text-[#52525b]">platform key</span>
+                      )}
+                      {!c.ok && c.critical && (
+                        <span className="text-[10px] font-medium text-red-400">Required</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[#52525b]">{c.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

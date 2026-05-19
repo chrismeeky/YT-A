@@ -8,6 +8,23 @@ import type { Project } from '@/lib/types';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useStorage } from '@/components/StorageProvider';
 
+const BETA_MODE = process.env.NEXT_PUBLIC_BETA_MODE === 'true';
+
+interface PendingIntegration { label: string; description: string; critical: boolean }
+
+function getPending(s: Record<string, string>): PendingIntegration[] {
+  const items: PendingIntegration[] = [];
+  if (!BETA_MODE && !s.anthropicApiKey)
+    items.push({ label: 'Anthropic', description: 'Required for channel analysis and script generation', critical: true });
+  if (!s.youtubeApiKey)
+    items.push({ label: 'YouTube Data API', description: 'Required for fetching channel videos', critical: true });
+  if (!BETA_MODE && !s.elevenLabsApiKey)
+    items.push({ label: 'ElevenLabs', description: 'Needed for scene audio generation', critical: false });
+  if (!BETA_MODE && !s.pexelsApiKey)
+    items.push({ label: 'Pexels', description: 'Needed for stock photos and videos per scene', critical: false });
+  return items;
+}
+
 export default function Dashboard() {
   const storage = useStorage();
   const searchParams = useSearchParams();
@@ -16,11 +33,16 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const [pending, setPending] = useState<PendingIntegration[]>([]);
 
   useEffect(() => {
     storage.listProjects()
       .then(data => { setProjects(data); setLoading(false); })
       .catch(() => setLoading(false));
+  }, [storage]);
+
+  useEffect(() => {
+    storage.getSettings().then(s => setPending(getPending(s as unknown as Record<string, string>)));
   }, [storage]);
 
   const deleteProject = async (id: string) => {
@@ -43,6 +65,37 @@ export default function Dashboard() {
           <span>+</span> New Project
         </Link>
       </div>
+
+      {pending.length > 0 && (
+        <div
+          className="mb-8 rounded-xl border p-5"
+          style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-amber-400 text-base">⚠</span>
+              <h2 className="text-sm font-semibold">Pending Setup</h2>
+              <span className="text-[10px] font-bold bg-amber-500 text-black rounded-full px-1.5 py-0.5">{pending.length}</span>
+            </div>
+            <Link href="/settings" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+              Go to Settings →
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {pending.map(item => (
+              <div key={item.label} className="flex items-start gap-3">
+                <span className={`mt-0.5 text-xs flex-shrink-0 ${item.critical ? 'text-red-400' : 'text-amber-400'}`}>
+                  {item.critical ? '✕' : '○'}
+                </span>
+                <div>
+                  <span className="text-sm font-medium">{item.label}</span>
+                  <span className="text-xs text-[#71717a] ml-2">{item.description}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-[#52525b]">Loading…</div>
