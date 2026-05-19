@@ -19,12 +19,13 @@ export function StorageProvider({ children }: { children: ReactNode }) {
   const [status, setStatus]       = useState<Status>('loading');
   const [ownerError, setOwnerError] = useState('');
 
+  const userId = user?.id;
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     setStatus('loading');
     setOwnerError('');
-    storage.init(user.id).then(ready => setStatus(ready ? 'ready' : 'needs-folder'));
-  }, [user]);
+    storage.init(userId).then(ready => setStatus(ready ? 'ready' : 'needs-folder'));
+  }, [userId]);
 
   const pickFolder = async () => {
     setOwnerError('');

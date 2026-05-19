@@ -66,3 +66,15 @@ export function resolvePromptLock(visualStyle: string | undefined): string | nul
   const preset = STYLE_PRESET_MAP.get(visualStyle);
   return preset ? preset.promptLock : visualStyle; // fall back to raw custom text
 }
+
+/** Infer the closest preset tag from a free-text production style description. */
+export function inferPresetTag(productionStyle: string): string | undefined {
+  const s = productionStyle.toLowerCase();
+  if (/anime|cel.?shad|manga/.test(s)) return 'anime';
+  if (/hand.?drawn|ghibli|2d anim|illustrated|gouache|ink line/.test(s)) return 'hand-drawn';
+  if (/watercolor/.test(s)) return 'watercolor';
+  if (/documentary|handheld|cin[eé]ma.v[eé]rit/.test(s)) return 'documentary';
+  if (/3d|cgi|pixar|dreamworks|three.dimension/.test(s)) return '3d-animated';
+  if (/photoreal|photo.?real|live.?action/.test(s)) return 'photoreal';
+  return undefined;
+}

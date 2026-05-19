@@ -63,7 +63,12 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [audioError, setAudioError] = useState('');
   const [audioSuccess, setAudioSuccess] = useState('');
   const [savingPhoto, setSavingPhoto] = useState<string | null>(null);
-  const [struckItems, setStruckItems] = useState<Set<string>>(new Set());
+  const [collapsedSegments, setCollapsedSegments] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(`segment-collapse:${script.id}`);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
   const [badgeAnimating, setBadgeAnimating] = useState(false);
   const prevMediaCountRef = useRef<number>(0);
   const scrollBodyRef = useRef<HTMLDivElement>(null);
@@ -100,11 +105,48 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     });
   };
 
-  const toggleStruck = (key: string) =>
-    setStruckItems(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const toggleCollapse = (key: string) =>
+    setCollapsedSegments(prev => {
+      const next = new Set(prev);
+      const full = `${activeSceneId}:${key}`;
+      next.has(full) ? next.delete(full) : next.add(full);
+      return next;
+    });
+
+  const isCollapsed = (key: string) =>
+    !!activeSceneId && collapsedSegments.has(`${activeSceneId}:${key}`);
+
+  // Persist collapse state to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(`segment-collapse:${script.id}`, JSON.stringify([...collapsedSegments])); }
+    catch { /* ignore */ }
+  }, [collapsedSegments, script.id]);
 
   // Clear interval on unmount
   useEffect(() => () => { if (holdIntervalRef.current) clearInterval(holdIntervalRef.current); }, []);
+
+  // When the window/tab loses focus the browser will refocus the last active element
+  // on return, scrolling the container to reveal it (e.g. the narration textarea at top).
+  // Blurring that element before the window deactivates leaves nothing to restore focus
+  // to, so the container stays exactly where the user left it.
+  // NOTE: scrollBodyRef.current is null on first mount (scene guard returns early), so
+  // we must check it lazily inside the handler rather than capturing it at effect time.
+  useEffect(() => {
+    const clearFocus = () => {
+      const el = scrollBodyRef.current;
+      if (!el) return;
+      if (el.contains(document.activeElement) && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    };
+    // window blur = OS window/app switch; visibilitychange = browser tab switch
+    window.addEventListener('blur', clearFocus);
+    document.addEventListener('visibilitychange', clearFocus);
+    return () => {
+      window.removeEventListener('blur', clearFocus);
+      document.removeEventListener('visibilitychange', clearFocus);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clear struck + active tab when switching between scenes (not on initial mount)
   const prevSceneRef = useRef<string | null>(null);
@@ -112,7 +154,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     const prev = prevSceneRef.current;
     prevSceneRef.current = activeSceneId;
     if (prev !== null && prev !== activeSceneId) {
-      setStruckItems(new Set()); onTabChange(''); setAudioSuccess(''); setAudioError(''); setSelectionPopover(null);
+      onTabChange(''); setAudioSuccess(''); setAudioError(''); setSelectionPopover(null);
       setDirtyImageIndices(new Set()); setDirtyVideoIndices(new Set());
     }
   }, [activeSceneId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -224,7 +266,6 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
         const body = scrollBodyRef.current;
         const bodyRect = body.getBoundingClientRect();
         const elRect = el.getBoundingClientRect();
-        // New images are appended at the bottom of the segment — scroll to reveal the segment bottom
         const scrollDown = elRect.bottom - bodyRect.bottom + 32;
         if (scrollDown > 0) {
           body.scrollBy({ top: scrollDown, behavior: 'smooth' });
@@ -911,38 +952,49 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                 >→</button>
                               </div>
                               <p
-                                onClick={() => struckItems.has(`img-${i}`) && toggleStruck(`img-${i}`)}
-                                title={struckItems.has(`img-${i}`) ? 'Click to unmark' : undefined}
-                                className={`flex-1 text-xs italic select-none transition-all ${dirtyImageIndices.has(i) ? '' : 'line-clamp-2'} ${
-                                  struckItems.has(`img-${i}`)
-                                    ? 'line-through text-indigo-300/30 cursor-pointer'
+                                onClick={() => toggleCollapse(`img-${i}`)}
+                                title={isCollapsed(`img-${i}`) ? 'Expand segment' : 'Collapse segment'}
+                                className={`flex-1 text-xs italic select-none cursor-pointer transition-all ${dirtyImageIndices.has(i) ? '' : 'line-clamp-2'} ${
+                                  isCollapsed(`img-${i}`)
+                                    ? 'text-indigo-300/40'
                                     : dirtyImageIndices.has(i) ? 'text-amber-300/70' : 'text-indigo-300/80'
                                 }`}
                               >
                                 {scene.imagePromptExcerpts[i]}
                               </p>
+                              <span
+                                onClick={() => toggleCollapse(`img-${i}`)}
+                                className="flex-shrink-0 text-[10px] text-indigo-300/40 hover:text-indigo-300/70 cursor-pointer select-none mt-0.5"
+                                title={isCollapsed(`img-${i}`) ? 'Expand segment' : 'Collapse segment'}
+                              >
+                                {isCollapsed(`img-${i}`) ? '▶' : '▼'}
+                              </span>
                             </div>
                           )}
-                          <textarea
-                            value={prompt}
-                            onChange={e => {
-                              const updated = [...(scene.imagePrompts ?? [''])];
-                              updated[i] = e.target.value;
-                              updateScene({ imagePrompts: updated });
-                            }}
-                            rows={2}
-                            className={`w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400 transition-opacity ${regenLoadingKeys.has(`img-${i}`) ? 'opacity-30' : ''}`}
-                            style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                            placeholder="Midjourney/DALL-E style prompt --ar 16:9…"
-                          />
-                          {regenLoadingKeys.has(`img-${i}`) && (
-                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded-md">
-                              <span className="text-[11px] text-indigo-300 animate-pulse font-medium">Regenerating…</span>
-                            </div>
+                          {!isCollapsed(`img-${i}`) && (
+                            <>
+                              <textarea
+                                value={prompt}
+                                onChange={e => {
+                                  const updated = [...(scene.imagePrompts ?? [''])];
+                                  updated[i] = e.target.value;
+                                  updateScene({ imagePrompts: updated });
+                                }}
+                                rows={2}
+                                className={`w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400 transition-opacity ${regenLoadingKeys.has(`img-${i}`) ? 'opacity-30' : ''}`}
+                                style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                                placeholder="Midjourney/DALL-E style prompt --ar 16:9…"
+                              />
+                              {regenLoadingKeys.has(`img-${i}`) && (
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded-md">
+                                  <span className="text-[11px] text-indigo-300 animate-pulse font-medium">Regenerating…</span>
+                                </div>
+                              )}
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <CopyButton text={prompt} />
+                              </div>
+                            </>
                           )}
-                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <CopyButton text={prompt} onCopy={() => toggleStruck(`img-${i}`)} />
-                          </div>
                         </div>
                         {promptChars(prompt).length > 0 && (
                           <div className="flex gap-1 mt-1.5 flex-wrap">
@@ -983,6 +1035,13 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                     const extKey = `${scene.id}-${i}`;
                     const ext = extendState[extKey];
                     const isExtension = scene.videoPromptIsExtension?.[i];
+                    // Find parent index for extensions and hide when parent is collapsed
+                    if (isExtension) {
+                      const extFlags = scene.videoPromptIsExtension ?? [];
+                      let parentIdx = i - 1;
+                      while (parentIdx >= 0 && extFlags[parentIdx]) parentIdx--;
+                      if (parentIdx >= 0 && isCollapsed(`vid-${parentIdx}`)) return null;
+                    }
                     return (
                       <div key={i} className={`flex gap-2 ${isExtension ? 'pl-5' : ''}`}>
                         <div className="flex flex-col items-center gap-0.5 flex-shrink-0 w-5">
@@ -1042,16 +1101,23 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                   })()}
                                 </div>
                                 <p
-                                  onClick={() => struckItems.has(`vid-${i}`) && toggleStruck(`vid-${i}`)}
-                                  title={struckItems.has(`vid-${i}`) ? 'Click to unmark' : undefined}
-                                  className={`flex-1 text-xs italic select-none transition-all ${dirtyVideoIndices.has(i) ? '' : 'line-clamp-2'} ${
-                                    struckItems.has(`vid-${i}`)
-                                      ? 'line-through text-yellow-300/30 cursor-pointer'
+                                  onClick={() => toggleCollapse(`vid-${i}`)}
+                                  title={isCollapsed(`vid-${i}`) ? 'Expand segment' : 'Collapse segment'}
+                                  className={`flex-1 text-xs italic select-none cursor-pointer transition-all ${dirtyVideoIndices.has(i) ? '' : 'line-clamp-2'} ${
+                                    isCollapsed(`vid-${i}`)
+                                      ? 'text-yellow-300/40'
                                       : dirtyVideoIndices.has(i) ? 'text-amber-300/70' : 'text-yellow-300/80'
                                   }`}
                                 >
                                   {scene.videoPromptExcerpts[i]}
                                 </p>
+                                <span
+                                  onClick={() => toggleCollapse(`vid-${i}`)}
+                                  className="flex-shrink-0 text-[10px] text-yellow-300/40 hover:text-yellow-300/70 cursor-pointer select-none mt-0.5"
+                                  title={isCollapsed(`vid-${i}`) ? 'Expand segment' : 'Collapse segment'}
+                                >
+                                  {isCollapsed(`vid-${i}`) ? '▶' : '▼'}
+                                </span>
                               </div>
                             )}
                             {isExtension && (
@@ -1086,48 +1152,52 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                 </button>
                               </div>
                             )}
-                            <textarea
-                              value={prompt}
-                              onChange={e => {
-                                const updated = [...(scene.videoPrompts ?? [''])];
-                                updated[i] = e.target.value;
-                                updateScene({ videoPrompts: updated });
-                              }}
-                              rows={2}
-                              className={`w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400 transition-opacity ${regenLoadingKeys.has(`vid-${i}`) ? 'opacity-30' : ''}`}
-                              style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                              placeholder={isExtension ? 'Continuation prompt…' : 'Sora/Runway style prompt…'}
-                            />
-                            {regenLoadingKeys.has(`vid-${i}`) && (
-                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded-md">
-                                <span className="text-[11px] text-yellow-300 animate-pulse font-medium">Regenerating…</span>
-                              </div>
+                            {!isCollapsed(`vid-${i}`) && (
+                              <>
+                                <textarea
+                                  value={prompt}
+                                  onChange={e => {
+                                    const updated = [...(scene.videoPrompts ?? [''])];
+                                    updated[i] = e.target.value;
+                                    updateScene({ videoPrompts: updated });
+                                  }}
+                                  rows={2}
+                                  className={`w-full rounded-md px-3 py-2 text-xs border focus:border-indigo-400 transition-opacity ${regenLoadingKeys.has(`vid-${i}`) ? 'opacity-30' : ''}`}
+                                  style={{ background: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                                  placeholder={isExtension ? 'Continuation prompt…' : 'Sora/Runway style prompt…'}
+                                />
+                                {regenLoadingKeys.has(`vid-${i}`) && (
+                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none rounded-md">
+                                    <span className="text-[11px] text-yellow-300 animate-pulse font-medium">Regenerating…</span>
+                                  </div>
+                                )}
+                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                  <button
+                                    onClick={() => setRegenState(prev => ({
+                                      ...prev,
+                                      [extKey]: { open: !prev[extKey]?.open, referencePrev: prev[extKey]?.referencePrev ?? false, generating: false },
+                                    }))}
+                                    className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-sky-400 border-sky-900/60 hover:border-sky-600 hover:text-sky-300"
+                                    style={{ background: 'var(--surface)' }}
+                                    title="Regenerate this prompt"
+                                  >
+                                    ↻ Regen
+                                  </button>
+                                  <button
+                                    onClick={() => setExtendState(prev => ({
+                                      ...prev,
+                                      [extKey]: { open: !prev[extKey]?.open, duration: prev[extKey]?.duration ?? 6, generating: false },
+                                    }))}
+                                    className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-yellow-400 border-yellow-900/60 hover:border-yellow-600 hover:text-yellow-300"
+                                    style={{ background: 'var(--surface)' }}
+                                    title="Extend this prompt with a continuation"
+                                  >
+                                    ↗ Extend
+                                  </button>
+                                  <CopyButton text={prompt} />
+                                </div>
+                              </>
                             )}
-                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                              <button
-                                onClick={() => setRegenState(prev => ({
-                                  ...prev,
-                                  [extKey]: { open: !prev[extKey]?.open, referencePrev: prev[extKey]?.referencePrev ?? false, generating: false },
-                                }))}
-                                className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-sky-400 border-sky-900/60 hover:border-sky-600 hover:text-sky-300"
-                                style={{ background: 'var(--surface)' }}
-                                title="Regenerate this prompt"
-                              >
-                                ↻ Regen
-                              </button>
-                              <button
-                                onClick={() => setExtendState(prev => ({
-                                  ...prev,
-                                  [extKey]: { open: !prev[extKey]?.open, duration: prev[extKey]?.duration ?? 6, generating: false },
-                                }))}
-                                className="px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors text-yellow-400 border-yellow-900/60 hover:border-yellow-600 hover:text-yellow-300"
-                                style={{ background: 'var(--surface)' }}
-                                title="Extend this prompt with a continuation"
-                              >
-                                ↗ Extend
-                              </button>
-                              <CopyButton text={prompt} onCopy={() => toggleStruck(`vid-${i}`)} />
-                            </div>
                           </div>
                           {!isExtension && promptChars(prompt).length > 0 && (
                             <div className="flex gap-1 mt-1.5 flex-wrap">

@@ -207,14 +207,24 @@ export interface ContentStyle {
 }
 
 export interface WritingStyle {
-  sentenceStructure: string;       // rhythm and length patterns
-  vocabularyLevel: string;         // register, technicality, accessibility
-  directnessLevel: string;         // command-style, conversational, narrative, academic
-  rhetoricalDevices: string[];     // devices with descriptions of how they're used
-  paceAndRhythm: string;           // how language density and speed modulate across the video
-  voiceAndPersonality: string;     // the distinct creator persona and what makes it recognisable
-  openingFormula: string;          // the exact mechanical pattern used to open scripts, with a concrete structural example
-  signatureExpressions?: string[]; // representative language patterns native to this channel — not copied quotes, but structural examples that show vocabulary, rhythm, and tone in action
+  sentenceStructure: string;
+  vocabularyLevel: string;
+  directnessLevel: string;
+  rhetoricalDevices: string[];
+  paceAndRhythm: string;
+  voiceAndPersonality: string;
+  openingFormula: string;
+  bodySceneOpenings?: string;
+  sceneTransitionLanguage?: string; // how this channel closes scenes and hands off to the next
+  signatureExpressions?: string[];  // actual verbatim phrases/sentences from the analyzed transcripts
+}
+
+export interface VisualSceneGuide {
+  sceneDescriptionStyle: string; // how to write scene descriptions for this channel
+  brollPattern: string;          // what the channel cuts to during narration
+  editingRhythm: string;         // pace and triggers of visual cuts
+  graphicsAndTextUsage: string;  // when/how on-screen text and graphics are used
+  audioMood: string;             // background music and sound design character
 }
 
 export interface VisualBrand {
@@ -247,6 +257,7 @@ export interface ChannelInsights {
   hookStrategies: string[];
   scriptStructureTemplate: ScriptStructureTemplate;
   visualBrand: VisualBrand;
+  visualSceneGuide?: VisualSceneGuide;
   audienceProfile: AudienceProfile;
   uniqueValueProposition: string;
   engagementPatterns: string[];
@@ -254,7 +265,7 @@ export interface ChannelInsights {
   writingStyle?: WritingStyle;
   contentNature?: {
     classification: ContentNature;
-    reasoning: string; // why this classification was chosen
+    reasoning: string;
   };
   videoLength: { typical: string; reasoning: string };
   replicationFormula: string;

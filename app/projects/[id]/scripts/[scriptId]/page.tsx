@@ -9,7 +9,7 @@ import SceneEditor from '@/components/SceneEditor';
 import ConfirmModal from '@/components/ConfirmModal';
 import CharacterConsistencyModal from '@/components/CharacterConsistencyModal';
 import { useStorage } from '@/components/StorageProvider';
-import { VISUAL_STYLE_PRESETS } from '@/lib/visual-styles';
+import { VISUAL_STYLE_PRESETS, inferPresetTag } from '@/lib/visual-styles';
 
 export default function ScriptEditorPage() {
   const { id, scriptId } = useParams<{ id: string; scriptId: string }>();
@@ -53,7 +53,8 @@ export default function ScriptEditorPage() {
         // Pre-populate visual style from channel analysis if user hasn't set one yet
         const detected = a?.channelInsights?.visualBrand?.productionStyle;
         if (!data.visualStyle && detected) {
-          const prefilled = { ...data, visualStyle: detected };
+          const visualStyle = inferPresetTag(detected) ?? detected;
+          const prefilled = { ...data, visualStyle };
           setScript(prefilled);
           storage.saveScript(id, prefilled);
         }

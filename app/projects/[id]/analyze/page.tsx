@@ -10,6 +10,20 @@ import { useStorage } from '@/components/StorageProvider';
 
 type Step = 'input' | 'select' | 'analyzing' | 'done';
 
+type AnalyzeDraft = {
+  step: Step;
+  channelUrl: string;
+  analysisName: string;
+  videos: ChannelVideo[];
+  selected: string[];
+  sortBy: 'newest' | 'popular';
+  nextPageToken?: string;
+  uploadsPlaylistId?: string;
+};
+
+// Module-level cache: survives SPA navigation, cleared on full page reload
+const analyzeCache = new Map<string, AnalyzeDraft>();
+
 interface ProgressStep {
   id: string;
   label: string;
@@ -40,21 +54,24 @@ export default function AnalyzePage() {
   const searchParams = useSearchParams();
   const storage = useStorage();
 
-  const [step, setStep] = useState<Step>('input');
-  const [channelUrl, setChannelUrl] = useState(() => searchParams.get('channel') ?? '');
-  const [analysisName, setAnalysisName] = useState('');
-  const [videos, setVideos] = useState<ChannelVideo[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const draftKey = `${id}`;
+  const draft = analyzeCache.get(draftKey);
+
+  const [step, setStep] = useState<Step>(() => draft?.step ?? 'input');
+  const [channelUrl, setChannelUrl] = useState<string>(() => draft?.channelUrl ?? searchParams.get('channel') ?? '');
+  const [analysisName, setAnalysisName] = useState<string>(() => draft?.analysisName ?? '');
+  const [videos, setVideos] = useState<ChannelVideo[]>(() => draft?.videos ?? []);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(draft?.selected ?? []));
   const [fetching, setFetching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const [analyzeError, setAnalyzeError] = useState('');
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
-  const [nextPageToken, setNextPageToken] = useState<string | undefined>();
-  const [uploadsPlaylistId, setUploadsPlaylistId] = useState<string | undefined>();
+  const [nextPageToken, setNextPageToken] = useState<string | undefined>(() => draft?.nextPageToken);
+  const [uploadsPlaylistId, setUploadsPlaylistId] = useState<string | undefined>(() => draft?.uploadsPlaylistId);
   const [bookmarks, setBookmarks] = useState<ChannelBookmark[]>([]);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
-  const [sortBy, setSortBy] = useState<'newest' | 'popular'>('newest');
+  const [sortBy, setSortBy] = useState<'newest' | 'popular'>(() => draft?.sortBy ?? 'newest');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -63,9 +80,18 @@ export default function AnalyzePage() {
     storage.listBookmarks().then(setBookmarks);
   }, [storage]);
 
+  // Persist to in-memory cache on every meaningful state change
+  useEffect(() => {
+    if (step === 'analyzing') return;
+    analyzeCache.set(draftKey, {
+      step, channelUrl, analysisName, videos,
+      selected: [...selected], sortBy, nextPageToken, uploadsPlaylistId,
+    });
+  }, [step, channelUrl, analysisName, videos, selected, sortBy, nextPageToken, uploadsPlaylistId, draftKey]);
+
   useEffect(() => {
     const pre = searchParams.get('channel');
-    if (pre) fetchVideos(pre);
+    if (pre && !analyzeCache.has(draftKey)) fetchVideos(pre);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -259,6 +285,7 @@ export default function AnalyzePage() {
 
       // Small pause so the user sees all green ticks
       await new Promise(r => setTimeout(r, 600));
+      analyzeCache.delete(draftKey);
       router.push(`/projects/${id}`);
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed. Check your API key in Settings.');
