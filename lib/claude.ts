@@ -340,7 +340,7 @@ export async function synthesizeChannelInsights(
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 6000,
+    max_tokens: 8000,
     system:
       'You are a YouTube content strategy expert. Respond ONLY with valid JSON, no markdown fences, no prose.',
     messages: [
@@ -349,7 +349,7 @@ export async function synthesizeChannelInsights(
         content: `Synthesise a channel strategy profile from these ${videoAnalyses.length} detailed video analyses. A creator wants to model their channel on this one.
 
 CRITICAL INSTRUCTION: For most fields, extract PRINCIPLES and PSYCHOLOGICAL MECHANISMS — describe WHY each technique works and WHAT effect it creates, so a writer can apply the same intent to any topic with fresh language. Avoid reusable sentence starters or copy-paste templates for fields like hookStrategies, scriptStructureTemplate, and replicationFormula.
-EXCEPTION: The writingStyle.openingFormula field is deliberately mechanical — for that field only, describe the structural pattern as a formula with slots and show it filled with a placeholder example. This is the one place where structural specificity matters more than abstract principles.
+EXCEPTION: The writingStyle fields (openingFormula, bodySceneOpenings, sceneTransitionLanguage, signatureExpressions) are deliberately concrete — use ACTUAL phrases and sentences verbatim from the transcripts wherever possible. These fields exist so a writer can reproduce the channel's exact voice, not approximate it.
 
 VIDEO ANALYSES:
 ${JSON.stringify(summaries, null, 2)}
@@ -377,6 +377,13 @@ Return ONLY valid JSON:
     "faceInThumbnail": true,
     "productionStyle": "The exact visual production medium — be specific enough for an AI video generator to reproduce it. Examples: 'Pixar-style 3D CGI animation with soft lighting and expressive characters', 'DreamWorks 3D animated feature film style', 'hand-drawn 2D animation with watercolor backgrounds', 'photorealistic cinematic documentary', 'anime-style 2D animation with cel shading', 'live-action talking head with motion-graphic B-roll'. Do NOT use vague terms like '3D animated' or 'animated' alone — always include the studio reference or rendering style so AI generators produce the right output."
   },
+  "visualSceneGuide": {
+    "sceneDescriptionStyle": "How to write a scene description for this channel — what to mention (location, lighting, action, camera angle), what level of detail, and what to omit. Base this on the inferred visual style across all analyzed videos.",
+    "brollPattern": "What this channel typically cuts to during narration — e.g. 'close-ups of documents and evidence', 'aerial establishing shots of locations', 'character close-ups with shallow DOF', 'archival-style recreations'. Be specific enough that a director could brief a videographer.",
+    "editingRhythm": "The pace of visual cuts for this channel — how long a shot typically holds, what triggers a cut (new sentence? new beat? keyword?), and how editing pace changes across the emotional arc of a video.",
+    "graphicsAndTextUsage": "When and how this channel uses on-screen text, lower thirds, titles, or motion graphics — specific triggers and purposes.",
+    "audioMood": "The background music and sound design character this channel uses — genre, emotional tone, when it swells or drops, how it supports the narration."
+  },
   "audienceProfile": {
     "demographics": "Specific age range, background, what they are seeking",
     "painPoints": ["Specific pain 1", "Specific pain 2"],
@@ -397,7 +404,9 @@ Return ONLY valid JSON:
     "paceAndRhythm": "How language density and speed modulate — where the script accelerates, where it slows, and what triggers those shifts. Describe the underlying cadence pattern.",
     "voiceAndPersonality": "The distinct creator persona — what the voice sounds like on the page, what makes it immediately recognisable, what it projects about the creator's identity and values.",
     "openingFormula": "The exact mechanical structure this channel uses to open every script — describe the pattern as a formula with slots, then show it filled in with a structural example using placeholder content. E.g. '[Specific date], [named person] [did specific action]. What [they did next / was found / happened after] would [consequence that opens the mystery].' This must be mechanical and structural enough that a writer could follow it to produce an opening that is indistinguishable from the channel's real intros. Note what the channel NEVER does in its openings (e.g. never starts with a concept or question, never addresses the viewer directly, never opens with statistics).",
-    "signatureExpressions": ["A constructed example sentence in this channel's exact voice — not a copied quote, but a freshly written sentence that demonstrates the vocabulary level, rhythm, and personality. Topic: something generic like 'a disappearance in winter'. Write it exactly as this channel would.", "A second example on a different generic topic showing the same voice.", "A third example showing how this channel handles an emotional peak or revelation moment."]
+    "bodySceneOpenings": "How this channel opens its non-hook scenes (Scene 2 onwards). Use ACTUAL sentences from the transcripts as examples. Describe the structural pattern, show a real example verbatim, and note what this channel never does (e.g. 'never uses meta-framing like To understand X or In order to appreciate Y').",
+    "sceneTransitionLanguage": "How this channel closes a scene to hand off to the next — the exact tension-planting or cliffhanger technique used. Use ACTUAL closing lines from the transcripts as examples. Include the structural formula a writer can follow.",
+    "signatureExpressions": ["ACTUAL verbatim sentence or phrase from the transcripts that is most representative of this channel's voice — do not paraphrase or construct", "A second actual verbatim example showing a different register (e.g. an emotional peak, a reveal moment, a tense beat)", "A third actual verbatim example. If fewer than 3 strong examples exist across all transcripts, write a freshly constructed sentence that perfectly imitates the voice — but only as a last resort."]
   },
   "videoLength": {
     "typical": "Duration range in minutes",
@@ -470,6 +479,7 @@ export async function generateScript(
     thingsToSteal: analysis.channelInsights.thingsToSteal,
     writingStyle: analysis.channelInsights.writingStyle,
     productionStyle: analysis.channelInsights.visualBrand?.productionStyle,
+    visualSceneGuide: analysis.channelInsights.visualSceneGuide,
     contentNature: analysis.channelInsights.contentNature,
   };
 
@@ -509,7 +519,11 @@ ${strategy.writingStyle.signatureExpressions.map(e => `  "${e}"`).join('\n')}` :
 ${strategy.writingStyle.openingFormula ? `
 OPENING FORMULA — the very first words of Scene 1 MUST follow this exact mechanical structure:
 ${strategy.writingStyle.openingFormula}
-This overrides the general "no templates" rule below. The opening formula IS the template for Scene 1.` : ''}
+This overrides the general "no templates" rule below. The opening formula IS the template for Scene 1.` : ''}${strategy.writingStyle.bodySceneOpenings ? `
+BODY SCENE OPENINGS — how this channel opens Scene 2 and beyond (follow this pattern):
+${strategy.writingStyle.bodySceneOpenings}` : ''}${strategy.writingStyle.sceneTransitionLanguage ? `
+SCENE TRANSITION LANGUAGE — how this channel closes each scene (apply this to every scene except the last):
+${strategy.writingStyle.sceneTransitionLanguage}` : ''}
 
 The narration must sound indistinguishable from this channel's actual scripts at the sentence level — same rhythm, same vocabulary register, same personality coming through the words. A reader who knows the channel should recognise the voice immediately.
 
@@ -538,13 +552,13 @@ ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to 
 })()}STYLE RULES — READ CAREFULLY:
 - The OPENING FORMULA and CARRY-FORWARD LOOPS above are exceptions — follow those mechanically. Everything else below applies.
 - The channel strategy describes PRINCIPLES and PSYCHOLOGICAL MECHANISMS. Your job is to find fresh, topic-specific expressions of those principles — not to copy phrasing or templates from the strategy description itself.
-- FORBIDDEN: reproducing sentence structures or grammatical templates from the strategy description text. The strategy describes the style; it is not a writing sample to copy from.
+- FORBIDDEN: reproducing sentence structures or grammatical templates from the strategy description text. The strategy describes the style; it is not a writing sample to copy from. EXCEPTION: signatureExpressions and verbatim examples in openingFormula/bodySceneOpenings/sceneTransitionLanguage are real channel language — study them and write with the same vocabulary, rhythm, and personality.
 - Every scene must find its own unique entry point into the material. Do NOT open multiple scenes with the same grammatical structure.
 - The hook must be built from what is specifically surprising, counterintuitive, or emotionally charged about THIS topic — not a generic formula applied to any topic.
 - Apply the tone, pacing, and structural intent described in the strategy, but execute them through language that is entirely native to this specific subject.
 - Total narration word count across ALL scenes must total approximately ${settings.targetWordCount} words
 - For each scene: estimatedDurationSeconds = (wordCount / ${settings.wpm}) × 60, rounded to nearest second
-- sceneDescription is a brief visual note (1 sentence) — NOT the narration
+- sceneDescription is a brief visual note (1 sentence) — NOT the narration${strategy.visualSceneGuide ? `; write it following this channel's visual style: ${strategy.visualSceneGuide.sceneDescriptionStyle}` : ''}
 - Do NOT include image prompts or video prompts — those are generated separately on demand
 - Keep sceneDescription short (1 sentence max)
 

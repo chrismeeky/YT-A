@@ -19,7 +19,7 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [scripts, setScripts] = useState<Script[]>([]);
-  const [tab, setTab] = useState<'analyses' | 'scripts'>('analyses');
+  const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'analysis' | 'script'; id: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -71,7 +71,6 @@ export default function ProjectPage() {
       };
       await storage.saveAnalysis(id, imported);
       setAnalyses(prev => [imported, ...prev]);
-      setTab('analyses');
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to import analysis.');
     } finally {
@@ -152,43 +151,34 @@ export default function ProjectPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b" style={{ borderColor: 'var(--border)' }}>
-        {(['analyses', 'scripts'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm capitalize transition-colors border-b-2 -mb-px ${
-              tab === t
-                ? 'border-indigo-400 text-white'
-                : 'border-transparent text-[#71717a] hover:text-white'
-            }`}
+      {/* Analyses list */}
+      {analyses.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <p className="text-3xl mb-3">🔍</p>
+          <p className="text-[#a1a1aa] mb-2">No analyses yet</p>
+          <p className="text-[#52525b] text-sm mb-6">Paste a YouTube channel URL to analyse its top videos</p>
+          <Link
+            href={analyzeHref}
+            className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
           >
-            {t === 'analyses' ? `Channel Analyses (${analyses.length})` : `Scripts (${scripts.length})`}
-          </button>
-        ))}
-      </div>
+            Start Analysis
+          </Link>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {analyses.map(analysis => {
+            const channelScripts = scripts.filter(s => s.analysisId === analysis.id);
+            const isExpanded = expandedScripts.has(analysis.id);
+            const toggleScripts = () =>
+              setExpandedScripts(prev => {
+                const next = new Set(prev);
+                next.has(analysis.id) ? next.delete(analysis.id) : next.add(analysis.id);
+                return next;
+              });
 
-      {/* Analyses tab */}
-      {tab === 'analyses' && (
-        <div>
-          {analyses.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <p className="text-3xl mb-3">🔍</p>
-              <p className="text-[#a1a1aa] mb-2">No analyses yet</p>
-              <p className="text-[#52525b] text-sm mb-6">Paste a YouTube channel URL to analyse its top videos</p>
-              <Link
-                href={analyzeHref}
-                className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
-              >
-                Start Analysis
-              </Link>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {analyses.map(analysis => (
+            return (
+              <div key={analysis.id}>
                 <div
-                  key={analysis.id}
                   className="rounded-xl border p-5 group"
                   style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                 >
@@ -223,7 +213,7 @@ export default function ProjectPage() {
                     <p className="text-xs text-[#71717a]">{analysis.channelInsights.channelOverview}</p>
                   </div>
 
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex gap-2 flex-wrap">
                     <Link
                       href={`/projects/${id}/analyses/${analysis.id}`}
                       className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
@@ -237,80 +227,129 @@ export default function ProjectPage() {
                     >
                       Write Script
                     </Link>
+                    {channelScripts.length > 0 && (
+                      <button
+                        onClick={toggleScripts}
+                        className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] ml-auto"
+                        style={{ borderColor: 'var(--border)' }}
+                      >
+                        Scripts ({channelScripts.length}) {isExpanded ? '▴' : '▾'}
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Scripts tab */}
-      {tab === 'scripts' && (
-        <div>
-          {scripts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <p className="text-3xl mb-3">✍️</p>
-              <p className="text-[#a1a1aa] mb-2">No scripts yet</p>
-              {analyses.length > 0 ? (
-                <>
-                  <p className="text-[#52525b] text-sm mb-6">Generate a script based on your channel analysis</p>
-                  <Link
-                    href={`/projects/${id}/scripts/new`}
-                    className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
-                  >
-                    Create Script
-                  </Link>
-                </>
-              ) : (
-                <p className="text-[#52525b] text-sm">Run a channel analysis first, then create scripts from it.</p>
-              )}
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {scripts.map(script => (
-                <div
-                  key={script.id}
-                  className="rounded-xl border p-5 group"
+                {/* Collapsible scripts list */}
+                {isExpanded && channelScripts.length > 0 && (
+                  <div className="mt-1 ml-4 border-l-2 pl-4 grid gap-2 pt-2" style={{ borderColor: 'var(--border)' }}>
+                    {channelScripts.map(script => (
+                      <div
+                        key={script.id}
+                        className="rounded-lg border px-4 py-3 flex items-center justify-between group/script"
+                        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <Link
+                            href={`/projects/${id}/scripts/${script.id}`}
+                            className="text-sm font-medium hover:text-indigo-300 transition-colors truncate block"
+                          >
+                            {script.title}
+                          </Link>
+                          <p className="text-xs text-[#52525b] mt-0.5">
+                            {script.scenes.length} scenes · {script.settings.videoLength}min ·{' '}
+                            {formatDistanceToNow(new Date(script.updatedAt), { addSuffix: true })}
+                            {script.savedToDisk && (
+                              <span className="ml-2 text-green-500">✓ saved</span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4 shrink-0">
+                          <Link
+                            href={`/projects/${id}/scripts/${script.id}`}
+                            className="px-2.5 py-1 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
+                            style={{ borderColor: 'var(--border)' }}
+                          >
+                            Open →
+                          </Link>
+                          <button
+                            onClick={() => setConfirmDelete({ type: 'script', id: script.id })}
+                            className="opacity-0 group-hover/script:opacity-100 text-[#52525b] hover:text-red-400 transition-all text-sm"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Ungrouped scripts */}
+          {(() => {
+            const analysisIds = new Set(analyses.map(a => a.id));
+            const ungrouped = scripts.filter(s => !s.analysisId || !analysisIds.has(s.analysisId));
+            if (ungrouped.length === 0) return null;
+            const isExpanded = expandedScripts.has('__ungrouped__');
+            return (
+              <div>
+                <button
+                  onClick={() =>
+                    setExpandedScripts(prev => {
+                      const next = new Set(prev);
+                      next.has('__ungrouped__') ? next.delete('__ungrouped__') : next.add('__ungrouped__');
+                      return next;
+                    })
+                  }
+                  className="w-full text-left px-4 py-3 rounded-xl border text-xs text-[#71717a] hover:text-white transition-colors flex items-center justify-between"
                   style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <Link
-                        href={`/projects/${id}/scripts/${script.id}`}
-                        className="font-semibold text-sm hover:text-indigo-300 transition-colors"
+                  <span>Ungrouped Scripts ({ungrouped.length})</span>
+                  <span>{isExpanded ? '▴' : '▾'}</span>
+                </button>
+                {isExpanded && (
+                  <div className="mt-1 ml-4 border-l-2 pl-4 grid gap-2 pt-2" style={{ borderColor: 'var(--border)' }}>
+                    {ungrouped.map(script => (
+                      <div
+                        key={script.id}
+                        className="rounded-lg border px-4 py-3 flex items-center justify-between group/script"
+                        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                       >
-                        {script.title}
-                      </Link>
-                      <p className="text-xs text-[#52525b] mt-0.5">
-                        {script.scenes.length} scenes · {script.settings.videoLength}min · {' '}
-                        {formatDistanceToNow(new Date(script.updatedAt), { addSuffix: true })}
-                        {script.savedToDisk && (
-                          <span className="ml-2 text-green-500">✓ saved to disk</span>
-                        )}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setConfirmDelete({ type: 'script', id: script.id })}
-                      className="opacity-0 group-hover:opacity-100 text-[#52525b] hover:text-red-400 transition-all text-sm ml-4"
-                    >
-                      🗑
-                    </button>
+                        <div className="flex-1 min-w-0">
+                          <Link
+                            href={`/projects/${id}/scripts/${script.id}`}
+                            className="text-sm font-medium hover:text-indigo-300 transition-colors truncate block"
+                          >
+                            {script.title}
+                          </Link>
+                          <p className="text-xs text-[#52525b] mt-0.5">
+                            {script.scenes.length} scenes · {script.settings.videoLength}min ·{' '}
+                            {formatDistanceToNow(new Date(script.updatedAt), { addSuffix: true })}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4 shrink-0">
+                          <Link
+                            href={`/projects/${id}/scripts/${script.id}`}
+                            className="px-2.5 py-1 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
+                            style={{ borderColor: 'var(--border)' }}
+                          >
+                            Open →
+                          </Link>
+                          <button
+                            onClick={() => setConfirmDelete({ type: 'script', id: script.id })}
+                            className="opacity-0 group-hover/script:opacity-100 text-[#52525b] hover:text-red-400 transition-all text-sm"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-xs text-[#71717a] mt-2">Topic: {script.topic}</p>
-                  <div className="mt-4">
-                    <Link
-                      href={`/projects/${id}/scripts/${script.id}`}
-                      className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
-                      style={{ borderColor: 'var(--border)' }}
-                    >
-                      Open Editor →
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 

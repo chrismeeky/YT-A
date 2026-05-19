@@ -7,6 +7,9 @@ import type { Analysis, Script } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import { readSSE } from '@/lib/sse';
 
+type ScriptDraft = { topic: string; additionalInstructions: string; suggestions: { topic: string; context: string }[]; suggestionSeed: string | null };
+const scriptDraftCache = new Map<string, ScriptDraft>();
+
 export default function NewScriptPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -27,6 +30,7 @@ export default function NewScriptPage() {
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [suggestions, setSuggestions] = useState<{ topic: string; context: string }[]>([]);
+  const [suggestionSeed, setSuggestionSeed] = useState<string | null>(null); // null = generic
   const [loadingTopics, setLoadingTopics] = useState(false);
   const [topicsError, setTopicsError] = useState('');
   const [contextMode, setContextMode] = useState<'manual' | 'url'>('manual');
@@ -37,11 +41,12 @@ export default function NewScriptPage() {
   const [extractedSources, setExtractedSources] = useState<string[]>([]);
 
   const cacheKey = (analysisId: string) => `topic-suggestions:${analysisId}`;
+  const draftKey = id;
 
   const loadCached = (analysisId: string) => {
     try {
       const raw = localStorage.getItem(cacheKey(analysisId));
-      if (raw) setSuggestions(JSON.parse(raw));
+      if (raw) { setSuggestions(JSON.parse(raw)); setSuggestionSeed(null); }
     } catch { /* ignore */ }
   };
 
@@ -50,6 +55,19 @@ export default function NewScriptPage() {
       localStorage.setItem(cacheKey(analysisId), JSON.stringify(data));
     } catch { /* ignore */ }
   };
+
+  // Restore draft from in-memory cache on mount (survives SPA nav, clears on reload)
+  useEffect(() => {
+    const draft = scriptDraftCache.get(draftKey);
+    if (!draft) return;
+    if (draft.topic) setForm(f => ({ ...f, topic: draft.topic, additionalInstructions: draft.additionalInstructions }));
+    if (draft.suggestions?.length) { setSuggestions(draft.suggestions); setSuggestionSeed(draft.suggestionSeed); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist draft to in-memory cache on every change
+  useEffect(() => {
+    scriptDraftCache.set(draftKey, { topic: form.topic, additionalInstructions: form.additionalInstructions, suggestions, suggestionSeed });
+  }, [form.topic, form.additionalInstructions, suggestions, suggestionSeed, draftKey]);
 
   useEffect(() => {
     Promise.all([
@@ -64,7 +82,13 @@ export default function NewScriptPage() {
         wpm: s.defaultWpm ?? 150,
         analysisId: resolvedAnalysisId,
       }));
-      if (resolvedAnalysisId) loadCached(resolvedAnalysisId);
+      // Only load generic cached suggestions if we have no draft suggestions already
+      if (resolvedAnalysisId) {
+        setSuggestions(prev => {
+          if (prev.length === 0) loadCached(resolvedAnalysisId);
+          return prev;
+        });
+      }
     });
   }, [id, storage]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -72,12 +96,13 @@ export default function NewScriptPage() {
 
   const getAnalysis = () => analyses.find(a => a.id === form.analysisId) ?? null;
 
-  const suggestTopics = async () => {
+  const suggestTopics = async (seed?: string) => {
     const analysis = getAnalysis();
     if (!analysis) return;
     setLoadingTopics(true);
     setTopicsError('');
     setSuggestions([]);
+    const trimmedSeed = seed?.trim() ?? '';
     try {
       const settings = await storage.getSettings();
       const res = await fetch(`/api/projects/${id}/scripts/suggest-topics`, {
@@ -86,13 +111,15 @@ export default function NewScriptPage() {
         body: JSON.stringify({
           analysis,
           anthropicApiKey: settings.anthropicApiKey,
+          ...(trimmedSeed ? { seedTopic: trimmedSeed } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) { setTopicsError(data.error); return; }
       const fetched = data.suggestions ?? [];
       setSuggestions(fetched);
-      saveCache(form.analysisId, fetched);
+      setSuggestionSeed(trimmedSeed || null);
+      saveCache(form.analysisId, fetched); // always save — seeded results override generic cache
     } catch {
       setTopicsError('Failed to generate topic ideas.');
     } finally {
@@ -158,6 +185,7 @@ export default function NewScriptPage() {
       }
       const data = await readSSE<Script>(res, setProgress);
       await storage.saveScript(id, data);
+      scriptDraftCache.delete(draftKey);
       router.push(`/projects/${id}/scripts/${data.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Script generation failed. Check your API key in Settings.');
@@ -223,7 +251,7 @@ export default function NewScriptPage() {
               <label className="text-sm font-medium">Video Topic *</label>
               <button
                 type="button"
-                onClick={suggestTopics}
+                onClick={() => suggestTopics()}
                 disabled={!form.analysisId || loadingTopics}
                 className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium border border-[#333] hover:border-indigo-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#71717a]"
               >
@@ -246,10 +274,27 @@ export default function NewScriptPage() {
               placeholder="e.g. How to start investing with $100"
             />
 
+            {form.topic.trim().length >= 3 && form.analysisId && (
+              <button
+                type="button"
+                onClick={() => suggestTopics(form.topic)}
+                disabled={loadingTopics}
+                className="mt-2 flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors"
+              >
+                {loadingTopics
+                  ? <><span className="animate-spin inline-block">⚡</span> Generating variations…</>
+                  : <>✨ Suggest variations of &ldquo;{form.topic.length > 40 ? form.topic.slice(0, 40) + '…' : form.topic}&rdquo;</>}
+              </button>
+            )}
+
             {topicsError && <p className="text-xs text-red-400 mt-2">{topicsError}</p>}
             {suggestions.length > 0 && (
               <div className="mt-3 space-y-1.5">
-                <p className="text-xs text-[#52525b]">Click a topic to use it — context will be prefilled:</p>
+                <p className="text-xs text-[#52525b]">
+                  {suggestionSeed
+                    ? <>Variations of &ldquo;{suggestionSeed}&rdquo; — click to use:</>
+                    : <>Click a topic to use it — context will be prefilled:</>}
+                </p>
                 {suggestions.map((s, i) => (
                   <button
                     key={i}
