@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="scroll-mt-8">
+    <section id={id} className="scroll-mt-24">
       <h2 className="text-lg font-semibold mb-4 pb-2 border-b" style={{ borderColor: 'var(--border)' }}>
         {title}
       </h2>
@@ -127,10 +127,34 @@ export default function DocsPage() {
   }, []);
 
   return (
-    <div className="min-h-full py-12 px-6">
+    <div className="min-h-full" style={{ color: 'var(--text)' }}>
+      {/* Navbar */}
+      <nav
+        className="border-b sticky top-0 z-50"
+        style={{ borderColor: 'var(--border)', background: 'rgba(13,13,13,0.85)', backdropFilter: 'blur(12px)' }}
+      >
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-xl">▶</span>
+            <span className="font-bold text-lg tracking-tight">ReelIQ</span>
+          </Link>
+          <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--text-3)' }}>
+            <Link href="/about" className="hover:text-white transition-colors">About</Link>
+            <Link href="/login" className="hover:text-white transition-colors">Sign In</Link>
+            <Link
+              href="/signup"
+              className="px-4 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white font-medium transition-colors"
+            >
+              Get Started
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      <div className="py-12 px-6">
       <div className="max-w-5xl mx-auto flex gap-12">
         {/* Sticky sidebar TOC */}
-        <aside className="hidden lg:block w-44 flex-shrink-0 sticky top-8 self-start">
+        <aside className="hidden lg:block w-44 flex-shrink-0 sticky top-[80px] self-start">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-[#52525b] mb-3">On this page</p>
           <nav className="space-y-1">
             {NAV.map(n => (
@@ -382,6 +406,7 @@ export default function DocsPage() {
           ))}
         </Section>
         </div>
+      </div>
       </div>
     </div>
   );
