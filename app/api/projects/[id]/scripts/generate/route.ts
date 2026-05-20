@@ -4,9 +4,10 @@ import { generateScript } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
-import type { Script, Scene, ScriptSettings, Analysis } from '@/lib/types';
+import { getUserIdFromRequest } from '@/lib/supabase';
+import type { Script, Scene, ScriptSettings, Analysis, DirectorSegment, DirectorAsset } from '@/lib/types';
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(
   request: NextRequest,
@@ -20,7 +21,10 @@ export async function POST(
     videoLength?: number;
     wpm?: number;
     anthropicApiKey?: string;
+    directorMode?: boolean;
+    assetMixOverride?: Record<string, number>;
   };
+  const userId = await getUserIdFromRequest(request);
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
   if (!anthropicApiKey) {
@@ -31,6 +35,7 @@ export async function POST(
     return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
   }
 
+  const directorMode = body.directorMode ?? false;
   const videoLength = body.videoLength ?? 5;
   const wpm        = body.wpm        ?? 150;
   const targetWordCount = Math.round(videoLength * wpm);
@@ -43,7 +48,9 @@ export async function POST(
       try {
         emit({ message: `Building prompt from channel analysis…` });
 
-        emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script with Claude… (this may take up to 60 seconds)` });
+        const modeLabel = directorMode ? ' with director segments' : '';
+        emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script${modeLabel} with Claude… (this may take up to 90 seconds)` });
+
         const { result: generated, inputTokens, outputTokens } = await generateScript(
           anthropicApiKey,
           body.analysis,
@@ -51,25 +58,70 @@ export async function POST(
           body.topic,
           body.targetAudience        ?? '',
           body.additionalInstructions ?? '',
+          directorMode,
+          body.assetMixOverride,
         );
 
         emit({ message: `Parsing ${generated.scenes.length} scenes…` });
-        const scenes: Scene[] = generated.scenes.map(s => ({
-          id: uuid(),
-          number: s.number,
-          title: s.title,
-          narration: s.narration,
-          sceneDescription: s.sceneDescription,
-          estimatedDurationSeconds: s.estimatedDurationSeconds,
-          wordCount: s.wordCount,
-          includeImagePrompt: true,
-          includeVideoPrompt: true,
-          includeStockUrl: false,
-          includeStockPhotos: false,
-          includeRealImages: false,
-          includeStockVideos: false,
-          mediaFiles: [] as import('@/lib/types').MediaFile[],
-        }));
+
+        const scenes: Scene[] = generated.scenes.map(s => {
+          // Director mode: build narration from segments and attach directorSegments
+          if (directorMode && Array.isArray(s.segments) && s.segments.length > 0) {
+            const narration = s.segments.map(seg => seg.text).join(' ');
+
+            const directorSegments: DirectorSegment[] = s.segments.map(seg => ({
+              id: uuid(),
+              narrationExcerpt: seg.text,
+              durationSeconds: seg.durationSeconds,
+              assets: (seg.assets ?? []).map((a): DirectorAsset => ({
+                id: uuid(),
+                rank: a.rank,
+                type: a.type as DirectorAsset['type'],
+                rationale: a.note,
+                searchQuery: a.searchQuery ?? undefined,
+                prompts: [],
+                totalDuration: seg.durationSeconds,
+                generated: false,
+              })),
+            }));
+
+            return {
+              id: uuid(),
+              number: s.number,
+              title: s.title,
+              narration,
+              sceneDescription: s.sceneDescription,
+              estimatedDurationSeconds: s.estimatedDurationSeconds,
+              wordCount: s.wordCount,
+              includeImagePrompt: true,
+              includeVideoPrompt: true,
+              includeStockUrl: false,
+              includeStockPhotos: false,
+              includeRealImages: false,
+              includeStockVideos: false,
+              mediaFiles: [],
+              directorSegments,
+            };
+          }
+
+          // Regular mode
+          return {
+            id: uuid(),
+            number: s.number,
+            title: s.title,
+            narration: s.narration ?? '',
+            sceneDescription: s.sceneDescription,
+            estimatedDurationSeconds: s.estimatedDurationSeconds,
+            wordCount: s.wordCount,
+            includeImagePrompt: true,
+            includeVideoPrompt: true,
+            includeStockUrl: false,
+            includeStockPhotos: false,
+            includeRealImages: false,
+            includeStockVideos: false,
+            mediaFiles: [],
+          };
+        });
 
         const script: Script = {
           id: uuid(),
@@ -85,12 +137,14 @@ export async function POST(
           settings:   scriptSettings,
           scenes,
           savedToDisk: false,
+          directorMode,
         };
 
         void trackUsage({
           operation: 'generate-script',
           api: 'anthropic',
           project_id: params.id,
+          user_id: userId,
           input_tokens: inputTokens,
           output_tokens: outputTokens,
           estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),

@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { NextRequest } from 'next/server';
 
 const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 // Server-side: service role key bypasses RLS; falls back to anon key
@@ -21,4 +22,14 @@ export function getBrowserSupabase(): SupabaseClient | null {
   if (!url || !anonKey) return null;
   if (!_browser) _browser = createClient(url, anonKey, { auth: { autoRefreshToken: false } });
   return _browser;
+}
+
+export async function getUserIdFromRequest(request: NextRequest): Promise<string | undefined> {
+  const auth = request.headers.get('Authorization');
+  if (!auth?.startsWith('Bearer ')) return undefined;
+  const token = auth.slice(7);
+  if (!url || !anonKey) return undefined;
+  const client = createClient(url, anonKey, { auth: { persistSession: false } });
+  const { data: { user } } = await client.auth.getUser(token);
+  return user?.id ?? undefined;
 }

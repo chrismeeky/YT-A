@@ -250,6 +250,15 @@ export interface ScriptStructureTemplate {
 
 export type ContentNature = 'fictional' | 'non-fictional' | 'mixed';
 
+export interface VisualAssetMix {
+  'ai-video': number;
+  'ai-image': number;
+  'stock-video': number;
+  'stock-photo': number;
+  'real-image': number;
+  reasoning: string; // 1-sentence explanation of the mix
+}
+
 export interface ChannelInsights {
   channelOverview: string;
   contentPillars: string[];
@@ -258,6 +267,7 @@ export interface ChannelInsights {
   scriptStructureTemplate: ScriptStructureTemplate;
   visualBrand: VisualBrand;
   visualSceneGuide?: VisualSceneGuide;
+  visualAssetMix?: VisualAssetMix; // estimated % breakdown of visual asset types this channel uses
   audienceProfile: AudienceProfile;
   uniqueValueProposition: string;
   engagementPatterns: string[];
@@ -374,6 +384,8 @@ export interface Scene {
 
   audioFile?: string;
   mediaFiles: MediaFile[];
+  directorMediaFiles?: MediaFile[];  // separate from regular mediaFiles — used only in Director mode
+  directorSegments?: DirectorSegment[]; // generated at script-creation time in director mode; replaces directorPlan lookup
 }
 
 export interface ScriptSettings {
@@ -416,6 +428,39 @@ export interface DetectedCharacter {
   count: number;
 }
 
+// ─── Director Mode ──────────────────────────────────────────────────────────
+
+export type DirectorAssetType = 'ai-video' | 'ai-image' | 'stock-video' | 'stock-photo' | 'real-image';
+
+export interface DirectorAsset {
+  id: string;
+  rank: number;
+  type: DirectorAssetType;
+  rationale: string;
+  searchQuery?: string;   // for stock-video, stock-photo, real-image
+  prompts: string[];      // empty until lazily generated (ai-video / ai-image)
+  clipLabels?: ('CUT' | 'CONTINUOUS' | null)[];  // parallel to prompts; null = unknown
+  durationEach?: number;  // seconds per clip for video types
+  totalDuration: number;  // total seconds recommended for this segment
+  generated: boolean;
+  // For stock/real — results from search
+  stockPhotos?: StockPhoto[];
+  stockVideos?: StockVideo[];
+  realImages?: RealImage[];
+}
+
+export interface DirectorSegment {
+  id: string;
+  narrationExcerpt: string;
+  durationSeconds: number;
+  assets: DirectorAsset[];
+}
+
+export interface DirectorScene {
+  sceneId: string;
+  segments: DirectorSegment[];
+}
+
 export interface Script {
   id: string;
   projectId: string;
@@ -434,6 +479,8 @@ export interface Script {
   detectedCharacters?: DetectedCharacter[];
   visualStyle?: string; // preset tag or custom text — injected into every prompt
   savedToDisk: boolean;
+  directorMode?: boolean;
+  directorPlan?: DirectorScene[];
 }
 
 // ─── Research ──────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { v4 as uuid } from 'uuid';
 import type { Script, Scene, Analysis, CharacterSheet } from '@/lib/types';
 import SceneEditor from '@/components/SceneEditor';
+import DirectorView from '@/components/DirectorView';
 import ConfirmModal from '@/components/ConfirmModal';
 import CharacterConsistencyModal from '@/components/CharacterConsistencyModal';
 import { useStorage } from '@/components/StorageProvider';
@@ -33,7 +34,11 @@ export default function ScriptEditorPage() {
   const [characterModalOpen, setCharacterModalOpen] = useState(false);
   const [characterModalInitialName, setCharacterModalInitialName] = useState<string | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'regular' | 'director'>('regular');
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [pexelsApiKey, setPexelsApiKey] = useState('');
+  const [braveApiKey, setBraveApiKey] = useState('');
+  const [realImageProvider, setRealImageProvider] = useState<'brave' | 'duckduckgo'>('brave');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -41,6 +46,7 @@ export default function ScriptEditorPage() {
       if (!data) { setLoading(false); return; }
       setScript(data);
       setSavedToDisk(data.savedToDisk ?? false);
+      if (data.directorMode) setViewMode('director');
       const fromUrl = searchParams.get('scene');
       const exists = fromUrl && data.scenes?.some((s: Scene) => s.id === fromUrl);
       setActiveSceneId(exists ? fromUrl : (data.scenes?.[0]?.id ?? null));
@@ -62,7 +68,12 @@ export default function ScriptEditorPage() {
       setLoading(false);
     }).catch(() => setLoading(false));
 
-    storage.getSettings().then(s => setAnthropicApiKey(s.anthropicApiKey ?? ''));
+    storage.getSettings().then(s => {
+      setAnthropicApiKey(s.anthropicApiKey ?? '');
+      setPexelsApiKey(s.pexelsApiKey ?? '');
+      setBraveApiKey(s.braveApiKey ?? '');
+      setRealImageProvider((s.realImageProvider as 'brave' | 'duckduckgo') ?? 'brave');
+    });
   }, [id, scriptId, storage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-detect characters in the background when script loads without cached detection
@@ -265,6 +276,22 @@ export default function ScriptEditorPage() {
           <span>{script.scenes.length} scenes</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {script.directorMode && (
+            <div className="flex items-center rounded-md border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
+              <button
+                onClick={() => setViewMode('regular')}
+                className={`px-2.5 py-1.5 transition-colors ${viewMode === 'regular' ? 'bg-[#27272a] text-white' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+              >
+                Regular
+              </button>
+              <button
+                onClick={() => setViewMode('director')}
+                className={`px-2.5 py-1.5 transition-colors flex items-center gap-1 ${viewMode === 'director' ? 'bg-indigo-500/20 text-indigo-300' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
+              >
+                🎬 Director
+              </button>
+            </div>
+          )}
           {saveMsg && (
             <span className="text-xs text-green-400">{saveMsg}</span>
           )}
@@ -487,65 +514,79 @@ export default function ScriptEditorPage() {
 
       {/* Main content: scene list + editor */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Scene sidebar */}
-        <div
-          className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-        >
-          <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
-            <span className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Scenes</span>
-          </div>
-          <div className="flex-1 overflow-y-auto py-1">
-            {script.scenes.map(scene => (
-              <button
-                key={scene.id}
-                onClick={() => setActiveSceneId(scene.id)}
-                className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors ${
-                  activeSceneId === scene.id
-                    ? 'bg-indigo-500/15 border-l-2 border-indigo-400'
-                    : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
-                }`}
-              >
-                <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{scene.number}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{scene.title || 'Untitled'}</p>
-                  <p className="text-[10px] text-[#52525b] mt-0.5">
-                    ~{scene.estimatedDurationSeconds}s · {scene.wordCount}w
-                    {scene.audioFile && <span className="ml-1 text-green-500">🎵</span>}
-                    {scene.mediaFiles?.length > 0 && <span className="ml-1 text-blue-400">📁</span>}
-                  </p>
-                </div>
-                <button
-                  onClick={e => { e.stopPropagation(); deleteScene(scene.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-[#333] hover:text-red-400 transition-all text-xs flex-shrink-0 pt-0.5"
-                >
-                  ×
-                </button>
-              </button>
-            ))}
-          </div>
-          <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
-            <button
-              onClick={addScene}
-              className="w-full py-2 rounded-md text-xs border transition-colors text-[#71717a] hover:text-white hover:border-[#444]"
-              style={{ borderColor: 'var(--border)' }}
+        {viewMode === 'director' && script.directorMode ? (
+          <DirectorView
+            script={script}
+            analysis={analysis}
+            onScriptChange={handleScriptChange}
+            anthropicApiKey={anthropicApiKey}
+            pexelsApiKey={pexelsApiKey || undefined}
+            braveApiKey={braveApiKey || undefined}
+            realImageProvider={realImageProvider}
+          />
+        ) : (
+          <>
+            {/* Scene sidebar */}
+            <div
+              className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
             >
-              + Add Scene
-            </button>
-          </div>
-        </div>
+              <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+                <span className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Scenes</span>
+              </div>
+              <div className="flex-1 overflow-y-auto py-1">
+                {script.scenes.map(scene => (
+                  <button
+                    key={scene.id}
+                    onClick={() => setActiveSceneId(scene.id)}
+                    className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors ${
+                      activeSceneId === scene.id
+                        ? 'bg-indigo-500/15 border-l-2 border-indigo-400'
+                        : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
+                    }`}
+                  >
+                    <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{scene.number}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">{scene.title || 'Untitled'}</p>
+                      <p className="text-[10px] text-[#52525b] mt-0.5">
+                        ~{scene.estimatedDurationSeconds}s · {scene.wordCount}w
+                        {scene.audioFile && <span className="ml-1 text-green-500">🎵</span>}
+                        {scene.mediaFiles?.length > 0 && <span className="ml-1 text-blue-400">📁</span>}
+                      </p>
+                    </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteScene(scene.id); }}
+                      className="opacity-0 group-hover:opacity-100 text-[#333] hover:text-red-400 transition-all text-xs flex-shrink-0 pt-0.5"
+                    >
+                      ×
+                    </button>
+                  </button>
+                ))}
+              </div>
+              <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                <button
+                  onClick={addScene}
+                  className="w-full py-2 rounded-md text-xs border transition-colors text-[#71717a] hover:text-white hover:border-[#444]"
+                  style={{ borderColor: 'var(--border)' }}
+                >
+                  + Add Scene
+                </button>
+              </div>
+            </div>
 
-        {/* Scene editor */}
-        <SceneEditor
-          projectId={id}
-          script={script}
-          analysis={analysis}
-          activeSceneId={activeSceneId}
-          onScriptChange={handleScriptChange}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
-        />
+            {/* Scene editor */}
+            <SceneEditor
+              projectId={id}
+              script={script}
+              analysis={analysis}
+              activeSceneId={activeSceneId}
+              onScriptChange={handleScriptChange}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
+            />
+          </>
+        )}
       </div>
 
       {confirmDeleteSceneId && (

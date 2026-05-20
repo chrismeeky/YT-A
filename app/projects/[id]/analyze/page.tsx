@@ -212,7 +212,7 @@ export default function AnalyzePage() {
         updateStep(stepId, 'loading');
 
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 115_000);
+        const timer = setTimeout(() => ctrl.abort(), 270_000);
         let res: Response;
         try {
           res = await fetch(`/api/projects/${id}/analyze/video`, {
@@ -224,7 +224,7 @@ export default function AnalyzePage() {
         } catch (e) {
           clearTimeout(timer);
           const msg = e instanceof DOMException && e.name === 'AbortError'
-            ? 'Request timed out — the analysis is taking too long. Try a shorter video or check your Vercel plan limits.'
+            ? 'Analysis timed out after 4.5 minutes. Try a shorter video (under 15 min works best).'
             : 'Network error — could not reach the server. Check your connection.';
           updateStep(stepId, 'error');
           setAnalyzeError(msg);
@@ -252,11 +252,27 @@ export default function AnalyzePage() {
 
       // Synthesize
       updateStep('synthesize', 'loading');
-      const synthRes = await fetch(`/api/projects/${id}/analyze/synthesize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey }),
-      });
+      const synthCtrl = new AbortController();
+      const synthTimer = setTimeout(() => synthCtrl.abort(), 270_000);
+      let synthRes: Response;
+      try {
+        synthRes = await fetch(`/api/projects/${id}/analyze/synthesize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey }),
+          signal: synthCtrl.signal,
+        });
+      } catch (e) {
+        clearTimeout(synthTimer);
+        const msg = e instanceof DOMException && e.name === 'AbortError'
+          ? 'Synthesis timed out. Try again — it usually completes faster on retry.'
+          : 'Network error during synthesis. Check your connection.';
+        updateStep('synthesize', 'error');
+        setAnalyzeError(msg);
+        setStep('select');
+        return;
+      }
+      clearTimeout(synthTimer);
       const synthData = await synthRes.json() as { result?: unknown; error?: string };
 
       if (!synthRes.ok || synthData.error) {

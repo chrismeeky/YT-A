@@ -26,17 +26,38 @@ export async function searchDuckDuckGoImages(
   query: string,
   count = 6
 ): Promise<RealImage[]> {
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  const browserHeaders = {
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+
   const vqdRes = await fetch(
     `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
-    { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
+    { headers: browserHeaders }
   );
   const html = await vqdRes.text();
-  const vqdMatch = html.match(/vqd=([^&"]+)/);
+
+  // DDG embeds the token in multiple formats — try them all
+  const vqdMatch =
+    html.match(/vqd=["']?([^&"'\s]+)["']?/) ??
+    html.match(/data-vqd=["']([^"']+)["']/) ??
+    html.match(/"vqd"\s*:\s*"([^"]+)"/);
   if (!vqdMatch) throw new Error('DuckDuckGo: could not extract vqd token');
   const vqd = vqdMatch[1];
+
   const res = await fetch(
-    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${vqd}&o=json`,
-    { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', Referer: 'https://duckduckgo.com/' } }
+    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&o=json&p=1&s=0&u=bing&f=,,,&l=en-us`,
+    {
+      headers: {
+        'User-Agent': UA,
+        'Referer': 'https://duckduckgo.com/',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    }
   );
   if (!res.ok) throw new Error(`DuckDuckGo Images error ${res.status}: ${res.statusText}`);
   const data = await res.json();

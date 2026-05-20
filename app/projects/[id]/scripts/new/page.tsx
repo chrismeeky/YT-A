@@ -3,12 +3,34 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import type { Analysis, Script } from '@/lib/types';
+import type { Analysis, Script, DirectorAssetType } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import { readSSE } from '@/lib/sse';
 
 type ScriptDraft = { topic: string; additionalInstructions: string; suggestions: { topic: string; context: string }[]; suggestionSeed: string | null };
 const scriptDraftCache = new Map<string, ScriptDraft>();
+
+type AssetMix = Record<DirectorAssetType, number>;
+
+const ALL_ASSET_TYPES: DirectorAssetType[] = ['ai-video', 'ai-image', 'stock-video', 'stock-photo', 'real-image'];
+
+const ASSET_MIX_LABELS: Record<DirectorAssetType, string> = {
+  'ai-video':    'AI Video',
+  'ai-image':    'AI Image',
+  'stock-video': 'Stock Video',
+  'stock-photo': 'Stock Photo',
+  'real-image':  'Real Image',
+};
+
+const ASSET_MIX_COLORS: Record<DirectorAssetType, string> = {
+  'ai-video':    '#818cf8',
+  'ai-image':    '#34d399',
+  'stock-video': '#f59e0b',
+  'stock-photo': '#e879f9',
+  'real-image':  '#f87171',
+};
+
+const EQUAL_MIX: AssetMix = { 'ai-video': 20, 'ai-image': 20, 'stock-video': 20, 'stock-photo': 20, 'real-image': 20 };
 
 export default function NewScriptPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,6 +48,38 @@ export default function NewScriptPage() {
     videoLength: 5,
     wpm: 150,
   });
+  const [directorMode, setDirectorMode] = useState(false);
+  const [assetMix, setAssetMix] = useState<AssetMix>({ ...EQUAL_MIX });
+
+  const setMixValue = (type: DirectorAssetType, value: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(value)));
+    const remaining = 100 - clamped;
+    const others = ALL_ASSET_TYPES.filter(t => t !== type);
+    const otherTotal = others.reduce((s, t) => s + assetMix[t], 0);
+    const next: AssetMix = { ...assetMix, [type]: clamped };
+    if (otherTotal === 0) {
+      const each = Math.floor(remaining / others.length);
+      others.forEach((t, i) => { next[t] = i === others.length - 1 ? remaining - each * (others.length - 1) : each; });
+    } else {
+      let distributed = 0;
+      for (let i = 0; i < others.length - 1; i++) {
+        next[others[i]] = Math.round((assetMix[others[i]] / otherTotal) * remaining);
+        distributed += next[others[i]];
+      }
+      next[others[others.length - 1]] = remaining - distributed;
+    }
+    setAssetMix(next);
+  };
+
+  const resetMixToChannel = () => {
+    const analysis = getAnalysis();
+    const vm = analysis?.channelInsights?.visualAssetMix;
+    if (vm) {
+      setAssetMix({ 'ai-video': vm['ai-video'], 'ai-image': vm['ai-image'], 'stock-video': vm['stock-video'], 'stock-photo': vm['stock-photo'], 'real-image': vm['real-image'] });
+    } else {
+      setAssetMix({ ...EQUAL_MIX });
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
@@ -175,6 +229,8 @@ export default function NewScriptPage() {
           ...form,
           analysis,
           anthropicApiKey: settings.anthropicApiKey,
+          directorMode,
+          ...(directorMode ? { assetMixOverride: assetMix } : {}),
         }),
       });
       if (!res.ok) {
@@ -213,10 +269,16 @@ export default function NewScriptPage() {
           className="rounded-xl border p-12 text-center"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
         >
-          <div className="text-4xl mb-4 animate-pulse">✍️</div>
-          <h2 className="font-semibold mb-2">Writing your script…</h2>
+          <div className="text-4xl mb-4 animate-pulse">
+            {progress?.includes('director') ? '🎬' : '✍️'}
+          </div>
+          <h2 className="font-semibold mb-2">
+            {progress?.includes('director') ? 'Directing production…' : 'Writing your script…'}
+          </h2>
           <p className="text-sm text-[#71717a]">{progress || `Generating ~${targetWords} words across scenes…`}</p>
-          <p className="text-xs text-[#52525b] mt-2">This takes 30–60 seconds</p>
+          <p className="text-xs text-[#52525b] mt-2">
+            {directorMode ? 'Script + director plan — this takes 60–120 seconds' : 'This takes 30–60 seconds'}
+          </p>
         </div>
       ) : (
         <form onSubmit={generate} className="space-y-5">
@@ -489,6 +551,92 @@ export default function NewScriptPage() {
             </p>
           </div>
 
+          {/* Director Mode toggle */}
+          <div
+            className="rounded-lg border p-4"
+            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const next = !directorMode;
+                setDirectorMode(next);
+                if (next) resetMixToChannel();
+              }}
+              className="w-full flex items-start gap-3 text-left"
+            >
+              <div className={`mt-0.5 w-9 h-5 rounded-full flex-shrink-0 transition-colors relative ${directorMode ? 'bg-indigo-500' : 'bg-[#333]'}`}>
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${directorMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+              <div>
+                <p className="text-sm font-medium flex items-center gap-1.5">
+                  🎬 Director Mode
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-normal">Beta</span>
+                </p>
+                <p className="text-xs text-[#52525b] mt-0.5 leading-relaxed">
+                  AI acts as a director — breaks each scene into precise visual segments, ranks the best media type for each (video, image, stock), and auto-generates all prompts on demand. Fully informed by the channel&apos;s visual style and editing rhythm.
+                </p>
+              </div>
+            </button>
+
+            {/* Asset mix editor — visible when director mode is on */}
+            {directorMode && (
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-medium text-[#71717a] uppercase tracking-wide">Asset Mix</p>
+                  <button
+                    type="button"
+                    onClick={resetMixToChannel}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    Reset to channel
+                  </button>
+                </div>
+                <div className="flex items-center gap-4">
+                  {/* Sliders */}
+                  <div className="flex-1 space-y-2">
+                    {ALL_ASSET_TYPES.map(type => (
+                      <div key={type} className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ASSET_MIX_COLORS[type] }} />
+                        <span className="text-xs text-[#71717a] w-[72px] flex-shrink-0">{ASSET_MIX_LABELS[type]}</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={assetMix[type]}
+                          onChange={e => setMixValue(type, Number(e.target.value))}
+                          className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
+                          style={{ accentColor: ASSET_MIX_COLORS[type] }}
+                        />
+                        <span className="text-xs text-[#a1a1aa] w-8 text-right flex-shrink-0">{assetMix[type]}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Live pie preview */}
+                  {(() => {
+                    let cum = 0;
+                    const stops = ALL_ASSET_TYPES
+                      .filter(t => assetMix[t] > 0)
+                      .map(t => {
+                        const start = cum;
+                        cum += assetMix[t];
+                        return `${ASSET_MIX_COLORS[t]} ${start}% ${cum}%`;
+                      });
+                    return (
+                      <div
+                        className="flex-shrink-0 rounded-full"
+                        style={{
+                          width: 52, height: 52,
+                          background: stops.length > 0 ? `conic-gradient(${stops.join(', ')})` : '#3f3f46',
+                        }}
+                      />
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
+
           {error && <p className="text-sm text-red-400">{error}</p>}
 
           <button
@@ -496,7 +644,7 @@ export default function NewScriptPage() {
             disabled={!form.analysisId || !form.topic.trim()}
             className="w-full py-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
           >
-            Generate Script →
+            {directorMode ? '🎬 Generate Script + Director Plan →' : 'Generate Script →'}
           </button>
         </form>
       )}
