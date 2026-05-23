@@ -30,10 +30,11 @@ export async function POST(
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
+    wpm?: number;
   };
 
   const userId = await getUserIdFromRequest(request);
-  const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters } = body;
+  const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, wpm } = body;
 
   // ── Stock / real image searches ───────────────────────────────────────────
   if (assetType === 'stock-photo') {
@@ -74,8 +75,14 @@ export async function POST(
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
   if (!anthropicApiKey) return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
 
-  const clipDuration = durationEach ?? Math.min(8, durationSeconds);
-  const clipCount = Math.ceil(durationSeconds / clipDuration);
+  // Derive the effective duration from narration text × WPM (accurate to the actual TTS read time).
+  // Falls back to the pre-computed durationSeconds if WPM is not provided.
+  const narrationWords = narrationExcerpt.trim().split(/\s+/).filter(Boolean).length;
+  const effectiveDuration = wpm && narrationWords > 0
+    ? Math.max(1, Math.round((narrationWords / wpm) * 60))
+    : durationSeconds;
+  const clipDuration = durationEach ?? Math.min(8, effectiveDuration);
+  const clipCount = Math.max(1, Math.round(effectiveDuration / clipDuration));
   const productionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
   const visualGuide = analysis.channelInsights.visualSceneGuide;
 

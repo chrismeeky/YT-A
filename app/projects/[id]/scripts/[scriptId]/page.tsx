@@ -523,6 +523,8 @@ export default function ScriptEditorPage() {
             pexelsApiKey={pexelsApiKey || undefined}
             braveApiKey={braveApiKey || undefined}
             realImageProvider={realImageProvider}
+            activeSceneId={activeSceneId}
+            onActiveSceneChange={setActiveSceneId}
           />
         ) : (
           <>

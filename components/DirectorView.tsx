@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { Script, Analysis, DirectorScene, DirectorSegment, DirectorAsset, DirectorAssetType, StockPhoto, StockVideo, RealImage, VisualAssetMix } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import MediaUploadModal from '@/components/MediaUploadModal';
@@ -55,6 +55,8 @@ interface Props {
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  activeSceneId?: string | null;
+  onActiveSceneChange?: (sceneId: string) => void;
 }
 
 // ─── Asset card ───────────────────────────────────────────────────────────────
@@ -101,8 +103,19 @@ function AssetCard({
   const savedNames = new Set(targetScene?.directorMediaFiles?.map(f => f.originalName) ?? []);
 
   const isAI = asset.type === 'ai-video' || asset.type === 'ai-image';
+
+  // Use the narration slice (if this is a multi-shot asset) or the full segment narration
+  // to compute the actual TTS duration from word count × WPM rather than the pre-computed
+  // segment.durationSeconds (which covers the entire segment, not just this slot).
+  const effectiveNarration = asset.narrationSlice ?? segment.narrationExcerpt;
+  const effectiveWords = effectiveNarration.trim().split(/\s+/).filter(Boolean).length;
+  const effectiveDurationSeconds = Math.max(
+    1,
+    Math.round((effectiveWords / (script.settings.wpm || 150)) * 60),
+  );
+  const clipDurationEach = asset.durationEach ?? 8;
   const clipCount = asset.type === 'ai-video'
-    ? Math.ceil(segment.durationSeconds / (asset.durationEach ?? 8))
+    ? Math.max(1, Math.round(effectiveDurationSeconds / clipDurationEach))
     : 1;
 
   const sceneData = script.scenes.find(s => s.id === scene.sceneId);
@@ -119,9 +132,10 @@ function AssetCard({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             assetType: asset.type,
-            narrationExcerpt: segment.narrationExcerpt,
-            durationSeconds: segment.durationSeconds,
+            narrationExcerpt: asset.narrationSlice ?? segment.narrationExcerpt,
+            durationSeconds: effectiveDurationSeconds,
             durationEach: asset.durationEach,
+            wpm: script.settings.wpm,
             searchQuery: asset.searchQuery,
             directorNote: asset.rationale,
             sceneTitle: sceneData?.title ?? '',
@@ -406,6 +420,73 @@ function AssetCard({
   );
 }
 
+// ─── Multi-shot slot colours ──────────────────────────────────────────────────
+
+const SLOT_COLORS_DEF = [
+  { bg: '#6366f118', border: '#6366f1', text: '#a5b4fc' },
+  { bg: '#f59e0b18', border: '#f59e0b', text: '#fbbf24' },
+  { bg: '#10b98118', border: '#10b981', text: '#6ee7b7' },
+  { bg: '#f43f5e18', border: '#f43f5e', text: '#fb7185' },
+  { bg: '#8b5cf618', border: '#8b5cf6', text: '#c4b5fd' },
+];
+
+// ─── Highlighted narration ────────────────────────────────────────────────────
+
+function HighlightedNarration({
+  narration,
+  slices,
+  onSlotFocus,
+}: {
+  narration: string;
+  slices: Array<{ slot: number; text: string }>;
+  onSlotFocus: (slot: number) => void;
+}) {
+  if (slices.length === 0) {
+    return <p className="text-xs leading-relaxed text-[#a1a1aa]">{narration}</p>;
+  }
+
+  const ranges: { start: number; end: number; slot: number }[] = [];
+  for (const { slot, text } of slices) {
+    const idx = narration.indexOf(text);
+    if (idx >= 0) ranges.push({ start: idx, end: idx + text.length, slot });
+  }
+  ranges.sort((a, b) => a.start - b.start);
+
+  const parts: { text: string; slot?: number }[] = [];
+  let pos = 0;
+  for (const r of ranges) {
+    if (r.start > pos) parts.push({ text: narration.slice(pos, r.start) });
+    parts.push({ text: narration.slice(r.start, r.end), slot: r.slot });
+    pos = r.end;
+  }
+  if (pos < narration.length) parts.push({ text: narration.slice(pos) });
+
+  return (
+    <p className="text-xs leading-relaxed text-[#a1a1aa]">
+      {parts.map((part, i) => {
+        if (part.slot === undefined) return <span key={i}>{part.text}</span>;
+        const c = SLOT_COLORS_DEF[part.slot % SLOT_COLORS_DEF.length];
+        return (
+          <mark
+            key={i}
+            onClick={e => { e.stopPropagation(); onSlotFocus(part.slot!); }}
+            className="cursor-pointer rounded-sm"
+            style={{ background: c.bg, color: 'inherit', borderBottom: `1px solid ${c.border}60` }}
+          >
+            {part.text}
+            <sup
+              className="ml-0.5 font-bold select-none"
+              style={{ fontSize: '8px', color: c.text }}
+            >
+              {part.slot + 1}
+            </sup>
+          </mark>
+        );
+      })}
+    </p>
+  );
+}
+
 // ─── Segment card ─────────────────────────────────────────────────────────────
 
 function SegmentCard({
@@ -417,7 +498,6 @@ function SegmentCard({
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
-  enabledTypes,
   savingUrl,
   onSegmentUpdate,
   onSaveToScene,
@@ -432,7 +512,6 @@ function SegmentCard({
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
-  enabledTypes: Set<DirectorAssetType>;
   savingUrl: string | null;
   onSegmentUpdate: (updated: DirectorSegment) => void;
   onSaveToScene: (url: string, name: string, sceneId: string) => Promise<void>;
@@ -440,6 +519,8 @@ function SegmentCard({
   onVideoPlayer: (src: string, title: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [highlightedSlot, setHighlightedSlot] = useState<number | null>(null);
+  const slotRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const updateAsset = useCallback((updatedAsset: DirectorAsset) => {
     onSegmentUpdate({
@@ -448,9 +529,40 @@ function SegmentCard({
     });
   }, [segment, onSegmentUpdate]);
 
-  const visibleAssets = segment.assets.filter(a => enabledTypes.has(a.type));
   const generatedCount = segment.assets.filter(a => a.generated).length;
-  const topAsset = segment.assets[0];
+  const topAsset = segment.assets.find(a => a.rank === 1);
+
+  // Multi-shot detection
+  const isMultiSlot = segment.assets.some(a => a.slot !== undefined);
+  const slotCount = isMultiSlot
+    ? Math.max(...segment.assets.map(a => a.slot ?? 0)) + 1
+    : 1;
+  const getSlotAssets = (slot: number) =>
+    segment.assets.filter(a => (a.slot ?? 0) === slot);
+  const primaryPerSlot = Array.from({ length: slotCount }, (_, i) =>
+    getSlotAssets(i).find(a => a.rank === 1)
+  ).filter(Boolean) as DirectorAsset[];
+  const slicePairs = primaryPerSlot
+    .filter(a => a.narrationSlice)
+    .map(a => ({ slot: a.slot!, text: a.narrationSlice! }));
+
+  const focusSlot = (slot: number) => {
+    if (!open) setOpen(true);
+    setTimeout(() => {
+      slotRefs.current[slot]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      // Flash the slot after the scroll animation settles
+      setTimeout(() => {
+        setHighlightedSlot(slot);
+        setTimeout(() => setHighlightedSlot(null), 700);
+      }, 350);
+    }, 50);
+  };
+
+  const commonCardProps = {
+    segment, scene, script, analysis,
+    anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider,
+    savingUrl, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
+  };
 
   return (
     <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
@@ -461,17 +573,34 @@ function SegmentCard({
       >
         <span className="text-[10px] mt-0.5 flex-shrink-0 text-[#52525b]">{open ? '▼' : '▶'}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-xs leading-relaxed text-[#a1a1aa]">{segment.narrationExcerpt}</p>
-          <div className="flex items-center gap-2 mt-1">
+          {isMultiSlot && open && slicePairs.length > 0 ? (
+            <HighlightedNarration
+              narration={segment.narrationExcerpt}
+              slices={slicePairs}
+              onSlotFocus={focusSlot}
+            />
+          ) : (
+            <p className="text-xs leading-relaxed text-[#a1a1aa]">{segment.narrationExcerpt}</p>
+          )}
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className="text-[10px] text-[#52525b]">{fmtDuration(segment.durationSeconds)}</span>
-            {topAsset && (
+            {isMultiSlot ? (
+              primaryPerSlot.map((a, i) => (
+                <span key={i}
+                  className="text-[9px] px-1.5 py-0.5 rounded-full"
+                  style={{ background: ASSET_COLORS[a.type] + '20', color: ASSET_COLORS[a.type] }}
+                >
+                  {ASSET_ICONS[a.type]} {i + 1}
+                </span>
+              ))
+            ) : topAsset ? (
               <span
                 className="text-[9px] px-1.5 py-0.5 rounded-full"
                 style={{ background: ASSET_COLORS[topAsset.type] + '20', color: ASSET_COLORS[topAsset.type] }}
               >
                 {ASSET_ICONS[topAsset.type]} {ASSET_LABELS[topAsset.type]}
               </span>
-            )}
+            ) : null}
             {generatedCount > 0 && (
               <span className="text-[9px] text-green-500">✓ {generatedCount} generated</span>
             )}
@@ -479,32 +608,54 @@ function SegmentCard({
         </div>
       </button>
 
-      {/* Asset list */}
+      {/* Asset body */}
       {open && (
-        <div className="border-t px-3 py-2.5 space-y-2" style={{ borderColor: 'var(--border)' }}>
-          {visibleAssets.length === 0 ? (
-            <p className="text-[11px] text-[#52525b]">No asset types enabled for this segment.</p>
+        <div className="border-t" style={{ borderColor: 'var(--border)' }}>
+          {isMultiSlot ? (
+            Array.from({ length: slotCount }, (_, slotIdx) => {
+              const slotAssets = getSlotAssets(slotIdx);
+              const primary = getSlotAssets(slotIdx).find(a => a.rank === 1);
+              const c = SLOT_COLORS_DEF[slotIdx % SLOT_COLORS_DEF.length];
+              return (
+                <div
+                  key={slotIdx}
+                  ref={el => { slotRefs.current[slotIdx] = el; }}
+                  className="px-3 py-2.5 space-y-2"
+                  style={{
+                    borderBottom: slotIdx < slotCount - 1 ? '1px solid var(--border)' : undefined,
+                    background: highlightedSlot === slotIdx ? c.bg.replace('18', '45') : 'transparent',
+                    transition: 'background 0.5s ease-out',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-[9px] font-bold w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}50` }}
+                    >
+                      {slotIdx + 1}
+                    </span>
+                    {primary?.narrationSlice && (
+                      <p className="text-[10px] text-[#52525b] leading-relaxed flex-1 truncate italic">
+                        &ldquo;{primary.narrationSlice.length > 90 ? primary.narrationSlice.slice(0, 90) + '…' : primary.narrationSlice}&rdquo;
+                      </p>
+                    )}
+                  </div>
+                  {slotAssets.length === 0 ? (
+                    <p className="text-[11px] text-[#52525b]">No enabled asset types for this shot.</p>
+                  ) : slotAssets.map(asset => (
+                    <AssetCard key={asset.id} asset={asset} {...commonCardProps} visible={true} />
+                  ))}
+                </div>
+              );
+            })
           ) : (
-            visibleAssets.map(asset => (
-              <AssetCard
-                key={asset.id}
-                asset={asset}
-                segment={segment}
-                scene={scene}
-                script={script}
-                analysis={analysis}
-                anthropicApiKey={anthropicApiKey}
-                pexelsApiKey={pexelsApiKey}
-                braveApiKey={braveApiKey}
-                realImageProvider={realImageProvider}
-                visible={enabledTypes.has(asset.type)}
-                savingUrl={savingUrl}
-                onUpdate={updateAsset}
-                onSaveToScene={onSaveToScene}
-                onLightbox={onLightbox}
-                onVideoPlayer={onVideoPlayer}
-              />
-            ))
+            <div className="px-3 py-2.5 space-y-2">
+              {segment.assets.length === 0 ? (
+                <p className="text-[11px] text-[#52525b]">No assets for this segment.</p>
+              ) : segment.assets.map(asset => (
+                <AssetCard key={asset.id} asset={asset} {...commonCardProps} visible={true} />
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -514,13 +665,17 @@ function SegmentCard({
 
 // ─── Main DirectorView ────────────────────────────────────────────────────────
 
-export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider }: Props) {
+export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
   const storage = useStorage();
-  const [enabledTypes, setEnabledTypes] = useState<Set<DirectorAssetType>>(new Set(ALL_TYPES));
   const [showChart, setShowChart] = useState(false);
-  const [activeSceneId, setActiveSceneId] = useState<string | null>(
+  const [internalActiveSceneId, setInternalActiveSceneId] = useState<string | null>(
     script.directorPlan?.[0]?.sceneId ?? null
   );
+  const activeSceneId = activeSceneIdProp !== undefined ? activeSceneIdProp : internalActiveSceneId;
+  const setActiveSceneId = (id: string) => {
+    setInternalActiveSceneId(id);
+    onActiveSceneChange?.(id);
+  };
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const [videoPlayer, setVideoPlayer] = useState<{ src: string; title: string } | null>(null);
   const [savingUrl, setSavingUrl] = useState<string | null>(null);
@@ -593,14 +748,7 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
     }
   }, [script, onScriptChange, storage]);
 
-  const toggleType = (type: DirectorAssetType) => {
-    setEnabledTypes(prev => {
-      const next = new Set(prev);
-      if (next.has(type)) { if (next.size > 1) next.delete(type); }
-      else next.add(type);
-      return next;
-    });
-  };
+
 
   // Build a unified plan from either the new per-scene directorSegments (Option 2)
   // or the legacy script.directorPlan (Option 1 / older scripts), for backward compat.
@@ -692,31 +840,43 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
 
       {/* Main panel */}
       <div className="flex-1 overflow-y-auto">
-        {/* Toolbar */}
-        <div
-          className="sticky top-0 z-10 border-b"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-        >
-          <div className="px-5 py-2.5 flex items-center gap-4">
-            <p className="text-xs text-[#52525b] flex-shrink-0">Show:</p>
-            <div className="flex flex-wrap gap-1.5 flex-1">
-              {ALL_TYPES.map(type => (
-                <button
-                  key={type}
-                  onClick={() => toggleType(type)}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-colors"
-                  style={enabledTypes.has(type)
-                    ? { background: ASSET_COLORS[type] + '20', borderColor: ASSET_COLORS[type] + '60', color: ASSET_COLORS[type] }
-                    : { background: 'transparent', borderColor: 'var(--border)', color: 'var(--text-3)' }}
-                >
-                  {ASSET_ICONS[type]} {ASSET_LABELS[type]}
-                </button>
-              ))}
-            </div>
+        {/* Action bar — sticky */}
+        {activeScene && (
+          <div
+            className="sticky top-0 z-10 flex items-center gap-2 flex-wrap px-5 py-2.5 border-b"
+            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+          >
+            <button
+              onClick={() => activeScriptScene && generateAudio(activeScene.sceneId, activeScriptScene.narration, activeScriptScene.number)}
+              disabled={generatingAudioFor === activeScene.sceneId || !activeScriptScene?.narration?.trim()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#a1a1aa] hover:text-white"
+            >
+              {generatingAudioFor === activeScene.sceneId
+                ? <><span className="animate-pulse">🎵</span> Generating…</>
+                : <><span>🎵</span> Generate Audio</>}
+            </button>
+            <button
+              onClick={() => setMediaModalSceneId(activeScene.sceneId)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] transition-colors text-[#a1a1aa] hover:text-white"
+            >
+              <span>📁</span> Media
+              {((activeScriptScene?.directorMediaFiles?.length ?? 0) + (activeScriptScene?.audioFile ? 1 : 0)) > 0 && (
+                <span className="ml-0.5 bg-indigo-500 text-white rounded-full px-1.5 py-0.5 text-[10px]">
+                  {(activeScriptScene?.directorMediaFiles?.length ?? 0) + (activeScriptScene?.audioFile ? 1 : 0)}
+                </span>
+              )}
+            </button>
+            {audioMsg?.sceneId === activeScene.sceneId && (
+              <span className={`text-xs ${audioMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
+                {audioMsg.ok ? `✓ ${audioMsg.text}` : audioMsg.text}
+              </span>
+            )}
+            {activeScriptScene?.audioFile && audioMsg?.sceneId !== activeScene.sceneId && (
+              <span className="text-xs text-green-400">🎵 {activeScriptScene.audioFile}</span>
+            )}
             <button
               onClick={() => setShowChart(v => !v)}
-              title="Toggle asset distribution chart"
-              className="text-[11px] px-2 py-0.5 rounded border transition-colors flex-shrink-0"
+              className="ml-auto text-[11px] px-2 py-1 rounded border transition-colors flex-shrink-0"
               style={showChart
                 ? { background: '#27272a', color: '#a1a1aa', borderColor: '#52525b' }
                 : { background: 'transparent', color: '#52525b', borderColor: '#3f3f46' }}
@@ -724,95 +884,95 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
               {showChart ? '▾ Hide chart' : '◈ Chart'}
             </button>
           </div>
+        )}
 
-          {/* Asset distribution charts */}
-          {showChart && (() => {
-            // ── Right chart: script mix from rank-1 assets ──
-            const scriptCounts: Partial<Record<DirectorAssetType, number>> = {};
-            let scriptTotal = 0;
-            for (const dirScene of plan) {
-              for (const seg of dirScene.segments) {
-                const primary = seg.assets.find(a => a.rank === 1) ?? seg.assets[0];
-                if (primary) {
-                  scriptCounts[primary.type] = (scriptCounts[primary.type] ?? 0) + 1;
-                  scriptTotal++;
-                }
+        {/* Asset distribution charts — shown below action bar when toggled */}
+        {showChart && (() => {
+          // ── Right chart: script mix from rank-1 assets ──
+          const scriptCounts: Partial<Record<DirectorAssetType, number>> = {};
+          let scriptTotal = 0;
+          for (const dirScene of plan) {
+            for (const seg of dirScene.segments) {
+              const primary = seg.assets.find(a => a.rank === 1) ?? seg.assets[0];
+              if (primary) {
+                scriptCounts[primary.type] = (scriptCounts[primary.type] ?? 0) + 1;
+                scriptTotal++;
               }
             }
+          }
 
-            function buildStops(pcts: Partial<Record<DirectorAssetType, number>>, total: number) {
-              const types = ALL_TYPES.filter(t => (pcts[t] ?? 0) > 0);
-              let cum = 0;
-              return types.map(t => {
-                const pct = ((pcts[t] ?? 0) / total) * 100;
-                const start = cum;
-                cum += pct;
-                return { type: t, pct, start, end: cum };
-              });
-            }
+          function buildStops(pcts: Partial<Record<DirectorAssetType, number>>, total: number) {
+            const types = ALL_TYPES.filter(t => (pcts[t] ?? 0) > 0);
+            let cum = 0;
+            return types.map(t => {
+              const pct = ((pcts[t] ?? 0) / total) * 100;
+              const start = cum;
+              cum += pct;
+              return { type: t, pct, start, end: cum };
+            });
+          }
 
-            function PieChart({ stops, label, note }: {
-              stops: { type: DirectorAssetType; pct: number; start: number; end: number }[];
-              label: string;
-              note: string;
-            }) {
-              const gradient = stops.length > 0
-                ? stops.map(s => `${ASSET_COLORS[s.type]} ${s.start.toFixed(1)}% ${s.end.toFixed(1)}%`).join(', ')
-                : '#3f3f46 0% 100%';
-              return (
-                <div className="flex-1 flex flex-col gap-2">
-                  <p className="text-[10px] text-[#71717a] font-medium uppercase tracking-wide">{label}</p>
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="flex-shrink-0 rounded-full"
-                      style={{ width: 56, height: 56, background: `conic-gradient(${gradient})` }}
-                    />
-                    <div className="flex flex-col gap-0.5 flex-1">
-                      {stops.length > 0 ? stops.map(({ type, pct }) => (
-                        <div key={type} className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ASSET_COLORS[type] }} />
-                          <span className="text-[10px] text-[#a1a1aa] truncate">{ASSET_LABELS[type]}</span>
-                          <span className="text-[10px] text-[#52525b] ml-auto">{Math.round(pct)}%</span>
-                        </div>
-                      )) : (
-                        <p className="text-[10px] text-[#3f3f46] italic">{note}</p>
-                      )}
-                    </div>
+          function PieChart({ stops, label, note }: {
+            stops: { type: DirectorAssetType; pct: number; start: number; end: number }[];
+            label: string;
+            note: string;
+          }) {
+            const gradient = stops.length > 0
+              ? stops.map(s => `${ASSET_COLORS[s.type]} ${s.start.toFixed(1)}% ${s.end.toFixed(1)}%`).join(', ')
+              : '#3f3f46 0% 100%';
+            return (
+              <div className="flex-1 flex flex-col gap-2">
+                <p className="text-[10px] text-[#71717a] font-medium uppercase tracking-wide">{label}</p>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="flex-shrink-0 rounded-full"
+                    style={{ width: 56, height: 56, background: `conic-gradient(${gradient})` }}
+                  />
+                  <div className="flex flex-col gap-0.5 flex-1">
+                    {stops.length > 0 ? stops.map(({ type, pct }) => (
+                      <div key={type} className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ASSET_COLORS[type] }} />
+                        <span className="text-[10px] text-[#a1a1aa] truncate">{ASSET_LABELS[type]}</span>
+                        <span className="text-[10px] text-[#52525b] ml-auto">{Math.round(pct)}%</span>
+                      </div>
+                    )) : (
+                      <p className="text-[10px] text-[#3f3f46] italic">{note}</p>
+                    )}
                   </div>
                 </div>
-              );
-            }
-
-            // ── Left chart: channel mix from analysis ──
-            const channelMix = analysis?.channelInsights?.visualAssetMix;
-            const channelPcts: Partial<Record<DirectorAssetType, number>> = {};
-            if (channelMix) {
-              const total = (channelMix['ai-video'] + channelMix['ai-image'] + channelMix['stock-video'] + channelMix['stock-photo'] + channelMix['real-image']) || 100;
-              for (const t of ALL_TYPES) channelPcts[t] = (channelMix[t] / total) * 100;
-            }
-            const channelStops = channelMix
-              ? buildStops(channelPcts, 100)
-              : [];
-
-            const scriptStops = scriptTotal > 0 ? buildStops(scriptCounts, scriptTotal) : [];
-
-            return (
-              <div className="px-5 pb-4 pt-3 border-t flex items-start gap-4" style={{ borderColor: 'var(--border)' }}>
-                <PieChart
-                  stops={channelStops}
-                  label="Channel's mix"
-                  note="Re-run channel analysis to see channel mix"
-                />
-                <div className="w-px self-stretch" style={{ background: 'var(--border)' }} />
-                <PieChart
-                  stops={scriptStops}
-                  label="This script"
-                  note="No segments yet"
-                />
               </div>
             );
-          })()}
-        </div>
+          }
+
+          // ── Left chart: channel mix from analysis ──
+          const channelMix = analysis?.channelInsights?.visualAssetMix;
+          const channelPcts: Partial<Record<DirectorAssetType, number>> = {};
+          if (channelMix) {
+            const total = (channelMix['ai-video'] + channelMix['ai-image'] + channelMix['stock-video'] + channelMix['stock-photo'] + channelMix['real-image']) || 100;
+            for (const t of ALL_TYPES) channelPcts[t] = (channelMix[t] / total) * 100;
+          }
+          const channelStops = channelMix
+            ? buildStops(channelPcts, 100)
+            : [];
+
+          const scriptStops = scriptTotal > 0 ? buildStops(scriptCounts, scriptTotal) : [];
+
+          return (
+            <div className="px-5 pb-4 pt-3 border-b flex items-start gap-4" style={{ borderColor: 'var(--border)' }}>
+              <PieChart
+                stops={channelStops}
+                label="Channel's mix"
+                note="Re-run channel analysis to see channel mix"
+              />
+              <div className="w-px self-stretch" style={{ background: 'var(--border)' }} />
+              <PieChart
+                stops={scriptStops}
+                label="This script"
+                note="No segments yet"
+              />
+            </div>
+          );
+        })()}
 
         {/* Scene content */}
         {activeScene && (
@@ -822,38 +982,6 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
               <h2 className="text-sm font-semibold">{activeScriptScene?.title ?? 'Scene'}</h2>
               {activeScriptScene?.sceneDescription && (
                 <p className="text-xs text-[#52525b] mt-0.5">{activeScriptScene.sceneDescription}</p>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => activeScriptScene && generateAudio(activeScene.sceneId, activeScriptScene.narration, activeScriptScene.number)}
-                disabled={generatingAudioFor === activeScene.sceneId || !activeScriptScene?.narration?.trim()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#a1a1aa] hover:text-white"
-              >
-                {generatingAudioFor === activeScene.sceneId
-                  ? <><span className="animate-pulse">🎵</span> Generating…</>
-                  : <><span>🎵</span> Generate Audio</>}
-              </button>
-              <button
-                onClick={() => setMediaModalSceneId(activeScene.sceneId)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] transition-colors text-[#a1a1aa] hover:text-white"
-              >
-                <span>📁</span> Media
-                {((activeScriptScene?.directorMediaFiles?.length ?? 0) + (activeScriptScene?.audioFile ? 1 : 0)) > 0 && (
-                  <span className="ml-0.5 bg-indigo-500 text-white rounded-full px-1.5 py-0.5 text-[10px]">
-                    {(activeScriptScene?.directorMediaFiles?.length ?? 0) + (activeScriptScene?.audioFile ? 1 : 0)}
-                  </span>
-                )}
-              </button>
-              {audioMsg?.sceneId === activeScene.sceneId && (
-                <span className={`text-xs ${audioMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
-                  {audioMsg.ok ? `✓ ${audioMsg.text}` : audioMsg.text}
-                </span>
-              )}
-              {activeScriptScene?.audioFile && audioMsg?.sceneId !== activeScene.sceneId && (
-                <span className="text-xs text-green-400">🎵 {activeScriptScene.audioFile}</span>
               )}
             </div>
 
@@ -883,7 +1011,6 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
                   pexelsApiKey={pexelsApiKey}
                   braveApiKey={braveApiKey}
                   realImageProvider={realImageProvider}
-                  enabledTypes={enabledTypes}
                   savingUrl={savingUrl}
                   onSegmentUpdate={seg => updateSegment(activeScene.sceneId, seg)}
                   onSaveToScene={saveToScene}

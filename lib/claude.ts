@@ -386,7 +386,8 @@ Return ONLY valid JSON:
     "brollPattern": "What this channel typically cuts to during narration — e.g. 'close-ups of documents and evidence', 'aerial establishing shots of locations', 'character close-ups with shallow DOF', 'archival-style recreations'. Be specific enough that a director could brief a videographer.",
     "editingRhythm": "The pace of visual cuts for this channel — how long a shot typically holds, what triggers a cut (new sentence? new beat? keyword?), and how editing pace changes across the emotional arc of a video.",
     "graphicsAndTextUsage": "When and how this channel uses on-screen text, lower thirds, titles, or motion graphics — specific triggers and purposes.",
-    "audioMood": "The background music and sound design character this channel uses — genre, emotional tone, when it swells or drops, how it supports the narration."
+    "audioMood": "The background music and sound design character this channel uses — genre, emotional tone, when it swells or drops, how it supports the narration.",
+    "cutRateShotsPerMinute": 0
   },
   "visualAssetMix": {
     "ai-video": 0,
@@ -458,6 +459,8 @@ interface RawDirectorChunkAsset {
   type: string;
   note: string;
   searchQuery?: string;
+  slot?: number;
+  narrationSlice?: string;
 }
 
 interface RawDirectorChunk {
@@ -560,11 +563,24 @@ RULES:
 ASSET SELECTION — per segment:
 Ask: what would a director for THIS channel choose, given the channel DNA and the running tally above? Rank-1 = best creative call. Rank-2 = strongest alternative. Never default to ai-image because a searchQuery is hard to write — write the searchQuery first, then decide the type.
 
+MULTI-SHOT SEGMENTS:
+${(() => {
+    const cutRate = di.visualSceneGuide?.cutRateShotsPerMinute;
+    const secsPerShot = cutRate ? Math.round(60 / cutRate) : 12;
+    return `This channel cuts approximately every ${secsPerShot}s (${cutRate ?? 'estimated'} shots/min).
+When a segment's durationSeconds ÷ ${secsPerShot} ≥ 1.8, split it into multiple shots using the "slot" field:
+  - slot 0 = first shot, slot 1 = second, etc.
+  - Each slot must include a "narrationSlice" field: the exact consecutive sentences from this segment's text that the shot covers.
+  - narrationSlice values must be verbatim substrings of the segment text, cover all sentences without gaps, and not overlap.
+  - Each slot still has rank 1 and rank 2 assets (same structure as single-shot assets).
+  - Single-shot segments (duration < ${Math.round(secsPerShot * 1.8)}s) omit slot and narrationSlice entirely.`;
+  })()}
+
 SEGMENT RULES:
 - Each segment is 1–4 complete sentences forming one coherent visual idea.
 - Segment boundaries MUST fall at sentence ends — never break mid-sentence.
 - Segments concatenated in order form the full continuous narration without gaps or added words.
-- Each segment has exactly 2 ranked assets (rank 1 = primary, rank 2 = best alternative).
+- Single-shot asset list: exactly 2 assets (rank 1, rank 2). Multi-shot: 2 assets per slot.
 - Asset "note": ≤8 words — the director's brief for this shot.
 - "searchQuery": required for stock-video, stock-photo, real-image; omit for ai-video and ai-image.
 - durationSeconds per segment = round((segmentWordCount / ${settings.wpm}) × 60)
@@ -587,7 +603,8 @@ Return ONLY valid JSON:
           "assets": [
             { "rank": 1, "type": "real-image", "note": "archival photo named subject 1961", "searchQuery": "specific real subject name 1961" },
             { "rank": 2, "type": "stock-photo", "note": "mountain winter atmospheric", "searchQuery": "ural mountains snow winter" }
-          ]
+          ],
+          "_multiShotExample_omit_this_key": "For long segments use slot+narrationSlice: [{rank:1,slot:0,narrationSlice:'First sentence.',type:'real-image',...},{rank:2,slot:0,narrationSlice:'First sentence.',type:'stock-photo',...},{rank:1,slot:1,narrationSlice:'Second sentence.',type:'ai-video',...},{rank:2,slot:1,narrationSlice:'Second sentence.',type:'stock-video',...}]"
         }
       ]
     }
@@ -599,7 +616,11 @@ Return ONLY valid JSON:
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: directorMode ? 16000 : 8000,
+    // Director mode is JSON-heavy: narration + per-segment asset annotations add ~8-10 tokens per
+    // target word on top of the narration itself. Scale the budget accordingly, capped at 64 K.
+    max_tokens: directorMode
+      ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 9)))
+      : Math.min(16000, Math.max(8000, Math.round(settings.targetWordCount * 4))),
     system:
       'You are an expert YouTube scriptwriter. Respond ONLY with valid JSON, no markdown code blocks, no prose.',
     messages: [

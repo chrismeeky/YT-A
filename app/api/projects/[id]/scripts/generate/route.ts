@@ -82,6 +82,8 @@ export async function POST(
                 prompts: [],
                 totalDuration: seg.durationSeconds,
                 generated: false,
+                slot: a.slot ?? undefined,
+                narrationSlice: a.narrationSlice ?? undefined,
               })),
             }));
 

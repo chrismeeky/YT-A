@@ -225,6 +225,7 @@ export interface VisualSceneGuide {
   editingRhythm: string;         // pace and triggers of visual cuts
   graphicsAndTextUsage: string;  // when/how on-screen text and graphics are used
   audioMood: string;             // background music and sound design character
+  cutRateShotsPerMinute?: number; // average distinct shots per minute across this channel's videos
 }
 
 export interface VisualBrand {
@@ -443,6 +444,9 @@ export interface DirectorAsset {
   durationEach?: number;  // seconds per clip for video types
   totalDuration: number;  // total seconds recommended for this segment
   generated: boolean;
+  // Multi-shot support: when a segment is long enough for multiple distinct shots
+  slot?: number;          // 0-indexed shot position within the segment (undefined = single shot)
+  narrationSlice?: string; // exact substring of the segment narration covered by this shot
   // For stock/real — results from search
   stockPhotos?: StockPhoto[];
   stockVideos?: StockVideo[];
