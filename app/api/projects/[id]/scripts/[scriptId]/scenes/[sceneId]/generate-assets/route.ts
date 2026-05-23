@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSceneAssets } from '@/lib/claude';
-import { searchPexels, searchBraveImages, searchPexelsVideos } from '@/lib/image-search';
+import { searchPexels, searchBraveImages, searchDuckDuckGoImages, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import type { Scene, Analysis, CharacterSheet, PromptDetail, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
@@ -89,18 +89,29 @@ export async function POST(
     }
 
     let realImageSegments: RealImageSegment[] | undefined;
-    if (assets.realImageQueries?.length && (body.realImageProvider ?? 'brave') === 'brave') {
-      const braveApiKey = resolveKeyWithFallback(body.braveApiKey, 'NEXT_PUBLIC_BRAVE_API_KEY');
-      if (!braveApiKey) {
-        return NextResponse.json({ error: 'Brave Search API key required for Real Images. Add it in Settings.' }, { status: 400 });
+    if (assets.realImageQueries?.length) {
+      const provider = body.realImageProvider ?? 'brave';
+      if (provider === 'brave') {
+        const braveApiKey = resolveKeyWithFallback(body.braveApiKey, 'NEXT_PUBLIC_BRAVE_API_KEY');
+        if (!braveApiKey) {
+          return NextResponse.json({ error: 'Brave Search API key required for Real Images. Add it in Settings.' }, { status: 400 });
+        }
+        realImageSegments = await Promise.all(
+          assets.realImageQueries.map(async ({ query, excerpt }) => ({
+            query,
+            narrationExcerpt: excerpt,
+            images: await searchBraveImages(query, braveApiKey, 6),
+          })),
+        );
+      } else if (provider === 'duckduckgo') {
+        realImageSegments = await Promise.all(
+          assets.realImageQueries.map(async ({ query, excerpt }) => ({
+            query,
+            narrationExcerpt: excerpt,
+            images: await searchDuckDuckGoImages(query, 6),
+          })),
+        );
       }
-      realImageSegments = await Promise.all(
-        assets.realImageQueries.map(async ({ query, excerpt }) => ({
-          query,
-          narrationExcerpt: excerpt,
-          images: await searchBraveImages(query, braveApiKey, 6),
-        })),
-      );
     }
 
     let stockVideoSegments: StockVideoSegment[] | undefined;

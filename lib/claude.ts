@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { v4 as uuid } from 'uuid';
 import type {
   ChannelVideo,
   VideoAnalysis,
@@ -6,6 +7,9 @@ import type {
   Analysis,
   Scene,
   ScriptSettings,
+  DirectorScene,
+  DirectorAsset,
+  DirectorSegment,
 } from './types';
 import { resolvePromptLock } from './visual-styles';
 
@@ -382,7 +386,16 @@ Return ONLY valid JSON:
     "brollPattern": "What this channel typically cuts to during narration — e.g. 'close-ups of documents and evidence', 'aerial establishing shots of locations', 'character close-ups with shallow DOF', 'archival-style recreations'. Be specific enough that a director could brief a videographer.",
     "editingRhythm": "The pace of visual cuts for this channel — how long a shot typically holds, what triggers a cut (new sentence? new beat? keyword?), and how editing pace changes across the emotional arc of a video.",
     "graphicsAndTextUsage": "When and how this channel uses on-screen text, lower thirds, titles, or motion graphics — specific triggers and purposes.",
-    "audioMood": "The background music and sound design character this channel uses — genre, emotional tone, when it swells or drops, how it supports the narration."
+    "audioMood": "The background music and sound design character this channel uses — genre, emotional tone, when it swells or drops, how it supports the narration.",
+    "cutRateShotsPerMinute": 0
+  },
+  "visualAssetMix": {
+    "ai-video": 0,
+    "ai-image": 0,
+    "stock-video": 0,
+    "stock-photo": 0,
+    "real-image": 0,
+    "reasoning": "1-sentence explanation of this channel's visual approach — e.g. 'Heavily archival with real documentary footage (real-image 50%, stock-video 30%) reflecting its non-fictional investigative style' or 'Fully AI-generated animation with no real footage, relying on ai-video and ai-image exclusively'. The five numbers must sum to 100. Map the channel's actual observed footage types to these categories: real-image = archival/documentary/actual photos of real people/events; stock-video = licensed footage, B-roll, generic atmospheric clips; stock-photo = licensed still photos, Getty-style imagery; ai-video = AI-generated video, animated sequences, motion graphics, CGI; ai-image = AI-generated stills, illustrated frames, graphic cards."
   },
   "audienceProfile": {
     "demographics": "Specific age range, background, what they are seeking",
@@ -441,13 +454,29 @@ Return ONLY valid JSON:
 
 // ─── Script Generation ──────────────────────────────────────────────────────
 
+interface RawDirectorChunkAsset {
+  rank: 1 | 2;
+  type: string;
+  note: string;
+  searchQuery?: string;
+  slot?: number;
+  narrationSlice?: string;
+}
+
+interface RawDirectorChunk {
+  text: string;
+  durationSeconds: number;
+  assets: RawDirectorChunkAsset[];
+}
+
 interface GeneratedScriptPayload {
   title: string;
   thumbnailConcept: string;
   scenes: Array<{
     number: number;
     title: string;
-    narration: string;
+    narration?: string;           // present in regular mode
+    segments?: RawDirectorChunk[]; // present in director mode
     sceneDescription: string;
     estimatedDurationSeconds: number;
     wordCount: number;
@@ -462,7 +491,9 @@ export async function generateScript(
   settings: ScriptSettings,
   topic: string,
   targetAudience: string,
-  additionalInstructions: string
+  additionalInstructions: string,
+  directorMode = false,
+  assetMixOverride?: Record<string, number>,
 ): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
   const ai = client(apiKey);
 
@@ -483,9 +514,113 @@ export async function generateScript(
     contentNature: analysis.channelInsights.contentNature,
   };
 
+  // Pre-compute director mode section outside the template literal to avoid IIFE complexity
+  const directorSection = (() => {
+    if (!directorMode) return '';
+    const di = analysis.channelInsights;
+    const vg = di.visualSceneGuide;
+    const cn = di.contentNature?.classification ?? 'unknown';
+    const ps = di.visualBrand?.productionStyle ?? 'not specified';
+    return `
+DIRECTOR MODE — write the narration in self-contained visual segments instead of a single narration block.
+
+CHANNEL VISUAL DNA — this is the channel you are directing. Match it exactly:
+- Production style: ${ps}
+- Content nature: ${cn}${di.contentNature?.reasoning ? ` — ${di.contentNature.reasoning}` : ''}
+- Energy / tone: ${di.contentStyle?.energy ?? ''}${di.contentStyle?.tone ? ` · ${di.contentStyle.tone}` : ''}
+${vg?.brollPattern ? `- How this channel cuts visually during narration: ${vg.brollPattern}` : ''}
+${vg?.editingRhythm ? `- Editing rhythm: ${vg.editingRhythm}` : ''}
+${vg?.graphicsAndTextUsage ? `- Graphics/text usage: ${vg.graphicsAndTextUsage}` : ''}
+
+AVAILABLE ASSET TYPES — use each type for the right situation:
+- "real-image"  → named real people, documented events, specific locations. searchQuery = "Samuel Little 1982 mugshot" / "Guadalupe County Texas courthouse"
+- "stock-video" → moving B-roll that evokes motion, atmosphere, or passage of time. searchQuery = visual mood, NOT the narration subject — "crowded city street night", "prison cell corridor", "highway empty dusk"
+- "stock-photo" → a single still that establishes place, object, or mood — use when motion is unnecessary. searchQuery = "old motel room dark", "FBI evidence board", "newspaper clipping crime"
+- "ai-video"    → slow cinematic pans, abstract or impossible visuals, dramatic reconstructions, stylised sequences that stock libraries cannot provide
+- "ai-image"    → illustrated or stylised stills; use when the visual concept is too specific, abstract, or stylised for stock libraries and does not need motion
+
+STOCK SEARCH QUERIES: never write the narration subject literally. Think: what footage or photo would a documentary editor cut to here? Use evocative, searchable terms — mood, place, object, action.
+${(assetMixOverride ?? di.visualAssetMix) ? (() => {
+    const estimatedSegments = Math.max(10, Math.round(settings.targetWordCount / 55));
+    const rawMix = assetMixOverride ?? di.visualAssetMix!;
+    const reasoning = !assetMixOverride && di.visualAssetMix ? di.visualAssetMix.reasoning : 'Custom mix set by the user.';
+    const types = (['ai-video', 'ai-image', 'stock-video', 'stock-photo', 'real-image'] as const).filter(t => (rawMix[t] ?? 0) > 0);
+    return `
+TARGET ASSET MIX${assetMixOverride ? ' (user-specified — override channel default)' : ' — measured distribution for this channel'}. APPLY IT:
+Estimated segments in this script: ~${estimatedSegments}. Your rank-1 choices must hit approximately:
+${types.map(t => `  • ${t}: ${rawMix[t]}%  →  ~${Math.round(estimatedSegments * (rawMix[t] as number) / 100)} segments`).join('\n')}
+Reasoning: ${reasoning}
+
+RULES:
+1. Tally your rank-1 choices as you write. After every scene, check that cumulative counts are tracking the targets above.
+2. If stock-video is running over its target, switch the next eligible atmospheric segment to stock-photo or ai-video instead.
+3. If real-image is running over its target, use stock-photo or stock-video for the next place/mood segment.
+4. ai-video must appear. Use it for slow cinematic pans, stylised transitions, or scenes that are impossible to film.
+5. stock-photo must appear. Use it when a single still is more powerful than moving footage.
+6. ai-image must not crowd out the other types — only use it when no stock or real visual fits.`;
+  })() : ''}
+
+ASSET SELECTION — per segment:
+Ask: what would a director for THIS channel choose, given the channel DNA and the running tally above? Rank-1 = best creative call. Rank-2 = strongest alternative. Never default to ai-image because a searchQuery is hard to write — write the searchQuery first, then decide the type.
+
+MULTI-SHOT SEGMENTS:
+${(() => {
+    const cutRate = di.visualSceneGuide?.cutRateShotsPerMinute;
+    const secsPerShot = cutRate ? Math.round(60 / cutRate) : 12;
+    return `This channel cuts approximately every ${secsPerShot}s (${cutRate ?? 'estimated'} shots/min).
+When a segment's durationSeconds ÷ ${secsPerShot} ≥ 1.8, split it into multiple shots using the "slot" field:
+  - slot 0 = first shot, slot 1 = second, etc.
+  - Each slot must include a "narrationSlice" field: the exact consecutive sentences from this segment's text that the shot covers.
+  - narrationSlice values must be verbatim substrings of the segment text, cover all sentences without gaps, and not overlap.
+  - Each slot still has rank 1 and rank 2 assets (same structure as single-shot assets).
+  - Single-shot segments (duration < ${Math.round(secsPerShot * 1.8)}s) omit slot and narrationSlice entirely.`;
+  })()}
+
+SEGMENT RULES:
+- Each segment is 1–4 complete sentences forming one coherent visual idea.
+- Segment boundaries MUST fall at sentence ends — never break mid-sentence.
+- Segments concatenated in order form the full continuous narration without gaps or added words.
+- Single-shot asset list: exactly 2 assets (rank 1, rank 2). Multi-shot: 2 assets per slot.
+- Asset "note": ≤8 words — the director's brief for this shot.
+- "searchQuery": required for stock-video, stock-photo, real-image; omit for ai-video and ai-image.
+- durationSeconds per segment = round((segmentWordCount / ${settings.wpm}) × 60)
+
+Return ONLY valid JSON:
+{
+  "title": "Video title following the channel's exact title formula",
+  "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
+  "scenes": [
+    {
+      "number": 1,
+      "title": "Scene label (Hook | Setup | Main Point 1 | CTA etc.)",
+      "sceneDescription": "One sentence: what the viewer sees during this scene",
+      "estimatedDurationSeconds": 120,
+      "wordCount": 300,
+      "segments": [
+        {
+          "text": "Exact narration sentences for this segment.",
+          "durationSeconds": 12,
+          "assets": [
+            { "rank": 1, "type": "real-image", "note": "archival photo named subject 1961", "searchQuery": "specific real subject name 1961" },
+            { "rank": 2, "type": "stock-photo", "note": "mountain winter atmospheric", "searchQuery": "ural mountains snow winter" }
+          ],
+          "_multiShotExample_omit_this_key": "For long segments use slot+narrationSlice: [{rank:1,slot:0,narrationSlice:'First sentence.',type:'real-image',...},{rank:2,slot:0,narrationSlice:'First sentence.',type:'stock-photo',...},{rank:1,slot:1,narrationSlice:'Second sentence.',type:'ai-video',...},{rank:2,slot:1,narrationSlice:'Second sentence.',type:'stock-video',...}]"
+        }
+      ]
+    }
+  ],
+  "totalEstimatedDuration": 300,
+  "totalWordCount": 750
+}`;
+  })();
+
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+    // Director mode is JSON-heavy: narration + per-segment asset annotations add ~8-10 tokens per
+    // target word on top of the narration itself. Scale the budget accordingly, capped at 64 K.
+    max_tokens: directorMode
+      ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 9)))
+      : Math.min(16000, Math.max(8000, Math.round(settings.targetWordCount * 4))),
     system:
       'You are an expert YouTube scriptwriter. Respond ONLY with valid JSON, no markdown code blocks, no prose.',
     messages: [
@@ -494,7 +629,7 @@ export async function generateScript(
         content: `Create a complete YouTube video script for the topic below, written in the style of the analysed channel.
 
 CHANNEL STRATEGY (principles and mechanisms — not templates):
-${JSON.stringify(strategy, null, 2)}
+${directorMode ? JSON.stringify(strategy) : JSON.stringify(strategy, null, 2)}
 
 SCRIPT PARAMETERS:
 Topic: ${topic}
@@ -559,10 +694,10 @@ ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to 
 - Total narration word count across ALL scenes must total approximately ${settings.targetWordCount} words
 - For each scene: estimatedDurationSeconds = (wordCount / ${settings.wpm}) × 60, rounded to nearest second
 - sceneDescription is a brief visual note (1 sentence) — NOT the narration${strategy.visualSceneGuide ? `; write it following this channel's visual style: ${strategy.visualSceneGuide.sceneDescriptionStyle}` : ''}
-- Do NOT include image prompts or video prompts — those are generated separately on demand
 - Keep sceneDescription short (1 sentence max)
+${!directorMode ? '- Do NOT include image prompts or video prompts — those are generated separately on demand' : ''}
 
-Return ONLY valid JSON:
+${directorSection}${!directorMode ? `Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
@@ -578,7 +713,7 @@ Return ONLY valid JSON:
   ],
   "totalEstimatedDuration": 300,
   "totalWordCount": 750
-}`,
+}` : ''}`,
       },
     ],
   });
@@ -909,6 +1044,320 @@ Return ONLY the description text, nothing else.`,
   const description = (response.content[0] as { type: string; text: string }).text.trim();
   return {
     description,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+}
+
+// ─── Director Plan Generation ────────────────────────────────────────────────
+
+interface RawDirectorAsset {
+  rank: number;
+  type: string;
+  note: string;
+  durationEach?: number;   // omitted by model for ai-image and stock/real assets
+  searchQuery?: string;    // omitted by model for ai-video and ai-image
+}
+
+interface RawDirectorSegment {
+  s: number;             // startChar offset into scene narration
+  e: number;             // endChar offset
+  dur: number;           // durationSeconds
+  assets: RawDirectorAsset[];
+}
+
+interface RawDirectorScene {
+  sceneId: string;
+  segments: RawDirectorSegment[];
+}
+
+type DirectorSceneInput = { id: string; title: string; narration: string; estimatedDurationSeconds: number };
+
+// Builds the static channel-context + rules block that is identical across all scene calls.
+// Returned as a single string so it can be placed in a cached content block.
+function buildDirectorStaticPrompt(analysis: Analysis, visualStyle?: string): string {
+  const insights = analysis.channelInsights;
+  const visualGuide = insights.visualSceneGuide;
+  const productionStyle = visualStyle ?? insights.visualBrand?.productionStyle ?? 'not specified';
+  const contentNature = insights.contentNature?.classification ?? 'unknown';
+
+  return `You are directing the visual production of a YouTube video. For each scene you receive, break the narration into precise visual segments and rank the 2 best media asset types per segment. Ground every decision in the channel's production style below.
+
+CHANNEL PRODUCTION PROFILE:
+- Visual style: ${productionStyle}
+- Content nature: ${contentNature}
+- Energy: ${insights.contentStyle?.energy ?? 'not specified'}
+- Tone: ${insights.contentStyle?.tone ?? 'not specified'}
+${visualGuide ? `- Broll pattern: ${visualGuide.brollPattern}
+- Editing rhythm: ${visualGuide.editingRhythm}
+- Graphics/text: ${visualGuide.graphicsAndTextUsage}
+- Audio mood: ${visualGuide.audioMood}` : ''}
+
+STRATEGIES TO APPLY:
+${insights.thingsToSteal?.slice(0, 5).map(t => `- ${t}`).join('\n') ?? 'None'}
+
+RETENTION PATTERNS:
+${insights.engagementPatterns?.slice(0, 3).map(p => `- ${p}`).join('\n') ?? 'None'}
+
+RULES:
+- Segment = one coherent visual unit; cut when subject, emotion, or rhythm changes
+- Identify segment boundaries by character offsets into the narration string (s=startChar, e=endChar)
+- CRITICAL: s and e MUST land on word boundaries — s must be the index of the first character of a word (either 0 or one position after a space), e must be the index one position after the last character of a word (either at a space or at the end of the string). Never split a word across segments.
+- Verify: narration[s] is never a partial word; narration[e-1] is never a partial word
+- Match channel editing rhythm for segment length
+- Asset types: ai-video | ai-image | stock-video | stock-photo | real-image
+- Rank exactly 2 assets per segment; rank 1 is primary, rank 2 is fallback
+- High-action/kinetic → ai-video rank 1; contemplative/atmospheric → ai-image rank 1
+- Non-fictional/real-world references${contentNature === 'non-fictional' ? ' (this channel)' : ''} → real-image ranks high
+- ai-video: durationEach = 6 or 8; stock/real: provide searchQuery; ai-image/ai-video: omit searchQuery
+- ai-image: omit durationEach
+- "note" field: ≤8 words explaining the choice
+- Omit any field whose value would be null or 0 — do not output null values
+
+OUTPUT: JSON array, one object per scene, no markdown, no commentary:
+[{"sceneId":"<id>","segments":[{"s":<startChar>,"e":<endChar>,"dur":<seconds>,"assets":[{"rank":1,"type":"ai-video","note":"kinetic action suits channel energy","durationEach":7},{"rank":2,"type":"stock-video","note":"generic fallback if AI fails","durationEach":7,"searchQuery":"specific phrase"}]}]}]`;
+}
+
+function parseDirectorResponse(raw: string, batchStartIndex: number): RawDirectorScene[] {
+  let cleaned = raw.trim();
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  cleaned = arrayMatch ? arrayMatch[0] : cleaned;
+  try {
+    return JSON.parse(cleaned) as RawDirectorScene[];
+  } catch {
+    throw new Error(`Failed to parse director plan (scenes starting at ${batchStartIndex + 1}). Response: ${cleaned.slice(0, 200)}`);
+  }
+}
+
+// Snap s backward to the start of a word (never land mid-word).
+function snapWordStart(text: string, s: number): number {
+  while (s > 0 && text[s - 1] !== ' ') s--;
+  return s;
+}
+
+// Snap e forward to the end of a word (never land mid-word).
+function snapWordEnd(text: string, e: number): number {
+  while (e < text.length && text[e] !== ' ') e++;
+  return e;
+}
+
+// Map raw Claude segments to DirectorSegments, respecting Claude's intended s/e offsets
+// (snapped to word boundaries) so assets stay aligned with the narration they were designed for.
+// Slight overlap between adjacent segments is preferable to shifting content away from its assets.
+function mapDirectorScene(rawScene: RawDirectorScene, narration: string): DirectorScene {
+  const rawSegs = rawScene.segments ?? [];
+  if (rawSegs.length === 0) return { sceneId: rawScene.sceneId, segments: [] };
+
+  const sorted = [...rawSegs].sort((a, b) => a.s - b.s);
+
+  return {
+    sceneId: rawScene.sceneId,
+    segments: sorted.map((rawSeg, i): DirectorSegment => {
+      const s = snapWordStart(narration, Math.max(0, rawSeg.s));
+      const e = i === sorted.length - 1
+        ? narration.length
+        : snapWordEnd(narration, Math.min(rawSeg.e, narration.length));
+      return {
+        id: uuid(),
+        narrationExcerpt: narration.slice(s, e).trim(),
+        durationSeconds: rawSeg.dur,
+        assets: (rawSeg.assets ?? []).map((rawAsset): DirectorAsset => ({
+          id: uuid(),
+          rank: rawAsset.rank,
+          type: rawAsset.type as DirectorAsset['type'],
+          rationale: rawAsset.note,
+          searchQuery: rawAsset.searchQuery ?? undefined,
+          prompts: [],
+          durationEach: rawAsset.durationEach ?? undefined,
+          totalDuration: rawSeg.dur,
+          generated: false,
+        })),
+      };
+    }),
+  };
+}
+
+// Yields one DirectorScene at a time so callers can stream progress to the client.
+// Internally batches 2 scenes per API call and uses prompt caching on the static context.
+export async function* generateDirectorPlanStream(
+  apiKey: string,
+  scenes: DirectorSceneInput[],
+  analysis: Analysis,
+  visualStyle?: string,
+): AsyncGenerator<{ scene: DirectorScene; index: number; total: number; inputTokens: number; outputTokens: number }> {
+  const ai = client(apiKey);
+  const staticPrompt = buildDirectorStaticPrompt(analysis, visualStyle);
+  const system = 'You are an expert YouTube video director. Respond ONLY with a JSON array — no markdown, no commentary.';
+  const BATCH_SIZE = 2;
+
+  for (let batchStart = 0; batchStart < scenes.length; batchStart += BATCH_SIZE) {
+    const batch = scenes.slice(batchStart, batchStart + BATCH_SIZE);
+
+    const sceneBlocks = batch.map((s, j) =>
+      `Scene ${batchStart + j + 1} [id: ${s.id}]\nTitle: ${s.title}\nDuration: ~${s.estimatedDurationSeconds}s\nNarration:\n${s.narration}`
+    ).join('\n\n---\n\n');
+
+    const response = await ai.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      system,
+      messages: [{
+        role: 'user',
+        content: [
+          // Static block: cached after the first call — subsequent calls pay ~10% of input cost for this portion
+          { type: 'text', text: staticPrompt, cache_control: { type: 'ephemeral' } } as { type: 'text'; text: string; cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: `\n\nSCENES TO DIRECT:\n${sceneBlocks}` },
+        ],
+      }],
+    }, {
+      headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' },
+    });
+
+    if (response.stop_reason === 'max_tokens') {
+      const titles = batch.map(s => `"${s.title}"`).join(', ');
+      throw new Error(`Director plan hit the output limit on scenes ${titles}. Try reducing video length or breaking long scenes into shorter ones.`);
+    }
+
+    const raw = response.content[0].type === 'text' ? response.content[0].text : '[]';
+    const rawScenes = parseDirectorResponse(raw, batchStart);
+
+    for (let j = 0; j < rawScenes.length; j++) {
+      yield {
+        scene: mapDirectorScene(rawScenes[j], batch[j]?.narration ?? ''),
+        index: batchStart + j,
+        total: scenes.length,
+        // Attribute all tokens to the first yield in the batch; rest are 0 to avoid double-counting
+        inputTokens: j === 0 ? response.usage.input_tokens : 0,
+        outputTokens: j === 0 ? response.usage.output_tokens : 0,
+      };
+    }
+  }
+}
+
+// Non-streaming wrapper used by callers that don't need per-scene progress.
+export async function generateDirectorPlan(
+  apiKey: string,
+  scenes: DirectorSceneInput[],
+  analysis: Analysis,
+  visualStyle?: string,
+): Promise<{ result: DirectorScene[]; inputTokens: number; outputTokens: number }> {
+  const result: DirectorScene[] = [];
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for await (const item of generateDirectorPlanStream(apiKey, scenes, analysis, visualStyle)) {
+    result.push(item.scene);
+    inputTokens += item.inputTokens;
+    outputTokens += item.outputTokens;
+  }
+  return { result, inputTokens, outputTokens };
+}
+
+// ─── Director Prompt Generation (lazy, per asset) ────────────────────────────
+
+export async function generateDirectorPrompts(
+  apiKey: string,
+  opts: {
+    assetType: 'ai-video' | 'ai-image';
+    narrationExcerpt: string;
+    durationEach: number;
+    clipCount: number;
+    sceneTitle: string;
+    sceneDescription: string;
+    scriptTitle: string;
+    productionStyle: string;
+    visualStyle?: string;
+    characters?: Array<{ name: string; fullDescription: string }>;
+    channelBrollPattern?: string;
+    channelEditingRhythm?: string;
+    contentNature?: string;
+    directorNote?: string;
+  }
+): Promise<{ prompts: string[]; clipLabels: ('CUT' | 'CONTINUOUS' | null)[]; inputTokens: number; outputTokens: number }> {
+  const ai = client(apiKey);
+  const { assetType, narrationExcerpt, durationEach, clipCount, sceneTitle, sceneDescription, scriptTitle, productionStyle, visualStyle, characters, channelBrollPattern, channelEditingRhythm, contentNature, directorNote } = opts;
+
+  const effectiveStyle = resolvePromptLock(visualStyle ?? productionStyle) ?? (visualStyle ?? productionStyle);
+  const isVideo = assetType === 'ai-video';
+  const characterBlock = characters?.length
+    ? `\nCHARACTER CONSISTENCY:\n${characters.map(c => `${c.name}: ${c.fullDescription}`).join('\n')}`
+    : '';
+
+  const clipInstruction = isVideo && clipCount > 1
+    ? `Generate exactly ${clipCount} sequential video prompts covering the narration segment. Each prompt is a ${durationEach}s clip. Number them with headers in this exact format: [Clip 1/${clipCount} · CUT] or [Clip 1/${clipCount} · CONTINUOUS] — use CUT if this clip starts a new camera setup/angle, CONTINUOUS if it continues the motion or framing from the previous clip. Then write the prompt text below the header.`
+    : isVideo
+    ? `Generate 1 video prompt for a ${durationEach}s clip.`
+    : `Generate 1 still image prompt.`;
+
+  // Static preamble: identical across all asset generation calls for the same script.
+  // Marked as cached so repeated clicks within a session pay ~10% input cost for this block.
+  const staticBlock = `Write ${isVideo ? 'video' : 'image'} generation prompt(s) for a narration segment.
+
+PRODUCTION STYLE: ${effectiveStyle}
+CONTENT NATURE: ${contentNature ?? 'not specified'}
+${channelBrollPattern ? `CHANNEL BROLL PATTERN (match this): ${channelBrollPattern}` : ''}
+${channelEditingRhythm ? `EDITING RHYTHM: ${channelEditingRhythm}` : ''}
+${characterBlock}
+
+VIDEO TITLE: ${scriptTitle}
+SCENE: ${sceneTitle}
+SCENE DESCRIPTION: ${sceneDescription}
+
+REQUIREMENTS:
+- Written specifically for ${effectiveStyle}
+- NARRATION FIDELITY (highest priority): depict EXACTLY what the narration says — the same subject, the same action, the same relationship. If the narration says a person presses their OWN face/temples, the subject must be doing it to themselves — not to another person. If the narration names a specific object, location, or action, it must appear in the prompt. Do NOT substitute, reinterpret, or invent actions or relationships not described.
+- Match the mood, pacing, and visual energy of the narration
+- Include lighting, composition, action/motion${isVideo ? ', and camera movement' : ''}
+- Production-ready — no meta-commentary, no caveats, just the prompt`;
+
+  const response = await ai.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1200,
+    system: `You are a visual prompt engineer for AI ${isVideo ? 'video' : 'image'} generation. Write vivid, production-ready prompts that match the channel's visual style exactly. The single most important rule: every prompt must depict exactly what the narration describes — same subject, same action, same relationships. Never substitute, invent, or reinterpret. Return ONLY the prompt text(s), no explanation.`,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: staticBlock, cache_control: { type: 'ephemeral' } } as { type: 'text'; text: string; cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: `\nNARRATION FOR THIS SEGMENT:\n"${narrationExcerpt}"\n${directorNote ? `\nDIRECTOR'S NOTE (mandatory — this is the primary visual intent, override any conflicting inference):\n"${directorNote}"\n` : ''}\n${clipInstruction}` },
+      ],
+    }],
+  }, {
+    headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' },
+  });
+
+  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+
+  let prompts: string[];
+  let clipLabels: ('CUT' | 'CONTINUOUS' | null)[];
+
+  if (clipCount > 1 && isVideo) {
+    // Split on headers like [Clip 1/3 · CUT] or [Clip 1/3 · CONTINUOUS] or plain [Clip 1/3]
+    const headerRe = /\[Clip \d+\/\d+(?:\s*[·•]\s*(CUT|CONTINUOUS))?\]/gi;
+    const labels: ('CUT' | 'CONTINUOUS' | null)[] = [];
+    const splitPoints: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = headerRe.exec(raw)) !== null) {
+      splitPoints.push(m.index + m[0].length);
+      const tag = m[1]?.toUpperCase();
+      labels.push(tag === 'CUT' ? 'CUT' : tag === 'CONTINUOUS' ? 'CONTINUOUS' : null);
+    }
+    if (splitPoints.length === clipCount) {
+      prompts = splitPoints.map((start, i) =>
+        raw.slice(start, splitPoints[i + 1]).trim()
+      );
+      clipLabels = labels;
+    } else {
+      prompts = [raw];
+      clipLabels = [null];
+    }
+  } else {
+    prompts = [raw];
+    clipLabels = [null];
+  }
+
+  return {
+    prompts,
+    clipLabels,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   };

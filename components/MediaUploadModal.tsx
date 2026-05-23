@@ -12,6 +12,7 @@ interface Props {
   script: Script;
   onClose: () => void;
   onScriptChange: (updated: Script) => void;
+  mediaKey?: 'mediaFiles' | 'directorMediaFiles';
 }
 
 type Tab = 'image' | 'video' | 'audio';
@@ -24,6 +25,7 @@ export default function MediaUploadModal({
   script,
   onClose,
   onScriptChange,
+  mediaKey = 'mediaFiles',
 }: Props) {
   const storage = useStorage();
   const [tab, setTab] = useState<Tab>('image');
@@ -35,7 +37,7 @@ export default function MediaUploadModal({
   const urlRevokeRef = useRef<string[]>([]);
 
   const scene = script.scenes.find(s => s.id === sceneId);
-  const mediaFiles: MediaFile[] = scene?.mediaFiles ?? [];
+  const mediaFiles: MediaFile[] = scene?.[mediaKey] ?? [];
   const audioFile = scene?.audioFile;
 
   // Compute object URLs for all media files
@@ -103,7 +105,7 @@ export default function MediaUploadModal({
       setObjectUrls(prev => ({ ...prev, [filename]: objUrl }));
       uploaded.push(mf);
     }
-    updateScene({ mediaFiles: [...mediaFiles, ...uploaded] });
+    updateScene({ [mediaKey]: [...mediaFiles, ...uploaded] });
     setLoading(false);
   }, [storage, projectId, scriptId, sceneId, mediaFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -113,7 +115,7 @@ export default function MediaUploadModal({
       URL.revokeObjectURL(objectUrls[filename]);
       setObjectUrls(prev => { const n = { ...prev }; delete n[filename]; return n; });
     }
-    updateScene({ mediaFiles: mediaFiles.filter(f => f.filename !== filename) });
+    updateScene({ [mediaKey]: mediaFiles.filter(f => f.filename !== filename) });
   };
 
   const deleteAudio = async () => {
@@ -157,7 +159,7 @@ export default function MediaUploadModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h2 className="font-semibold text-base">Media — Scene {sceneNumber}</h2>
+          <h2 className="font-semibold text-base">{mediaKey === 'directorMediaFiles' ? 'Director Media' : 'Media'} — Scene {sceneNumber}</h2>
           <button onClick={onClose} className="text-[#a1a1aa] hover:text-white text-xl leading-none">×</button>
         </div>
 
