@@ -452,6 +452,57 @@ Return ONLY valid JSON:
   }
 }
 
+// ─── Search Query Generation ─────────────────────────────────────────────────
+
+export async function generateSearchQuery(
+  apiKey: string,
+  narration: string,
+  assetType: 'stock-photo' | 'stock-video' | 'real-image',
+  ctx?: {
+    scriptTitle?: string;
+    sceneTitle?: string;
+    sceneDescription?: string;
+    characters?: Array<{ name: string; fullDescription: string }>;
+    contentNature?: string;
+    productionStyle?: string;
+    channelBrollPattern?: string;
+  },
+): Promise<string> {
+  const ai = client(apiKey);
+
+  const characterBlock = ctx?.characters?.length
+    ? `CHARACTERS: ${ctx.characters.map(c => `${c.name} — ${c.fullDescription}`).join('; ')}`
+    : null;
+
+  const lines = [
+    ctx?.contentNature     && `CONTENT NATURE: ${ctx.contentNature}`,
+    ctx?.productionStyle   && `PRODUCTION STYLE: ${ctx.productionStyle}`,
+    ctx?.channelBrollPattern && `BROLL PATTERN: ${ctx.channelBrollPattern}`,
+    ctx?.scriptTitle       && `VIDEO TITLE: ${ctx.scriptTitle}`,
+    ctx?.sceneTitle        && `SCENE: ${ctx.sceneTitle}`,
+    ctx?.sceneDescription  && `SCENE DESCRIPTION: ${ctx.sceneDescription}`,
+    characterBlock,
+    `NARRATION: "${narration.slice(0, 500)}"`,
+  ].filter(Boolean);
+
+  const instruction = {
+    'stock-photo': 'Write a 3–5 word Pexels stock photo search query capturing the visual mood or scene. Do not include person names.',
+    'stock-video': 'Write a 3–5 word Pexels stock video search query for the atmosphere or action. Do not include person names.',
+    'real-image': characterBlock
+      ? 'Write a 3–6 word archival/historical image search query. You have the character names above — use the correct name in the query.'
+      : 'Write a 3–6 word archival image search query. Resolve any pronouns to the named subject using the context above.',
+  }[assetType];
+
+  const response = await ai.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 30,
+    system: 'You are a documentary film researcher. Given production context and a narration excerpt, output ONLY a concise image/video search query (3–6 words). No explanation, no punctuation at the end, no quotes.',
+    messages: [{ role: 'user', content: `${lines.join('\n')}\n\n${instruction}` }],
+  });
+  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+  return raw.replace(/^["']|["']$/g, '').replace(/[.]+$/, '') || narration.slice(0, 40);
+}
+
 // ─── Script Generation ──────────────────────────────────────────────────────
 
 interface RawDirectorChunkAsset {
@@ -497,21 +548,23 @@ export async function generateScript(
 ): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
   const ai = client(apiKey);
 
-  // Send only the strategy fields needed for scripting — not the full insights object
+  // Send only the strategy fields needed for scripting — not the full insights object.
+  // In director mode, contentStyle/visualSceneGuide/contentNature/productionStyle are omitted
+  // here because directorSection already injects them explicitly, avoiding duplication.
   const strategy = {
     channelOverview: analysis.channelInsights.channelOverview,
     titleFormulas: analysis.channelInsights.titleFormulas,
     hookStrategies: analysis.channelInsights.hookStrategies,
     scriptStructureTemplate: analysis.channelInsights.scriptStructureTemplate,
-    contentStyle: analysis.channelInsights.contentStyle,
+    ...(!directorMode && { contentStyle: analysis.channelInsights.contentStyle }),
     audienceProfile: analysis.channelInsights.audienceProfile,
     engagementPatterns: analysis.channelInsights.engagementPatterns,
     replicationFormula: analysis.channelInsights.replicationFormula,
     thingsToSteal: analysis.channelInsights.thingsToSteal,
     writingStyle: analysis.channelInsights.writingStyle,
-    productionStyle: analysis.channelInsights.visualBrand?.productionStyle,
-    visualSceneGuide: analysis.channelInsights.visualSceneGuide,
-    contentNature: analysis.channelInsights.contentNature,
+    ...(!directorMode && { productionStyle: analysis.channelInsights.visualBrand?.productionStyle }),
+    ...(!directorMode && { visualSceneGuide: analysis.channelInsights.visualSceneGuide }),
+    ...(!directorMode && { contentNature: analysis.channelInsights.contentNature }),
   };
 
   // Pre-compute director mode section outside the template literal to avoid IIFE complexity
@@ -581,7 +634,7 @@ SEGMENT RULES:
 - Segment boundaries MUST fall at sentence ends — never break mid-sentence.
 - Segments concatenated in order form the full continuous narration without gaps or added words.
 - Single-shot asset list: exactly 2 assets (rank 1, rank 2). Multi-shot: 2 assets per slot.
-- Asset "note": ≤8 words — the director's brief for this shot.
+- Asset "note": ≤5 words — the director's brief for this shot.
 - "searchQuery": required for stock-video, stock-photo, real-image; omit for ai-video and ai-image.
 - durationSeconds per segment = round((segmentWordCount / ${settings.wpm}) × 60)
 
@@ -604,7 +657,6 @@ Return ONLY valid JSON:
             { "rank": 1, "type": "real-image", "note": "archival photo named subject 1961", "searchQuery": "specific real subject name 1961" },
             { "rank": 2, "type": "stock-photo", "note": "mountain winter atmospheric", "searchQuery": "ural mountains snow winter" }
           ],
-          "_multiShotExample_omit_this_key": "For long segments use slot+narrationSlice: [{rank:1,slot:0,narrationSlice:'First sentence.',type:'real-image',...},{rank:2,slot:0,narrationSlice:'First sentence.',type:'stock-photo',...},{rank:1,slot:1,narrationSlice:'Second sentence.',type:'ai-video',...},{rank:2,slot:1,narrationSlice:'Second sentence.',type:'stock-video',...}]"
         }
       ]
     }

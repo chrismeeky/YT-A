@@ -51,16 +51,27 @@ export async function POST(
         const modeLabel = directorMode ? ' with director segments' : '';
         emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script${modeLabel} with Claude… (this may take up to 90 seconds)` });
 
-        const { result: generated, inputTokens, outputTokens } = await generateScript(
-          anthropicApiKey,
-          body.analysis,
-          scriptSettings,
-          body.topic,
-          body.targetAudience        ?? '',
-          body.additionalInstructions ?? '',
-          directorMode,
-          body.assetMixOverride,
-        );
+        const keepalive = setInterval(() => {
+          try { emit({ message: 'Still generating…' }); } catch { /* stream closed */ }
+        }, 15_000);
+
+        let generated: Awaited<ReturnType<typeof generateScript>>['result'];
+        let inputTokens: number;
+        let outputTokens: number;
+        try {
+          ({ result: generated, inputTokens, outputTokens } = await generateScript(
+            anthropicApiKey,
+            body.analysis,
+            scriptSettings,
+            body.topic,
+            body.targetAudience        ?? '',
+            body.additionalInstructions ?? '',
+            directorMode,
+            body.assetMixOverride,
+          ));
+        } finally {
+          clearInterval(keepalive);
+        }
 
         emit({ message: `Parsing ${generated.scenes.length} scenes…` });
 
