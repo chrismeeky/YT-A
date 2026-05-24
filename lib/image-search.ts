@@ -24,8 +24,18 @@ export async function searchPexels(
 
 export async function searchDuckDuckGoImages(
   query: string,
-  count = 6
+  count = 6,
+  proxyUrl?: string
 ): Promise<RealImage[]> {
+  const proxy = proxyUrl ?? process.env.NEXT_PUBLIC_DDG_PROXY_URL ?? '';
+  if (proxy) {
+    const url = `${proxy.replace(/\/$/, '')}?q=${encodeURIComponent(query)}&count=${count}`;
+    const r = await fetch(url);
+    const d = await r.json() as { images?: RealImage[]; error?: string };
+    if (!r.ok) throw new Error(d.error ?? 'DDG proxy search failed');
+    return d.images ?? [];
+  }
+
   const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
   const browserHeaders = {
     'User-Agent': UA,
