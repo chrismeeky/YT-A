@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Script, Analysis, DirectorScene, DirectorSegment, DirectorAsset, DirectorAssetType, StockPhoto, StockVideo, RealImage, VisualAssetMix } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import MediaUploadModal from '@/components/MediaUploadModal';
@@ -74,6 +74,7 @@ function AssetCard({
   visible,
   savingUrl,
   onUpdate,
+  onDelete,
   onSaveToScene,
   onLightbox,
   onVideoPlayer,
@@ -90,6 +91,7 @@ function AssetCard({
   visible: boolean;
   savingUrl: string | null;
   onUpdate: (updated: DirectorAsset) => void;
+  onDelete: () => void;
   onSaveToScene: (url: string, name: string, sceneId: string) => Promise<void>;
   onLightbox: (src: string, alt: string) => void;
   onVideoPlayer: (src: string, title: string) => void;
@@ -98,11 +100,14 @@ function AssetCard({
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const generateRef = useRef<(() => void) | null>(null);
+  const autoFired = useRef(false);
 
   const targetScene = script.scenes.find(s => s.id === scene.sceneId);
   const savedNames = new Set(targetScene?.directorMediaFiles?.map(f => f.originalName) ?? []);
 
   const isAI = asset.type === 'ai-video' || asset.type === 'ai-image';
+  const isSearch = asset.type === 'stock-photo' || asset.type === 'stock-video' || asset.type === 'real-image';
 
   // Use the narration slice (if this is a multi-shot asset) or the full segment narration
   // to compute the actual TTS duration from word count × WPM rather than the pre-computed
@@ -157,6 +162,7 @@ function AssetCard({
         photos?: StockPhoto[];
         videos?: StockVideo[];
         images?: RealImage[];
+        autoSearchQuery?: string;
         error?: string;
       };
       if (!res.ok || data.error) { setError(data.error ?? 'Generation failed'); return; }
@@ -169,6 +175,7 @@ function AssetCard({
         stockPhotos: data.photos ?? asset.stockPhotos,
         stockVideos: data.videos ?? asset.stockVideos,
         realImages: data.images ?? asset.realImages,
+        ...(data.autoSearchQuery && { searchQuery: data.autoSearchQuery }),
       });
       setExpanded(true);
     } catch {
@@ -177,6 +184,18 @@ function AssetCard({
       setLoading(false);
     }
   };
+
+  // Keep the ref current so the mount effect can call the latest version
+  generateRef.current = generate;
+
+  // Auto-fire for user-added assets (rationale === '' signals added via picker, not by AI)
+  useEffect(() => {
+    if (!autoFired.current && !asset.generated && asset.rationale === '' && analysis) {
+      autoFired.current = true;
+      generateRef.current?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const copyPrompt = (idx: number, text: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -210,14 +229,6 @@ function AssetCard({
     >
       {/* Asset header */}
       <div className="flex items-center gap-2 px-3 py-2">
-        {/* Rank badge */}
-        <span
-          className="flex-shrink-0 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center"
-          style={{ background: color + '25', color }}
-        >
-          {asset.rank}
-        </span>
-
         <span className="text-sm">{ASSET_ICONS[asset.type]}</span>
         <span className="text-xs font-medium flex-1">{ASSET_LABELS[asset.type]}</span>
 
@@ -262,15 +273,26 @@ function AssetCard({
             ? '↺ Regen'
             : isAI ? '✨ Generate' : '🔍 Search'}
         </button>
+
+        <button
+          onClick={onDelete}
+          title="Remove asset"
+          className="w-6 h-6 flex items-center justify-center rounded text-[13px] transition-colors text-[#52525b] hover:text-red-400 hover:bg-red-400/10"
+        >
+          ×
+        </button>
       </div>
 
-      {/* Rationale */}
+      {/* Rationale + search query */}
       <div className="px-3 pb-2">
-        <p className="text-[11px] text-[#52525b] leading-relaxed">{asset.rationale}</p>
+        {asset.rationale && <p className="text-[11px] text-[#52525b] leading-relaxed">{asset.rationale}</p>}
         {asset.searchQuery && (
           <p className="text-[10px] text-[#3f3f46] mt-1">
             Search: <span className="text-[#52525b] font-mono">{asset.searchQuery}</span>
           </p>
+        )}
+        {!asset.searchQuery && !asset.rationale && loading && (
+          <p className="text-[10px] text-[#3f3f46] mt-1 italic">Generating…</p>
         )}
         {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
       </div>
@@ -519,6 +541,8 @@ function SegmentCard({
   onVideoPlayer: (src: string, title: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // null = closed; 'single' = open for single-slot segment; number = open for that slot index
+  const [addPickerSlot, setAddPickerSlot] = useState<number | 'single' | null>(null);
   const [highlightedSlot, setHighlightedSlot] = useState<number | null>(null);
   const slotRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -528,6 +552,22 @@ function SegmentCard({
       assets: segment.assets.map(a => a.id === updatedAsset.id ? updatedAsset : a),
     });
   }, [segment, onSegmentUpdate]);
+
+  const addAsset = useCallback((type: DirectorAssetType, slot?: number) => {
+    const newAsset: DirectorAsset = {
+      id: crypto.randomUUID(),
+      rank: 1,
+      type,
+      rationale: '',
+      prompts: [],
+      totalDuration: segment.durationSeconds,
+      generated: false,
+      ...(slot !== undefined && { slot }),
+    };
+    onSegmentUpdate({ ...segment, assets: [...segment.assets, newAsset] });
+    setAddPickerSlot(null);
+    if (!open) setOpen(true);
+  }, [segment, onSegmentUpdate, open]);
 
   const generatedCount = segment.assets.filter(a => a.generated).length;
   const topAsset = segment.assets.find(a => a.rank === 1);
@@ -557,6 +597,10 @@ function SegmentCard({
       }, 350);
     }, 50);
   };
+
+  const deleteAsset = useCallback((assetId: string) => {
+    onSegmentUpdate({ ...segment, assets: segment.assets.filter(a => a.id !== assetId) });
+  }, [segment, onSegmentUpdate]);
 
   const commonCardProps = {
     segment, scene, script, analysis,
@@ -612,7 +656,8 @@ function SegmentCard({
       {open && (
         <div className="border-t" style={{ borderColor: 'var(--border)' }}>
           {isMultiSlot ? (
-            Array.from({ length: slotCount }, (_, slotIdx) => {
+            <>
+            {Array.from({ length: slotCount }, (_, slotIdx) => {
               const slotAssets = getSlotAssets(slotIdx);
               const primary = getSlotAssets(slotIdx).find(a => a.rank === 1);
               const c = SLOT_COLORS_DEF[slotIdx % SLOT_COLORS_DEF.length];
@@ -640,21 +685,78 @@ function SegmentCard({
                       </p>
                     )}
                   </div>
-                  {slotAssets.length === 0 ? (
-                    <p className="text-[11px] text-[#52525b]">No enabled asset types for this shot.</p>
-                  ) : slotAssets.map(asset => (
-                    <AssetCard key={asset.id} asset={asset} {...commonCardProps} visible={true} />
+                  {slotAssets.filter(a => a.rank === 1).length === 0 ? (
+                    <p className="text-[11px] text-[#52525b]">No asset for this shot.</p>
+                  ) : slotAssets.filter(a => a.rank === 1).map(asset => (
+                    <AssetCard key={asset.id} asset={asset} {...commonCardProps} onDelete={() => deleteAsset(asset.id)} visible={true} />
                   ))}
+                  {/* Per-slot add picker */}
+                  {addPickerSlot === slotIdx ? (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {ALL_TYPES.map(type => (
+                        <button
+                          key={type}
+                          onClick={() => addAsset(type, slotIdx)}
+                          className="flex items-center gap-1 px-2 py-1 rounded border text-[11px] transition-colors hover:bg-white/5"
+                          style={{ borderColor: ASSET_COLORS[type] + '50', color: ASSET_COLORS[type] }}
+                        >
+                          {ASSET_ICONS[type]} {ASSET_LABELS[type]}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setAddPickerSlot(null)}
+                        className="px-2 py-1 rounded text-[11px] text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAddPickerSlot(slotIdx)}
+                      className="text-[10px] text-[#3f3f46] hover:text-[#71717a] transition-colors pt-0.5"
+                    >
+                      + Add asset
+                    </button>
+                  )}
                 </div>
               );
-            })
+            })}
+            </>
           ) : (
             <div className="px-3 py-2.5 space-y-2">
-              {segment.assets.length === 0 ? (
+              {segment.assets.filter(a => a.rank === 1).length === 0 ? (
                 <p className="text-[11px] text-[#52525b]">No assets for this segment.</p>
-              ) : segment.assets.map(asset => (
-                <AssetCard key={asset.id} asset={asset} {...commonCardProps} visible={true} />
+              ) : segment.assets.filter(a => a.rank === 1).map(asset => (
+                <AssetCard key={asset.id} asset={asset} {...commonCardProps} onDelete={() => deleteAsset(asset.id)} visible={true} />
               ))}
+              {/* Add asset picker */}
+              {addPickerSlot === 'single' ? (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {ALL_TYPES.map(type => (
+                    <button
+                      key={type}
+                      onClick={() => addAsset(type)}
+                      className="flex items-center gap-1 px-2 py-1 rounded border text-[11px] transition-colors hover:bg-white/5"
+                      style={{ borderColor: ASSET_COLORS[type] + '50', color: ASSET_COLORS[type] }}
+                    >
+                      {ASSET_ICONS[type]} {ASSET_LABELS[type]}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setAddPickerSlot(null)}
+                    className="px-2 py-1 rounded text-[11px] text-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setAddPickerSlot('single')}
+                  className="text-[10px] text-[#3f3f46] hover:text-[#71717a] transition-colors pt-0.5"
+                >
+                  + Add asset
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -682,6 +784,32 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
   const [mediaModalSceneId, setMediaModalSceneId] = useState<string | null>(null);
   const [generatingAudioFor, setGeneratingAudioFor] = useState<string | null>(null);
   const [audioMsg, setAudioMsg] = useState<{ sceneId: string; text: string; ok: boolean } | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(208);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const isDragging = useRef(false);
+
+  const startSidebarDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      const next = Math.max(140, Math.min(420, startWidth + ev.clientX - startX));
+      setSidebarWidth(next);
+      if (next > 140) setSidebarCollapsed(false);
+    };
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [sidebarWidth]);
+
+  useEffect(() => () => { isDragging.current = false; }, []);
 
   const saveToScene = useCallback(async (url: string, originalName: string, sceneId: string) => {
     setSavingUrl(url);
@@ -804,38 +932,85 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
     <div className="flex flex-1 overflow-hidden">
       {/* Scene sidebar */}
       <div
-        className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+        className="flex-shrink-0 border-r flex flex-col overflow-hidden transition-[width] duration-150"
+        style={{
+          width: sidebarCollapsed ? 32 : sidebarWidth,
+          background: 'var(--surface)',
+          borderColor: 'var(--border)',
+        }}
       >
-        <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
-          <p className="text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Scenes</p>
-          <p className="text-[10px] text-[#3f3f46] mt-0.5">{totalSegments} segments · {totalGenerated} generated</p>
-        </div>
-        <div className="flex-1 overflow-y-auto py-1">
-          {plan.map((dirScene, i) => {
-            const scriptScene = script.scenes.find(s => s.id === dirScene.sceneId);
-            const genCount = dirScene.segments.reduce((n, seg) => n + seg.assets.filter(a => a.generated).length, 0);
-            const isActive = dirScene.sceneId === activeScene?.sceneId;
-            return (
-              <button
-                key={dirScene.sceneId}
-                onClick={() => setActiveSceneId(dirScene.sceneId)}
-                className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors border-l-2 ${
-                  isActive ? 'bg-indigo-500/15 border-indigo-400' : 'hover:bg-[#1a1a1a] border-transparent'
-                }`}
-              >
-                <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{scriptScene?.title ?? 'Scene'}</p>
-                  <p className="text-[10px] text-[#52525b] mt-0.5">
-                    {dirScene.segments.length} seg{dirScene.segments.length !== 1 ? 's' : ''}
-                    {genCount > 0 && <span className="ml-1 text-green-500">·{genCount}✓</span>}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        {sidebarCollapsed ? (
+          /* Collapsed strip — just scene number pills */
+          <div className="flex flex-col items-center py-2 gap-3 flex-1">
+            <div className="flex flex-col items-center gap-1 flex-1 py-1 overflow-hidden">
+              {plan.map((dirScene, i) => {
+                const isActive = dirScene.sceneId === activeScene?.sceneId;
+                return (
+                  <button
+                    key={dirScene.sceneId}
+                    onClick={() => { setActiveSceneId(dirScene.sceneId); setSidebarCollapsed(false); }}
+                    className="w-6 h-5 flex items-center justify-center rounded text-[9px] transition-colors border-l-2"
+                    style={isActive
+                      ? { color: '#818cf8', background: 'rgba(99,102,241,0.15)', borderColor: '#818cf8' }
+                      : { color: '#52525b', borderColor: 'transparent' }}
+                  >
+                    {i + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+              <p className="text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Scenes</p>
+              <p className="text-[10px] text-[#3f3f46] mt-0.5">{totalSegments} segments · {totalGenerated} generated</p>
+            </div>
+            <div className="flex-1 overflow-y-auto py-1">
+              {plan.map((dirScene, i) => {
+                const scriptScene = script.scenes.find(s => s.id === dirScene.sceneId);
+                const genCount = dirScene.segments.reduce((n, seg) => n + seg.assets.filter(a => a.generated).length, 0);
+                const isActive = dirScene.sceneId === activeScene?.sceneId;
+                return (
+                  <button
+                    key={dirScene.sceneId}
+                    onClick={() => setActiveSceneId(dirScene.sceneId)}
+                    className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors border-l-2 ${
+                      isActive ? 'bg-indigo-500/15 border-indigo-400' : 'hover:bg-[#1a1a1a] border-transparent'
+                    }`}
+                  >
+                    <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">{scriptScene?.title ?? 'Scene'}</p>
+                      <p className="text-[10px] text-[#52525b] mt-0.5">
+                        {dirScene.segments.length} seg{dirScene.segments.length !== 1 ? 's' : ''}
+                        {genCount > 0 && <span className="ml-1 text-green-500">·{genCount}✓</span>}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Drag handle + collapse toggle */}
+      <div className="relative flex-shrink-0 w-3 flex items-center justify-center group">
+        {/* Draggable track */}
+        <div
+          onMouseDown={startSidebarDrag}
+          className="absolute inset-0 cursor-col-resize"
+        />
+        {/* Visible toggle button centred on the handle */}
+        <button
+          onClick={() => setSidebarCollapsed(v => !v)}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="relative z-10 w-4 h-8 flex items-center justify-center rounded-sm text-[10px] font-bold transition-all opacity-0 group-hover:opacity-100 hover:opacity-100"
+          style={{ background: 'var(--surface-2)', color: '#71717a', border: '1px solid var(--border)' }}
+        >
+          {sidebarCollapsed ? '›' : '‹'}
+        </button>
       </div>
 
       {/* Main panel */}

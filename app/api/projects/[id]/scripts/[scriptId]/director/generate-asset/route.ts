@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateDirectorPrompts } from '@/lib/claude';
+import { generateDirectorPrompts, generateSearchQuery } from '@/lib/claude';
 import { searchPexels, searchBraveImages, searchDuckDuckGoImages, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
@@ -36,39 +36,66 @@ export async function POST(
   const userId = await getUserIdFromRequest(request);
   const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, wpm } = body;
 
+  // ── Search query resolution ───────────────────────────────────────────────
+  // If a query was already generated (by the director plan or a previous request), use it as-is.
+  // Only generate a new one when the field is absent. Stale/bad queries are corrected by Regen,
+  // which always arrives here with no searchQuery.
+  const queryContentNature  = analysis.channelInsights.contentNature?.classification;
+  const queryProductionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
+  const queryBrollPattern   = analysis.channelInsights.visualSceneGuide?.brollPattern;
+
+  const resolveQuery = async (type: 'stock-photo' | 'stock-video' | 'real-image'): Promise<string> => {
+    if (searchQuery) return searchQuery;
+    const anthropicKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
+    if (!anthropicKey) {
+      return characters?.length
+        ? `${characters[0].name} ${sceneTitle}`.trim()
+        : sceneTitle || narrationExcerpt.slice(0, 40);
+    }
+    return generateSearchQuery(anthropicKey, narrationExcerpt, type, {
+      scriptTitle,
+      sceneTitle,
+      sceneDescription,
+      characters,
+      contentNature:       queryContentNature,
+      productionStyle:     queryProductionStyle,
+      channelBrollPattern: queryBrollPattern,
+    });
+  };
+
   // ── Stock / real image searches ───────────────────────────────────────────
   if (assetType === 'stock-photo') {
     const pexelsApiKey = resolveKeyWithFallback(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
     if (!pexelsApiKey) return NextResponse.json({ error: 'Pexels API key required.' }, { status: 400 });
-    if (!searchQuery) return NextResponse.json({ error: 'searchQuery required for stock-photo.' }, { status: 400 });
+    const query = await resolveQuery('stock-photo');
     void trackUsage({ operation: 'director-search', api: 'pexels', project_id: params.id, user_id: userId, requests: 1 });
-    const photos = await searchPexels(searchQuery, pexelsApiKey, 6);
-    return NextResponse.json({ photos });
+    const photos = await searchPexels(query, pexelsApiKey, 6);
+    return NextResponse.json({ photos, autoSearchQuery: query });
   }
 
   if (assetType === 'stock-video') {
     const pexelsApiKey = resolveKeyWithFallback(body.pexelsApiKey, 'NEXT_PUBLIC_PEXELS_API_KEY');
     if (!pexelsApiKey) return NextResponse.json({ error: 'Pexels API key required.' }, { status: 400 });
-    if (!searchQuery) return NextResponse.json({ error: 'searchQuery required for stock-video.' }, { status: 400 });
+    const query = await resolveQuery('stock-video');
     void trackUsage({ operation: 'director-search', api: 'pexels', project_id: params.id, user_id: userId, requests: 1 });
-    const videos = await searchPexelsVideos(searchQuery, pexelsApiKey, 6);
-    return NextResponse.json({ videos });
+    const videos = await searchPexelsVideos(query, pexelsApiKey, 6);
+    return NextResponse.json({ videos, autoSearchQuery: query });
   }
 
   if (assetType === 'real-image') {
     const provider = body.realImageProvider ?? 'brave';
-    if (!searchQuery) return NextResponse.json({ error: 'searchQuery required for real-image.' }, { status: 400 });
+    const query = await resolveQuery('real-image');
     if (provider === 'brave') {
       const braveApiKey = resolveKeyWithFallback(body.braveApiKey, 'NEXT_PUBLIC_BRAVE_API_KEY');
       if (!braveApiKey) return NextResponse.json({ error: 'Brave API key required.' }, { status: 400 });
-      const images = await searchBraveImages(searchQuery, braveApiKey, 6);
-      return NextResponse.json({ images });
+      const images = await searchBraveImages(query, braveApiKey, 6);
+      return NextResponse.json({ images, autoSearchQuery: query });
     }
     if (provider === 'duckduckgo') {
-      const images = await searchDuckDuckGoImages(searchQuery, 6);
-      return NextResponse.json({ images });
+      const images = await searchDuckDuckGoImages(query, 6);
+      return NextResponse.json({ images, autoSearchQuery: query });
     }
-    return NextResponse.json({ images: [] });
+    return NextResponse.json({ images: [], autoSearchQuery: query });
   }
 
   // ── AI prompt generation ──────────────────────────────────────────────────
@@ -101,7 +128,13 @@ export async function POST(
       channelBrollPattern: visualGuide?.brollPattern,
       channelEditingRhythm: visualGuide?.editingRhythm,
       contentNature: analysis.channelInsights.contentNature?.classification,
-      directorNote,
+      // For user-added assets (no directorNote), synthesise one from story context so
+      // the prompt has the same narrative grounding as AI-selected assets.
+      directorNote: directorNote || [
+        scriptTitle && `Story: ${scriptTitle}.`,
+        sceneDescription && `Scene: ${sceneDescription}.`,
+        characters?.length && `Key subjects: ${characters.map(c => c.name).join(', ')}.`,
+      ].filter(Boolean).join(' ') || undefined,
     });
 
     void trackUsage({
