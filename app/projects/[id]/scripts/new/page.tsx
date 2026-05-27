@@ -1,13 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Analysis, Script, DirectorAssetType } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import { readSSE } from '@/lib/sse';
 
-type ScriptDraft = { topic: string; additionalInstructions: string; suggestions: { topic: string; context: string }[]; suggestionSeed: string | null };
+type StoryAngle = { angle: string; description: string; focus: string; channelFavors?: boolean };
+type NarrationTone = { tone: string; description: string; instruction: string; channelFavors?: boolean };
+type ScriptDraft = {
+  topic: string;
+  additionalInstructions: string;
+  suggestions: { topic: string; context: string }[];
+  suggestionSeed: string | null;
+  angles: StoryAngle[];
+  selectedAngle: StoryAngle | null;
+  tones: NarrationTone[];
+  selectedTone: NarrationTone | null;
+  detailLevel: DetailLevelId;
+  step: number;
+};
 const scriptDraftCache = new Map<string, ScriptDraft>();
 
 type AssetMix = Record<DirectorAssetType, number>;
@@ -32,6 +45,51 @@ const ASSET_MIX_COLORS: Record<DirectorAssetType, string> = {
 
 const EQUAL_MIX: AssetMix = { 'ai-video': 20, 'ai-image': 20, 'stock-video': 20, 'stock-photo': 20, 'real-image': 20 };
 
+const DETAIL_LEVELS = [
+  {
+    id: 'restrained',
+    label: 'Restrained',
+    description: 'Broad strokes only. Events are acknowledged but not dwelt on — graphic elements are implied, not described.',
+    instruction: 'Keep all descriptions high-level and restrained. Acknowledge events without dwelling on disturbing details. Graphic elements should be implied rather than described.',
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    description: 'Clear and specific. Uses documented facts accurately without gratuitous detail.',
+    instruction: 'Describe events clearly and specifically using all documented facts. Be accurate without being gratuitously graphic. Strike a balance between clarity and restraint.',
+  },
+  {
+    id: 'detailed',
+    label: 'Detailed',
+    description: 'Thorough and precise. All known facts included — methods, evidence, timeline, scene specifics.',
+    instruction: 'Be thorough and precise. Include all documented facts — specific methods, physical evidence, timelines, and scene descriptions. Do not invent details, but do not soften or omit what is known.',
+  },
+  {
+    id: 'vivid',
+    label: 'Vivid',
+    description: 'Cinematic and immersive. Renders scenes with full sensory detail, unflinching where the story demands it.',
+    instruction: 'Write with cinematic, sensory-rich detail. Render scenes fully and vividly using every documented fact available. Be unflinching — describe violence, crime scenes, and disturbing events graphically as the story warrants. Do not manufacture details, but treat all known information with maximum narrative intensity.',
+  },
+] as const;
+
+type DetailLevelId = typeof DETAIL_LEVELS[number]['id'];
+
+function getRecommendedDetailLevel(analysis: Analysis): DetailLevelId {
+  const overview = (analysis.channelInsights.channelOverview ?? '').toLowerCase();
+  const tone     = (analysis.channelInsights.contentStyle?.tone ?? '').toLowerCase();
+  const voice    = (analysis.channelInsights.writingStyle?.voiceAndPersonality ?? '').toLowerCase();
+  const nature   = analysis.channelInsights.contentNature?.classification ?? 'non-fictional';
+  const combined = `${overview} ${tone} ${voice}`;
+
+  if (/graphic|vivid|unflinch|brutal|raw|explicit|visceral|gore|harrowing|disturb/.test(combined)) return 'vivid';
+  if (/detailed|thorough|deep.dive|forensic|in.depth|comprehensive|investigat|precise/.test(combined)) return 'detailed';
+  if (/educational|family|kid|child|school|learn|young|wholesome/.test(combined)) return 'restrained';
+  if (/dark|grim|somber|haunt|sinister|chill|suspens|gritty|crime|murder|killer/.test(combined)) return 'detailed';
+  return nature === 'fictional' ? 'vivid' : 'balanced';
+}
+
+const STEP_LABELS = ['Topic', 'Story', 'Settings'];
+
 export default function NewScriptPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -48,6 +106,7 @@ export default function NewScriptPage() {
     videoLength: 5,
     wpm: 150,
   });
+  const [step, setStep] = useState(1);
   const [directorMode, setDirectorMode] = useState(false);
   const [assetMix, setAssetMix] = useState<AssetMix>({ ...EQUAL_MIX });
 
@@ -80,13 +139,25 @@ export default function NewScriptPage() {
       setAssetMix({ ...EQUAL_MIX });
     }
   };
+
   const [loading, setLoading] = useState(false);
+  const [waitingToRetry, setWaitingToRetry] = useState(false);
+  const retryFnRef = useRef<(() => Promise<void>) | null>(null);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [suggestions, setSuggestions] = useState<{ topic: string; context: string }[]>([]);
-  const [suggestionSeed, setSuggestionSeed] = useState<string | null>(null); // null = generic
+  const [suggestionSeed, setSuggestionSeed] = useState<string | null>(null);
   const [loadingTopics, setLoadingTopics] = useState(false);
   const [topicsError, setTopicsError] = useState('');
+  const [angles, setAngles] = useState<StoryAngle[]>([]);
+  const [selectedAngle, setSelectedAngle] = useState<StoryAngle | null>(null);
+  const [loadingAngles, setLoadingAngles] = useState(false);
+  const [anglesError, setAnglesError] = useState('');
+  const [tones, setTones] = useState<NarrationTone[]>([]);
+  const [selectedTone, setSelectedTone] = useState<NarrationTone | null>(null);
+  const [loadingTones, setLoadingTones] = useState(false);
+  const [tonesError, setTonesError] = useState('');
+  const [detailLevel, setDetailLevel] = useState<DetailLevelId>('balanced');
   const [contextMode, setContextMode] = useState<'manual' | 'url'>('manual');
   const [urls, setUrls] = useState<string[]>(['']);
   const [extracting, setExtracting] = useState(false);
@@ -105,23 +176,58 @@ export default function NewScriptPage() {
   };
 
   const saveCache = (analysisId: string, data: { topic: string; context: string }[]) => {
-    try {
-      localStorage.setItem(cacheKey(analysisId), JSON.stringify(data));
-    } catch { /* ignore */ }
+    try { localStorage.setItem(cacheKey(analysisId), JSON.stringify(data)); } catch { /* ignore */ }
   };
 
-  // Restore draft from in-memory cache on mount (survives SPA nav, clears on reload)
+  const anglesCacheKey = (topic: string) => `story-angles:${topic}`;
+  const tonesCacheKey  = (topic: string) => `story-tones:${topic}`;
+
+  const saveAnglesCache = (topic: string, data: StoryAngle[]) => {
+    try { localStorage.setItem(anglesCacheKey(topic), JSON.stringify(data)); } catch { /* ignore */ }
+  };
+
+  const saveToneCache = (topic: string, data: NarrationTone[]) => {
+    try { localStorage.setItem(tonesCacheKey(topic), JSON.stringify(data)); } catch { /* ignore */ }
+  };
+
+  // Restore draft from in-memory cache on mount
   useEffect(() => {
     const draft = scriptDraftCache.get(draftKey);
     if (!draft) return;
     if (draft.topic) setForm(f => ({ ...f, topic: draft.topic, additionalInstructions: draft.additionalInstructions }));
     if (draft.suggestions?.length) { setSuggestions(draft.suggestions); setSuggestionSeed(draft.suggestionSeed); }
+    if (draft.angles?.length) { setAngles(draft.angles); setSelectedAngle(draft.selectedAngle); }
+    if (draft.tones?.length) { setTones(draft.tones); setSelectedTone(draft.selectedTone); }
+    if (draft.detailLevel) setDetailLevel(draft.detailLevel);
+    if (draft.step) setStep(draft.step);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist draft to in-memory cache on every change
+  // Auto-set recommended detail level when analysis changes
   useEffect(() => {
-    scriptDraftCache.set(draftKey, { topic: form.topic, additionalInstructions: form.additionalInstructions, suggestions, suggestionSeed });
-  }, [form.topic, form.additionalInstructions, suggestions, suggestionSeed, draftKey]);
+    const analysis = getAnalysis();
+    if (analysis) setDetailLevel(getRecommendedDetailLevel(analysis));
+  }, [form.analysisId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist draft on every change
+  useEffect(() => {
+    scriptDraftCache.set(draftKey, {
+      topic: form.topic, additionalInstructions: form.additionalInstructions,
+      suggestions, suggestionSeed, angles, selectedAngle, tones, selectedTone, detailLevel, step,
+    });
+  }, [form.topic, form.additionalInstructions, suggestions, suggestionSeed, angles, selectedAngle, tones, selectedTone, detailLevel, step, draftKey]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      const retry = retryFnRef.current;
+      if (retry) {
+        retryFnRef.current = null;
+        setWaitingToRetry(false);
+        void retry();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -136,7 +242,6 @@ export default function NewScriptPage() {
         wpm: s.defaultWpm ?? 150,
         analysisId: resolvedAnalysisId,
       }));
-      // Only load generic cached suggestions if we have no draft suggestions already
       if (resolvedAnalysisId) {
         setSuggestions(prev => {
           if (prev.length === 0) loadCached(resolvedAnalysisId);
@@ -162,22 +267,82 @@ export default function NewScriptPage() {
       const res = await fetch(`/api/projects/${id}/scripts/suggest-topics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          analysis,
-          anthropicApiKey: settings.anthropicApiKey,
-          ...(trimmedSeed ? { seedTopic: trimmedSeed } : {}),
-        }),
+        body: JSON.stringify({ analysis, anthropicApiKey: settings.anthropicApiKey, ...(trimmedSeed ? { seedTopic: trimmedSeed } : {}) }),
       });
-      const data = await res.json();
-      if (!res.ok) { setTopicsError(data.error); return; }
+      const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
+      if (!res.ok) { setTopicsError(data.error ?? 'Unknown server error'); return; }
       const fetched = data.suggestions ?? [];
       setSuggestions(fetched);
       setSuggestionSeed(trimmedSeed || null);
-      saveCache(form.analysisId, fetched); // always save — seeded results override generic cache
+      saveCache(form.analysisId, fetched);
     } catch {
       setTopicsError('Failed to generate topic ideas.');
     } finally {
       setLoadingTopics(false);
+    }
+  };
+
+  const suggestTones = async (topic: string, context: string, force = false) => {
+    const analysis = getAnalysis();
+    if (!analysis || !topic.trim()) return;
+    if (!force) {
+      const cached = localStorage.getItem(tonesCacheKey(topic));
+      if (cached) {
+        try { setTones(JSON.parse(cached)); return; } catch { /* fall through */ }
+      }
+    }
+    setLoadingTones(true);
+    setTonesError('');
+    setTones([]);
+    try {
+      const settings = await storage.getSettings();
+      const res = await fetch(`/api/projects/${id}/scripts/suggest-tones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, context: context || undefined, analysis, anthropicApiKey: settings.anthropicApiKey }),
+      });
+      const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
+      if (!res.ok) { setTonesError(data.error ?? 'Unknown server error'); return; }
+      const fetched: NarrationTone[] = data.tones ?? [];
+      setTones(fetched);
+      setSelectedTone(null);
+      saveToneCache(topic, fetched);
+    } catch {
+      setTonesError('Failed to generate narration tones.');
+    } finally {
+      setLoadingTones(false);
+    }
+  };
+
+  const suggestAngles = async (topic: string, context: string, force = false) => {
+    const analysis = getAnalysis();
+    if (!analysis || !topic.trim()) return;
+    if (!force) {
+      const cached = localStorage.getItem(anglesCacheKey(topic));
+      if (cached) {
+        try { setAngles(JSON.parse(cached)); return; } catch { /* fall through */ }
+      }
+    }
+    setLoadingAngles(true);
+    setAnglesError('');
+    setAngles([]);
+    try {
+      const settings = await storage.getSettings();
+      const res = await fetch(`/api/projects/${id}/scripts/suggest-angles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, context: context || undefined, analysis, anthropicApiKey: settings.anthropicApiKey }),
+      });
+      const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
+      if (!res.ok) { setAnglesError(data.error ?? 'Unknown server error'); return; }
+      const fetched: StoryAngle[] = data.angles ?? [];
+      setAngles(fetched);
+      setSelectedAngle(null);
+      saveAnglesCache(topic, fetched);
+    } catch {
+      setAnglesError('Failed to generate story angles.');
+    } finally {
+      setLoadingAngles(false);
     }
   };
 
@@ -193,14 +358,10 @@ export default function NewScriptPage() {
       const res = await fetch(`/api/projects/${id}/scripts/extract-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          urls: validUrls,
-          topic: form.topic || undefined,
-          anthropicApiKey: settings.anthropicApiKey,
-        }),
+        body: JSON.stringify({ urls: validUrls, topic: form.topic || undefined, anthropicApiKey: settings.anthropicApiKey }),
       });
-      const data = await res.json();
-      if (!res.ok) { setExtractError(data.error); return; }
+      const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
+      if (!res.ok) { setExtractError(data.error ?? 'Unknown server error'); return; }
       setForm(f => ({ ...f, additionalInstructions: data.context }));
       if (data.warnings?.length) setExtractWarnings(data.warnings);
       const failedUrls = new Set((data.warnings ?? []).map((w: string) => w.split(':')[0].trim()));
@@ -220,38 +381,104 @@ export default function NewScriptPage() {
     setLoading(true);
     setProgress('');
     setError('');
-    try {
-      const settings = await storage.getSettings();
-      const res = await fetch(`/api/projects/${id}/scripts/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          analysis,
-          anthropicApiKey: settings.anthropicApiKey,
-          directorMode,
-          ...(directorMode ? { assetMixOverride: assetMix } : {}),
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error);
+    setWaitingToRetry(false);
+
+    const payload = {
+      ...form,
+      analysis,
+      directorMode,
+      ...(selectedAngle ? { storyAngle: selectedAngle.focus } : {}),
+      ...(selectedTone ? { narrationTone: `${selectedTone.tone} — ${selectedTone.instruction}` } : {}),
+      detailLevel: DETAIL_LEVELS.find(l => l.id === detailLevel)?.instruction ?? '',
+      ...(directorMode ? { assetMixOverride: assetMix } : {}),
+    };
+
+    const run = async () => {
+      try {
+        const settings = await storage.getSettings();
+        const res = await fetch(`/api/projects/${id}/scripts/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, anthropicApiKey: settings.anthropicApiKey }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings.' }));
+          setError(data.error ?? 'Unknown server error');
+          setLoading(false);
+          return;
+        }
+        const data = await readSSE<Script>(res, setProgress);
+        await storage.saveScript(id, data);
+        scriptDraftCache.delete(draftKey);
+        router.push(`/projects/${id}/scripts/${data.id}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Script generation failed. Check your API key in Settings.';
+        const isNetworkError = /failed to fetch|networkerror|load failed|network request failed/i.test(message);
+        if (isNetworkError) {
+          setWaitingToRetry(true);
+          retryFnRef.current = run;
+          return;
+        }
+        setError(message);
         setLoading(false);
-        return;
       }
-      const data = await readSSE<Script>(res, setProgress);
-      await storage.saveScript(id, data);
-      scriptDraftCache.delete(draftKey);
-      router.push(`/projects/${id}/scripts/${data.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Script generation failed. Check your API key in Settings.');
-      setLoading(false);
-    }
+    };
+
+    await run();
   };
 
-  const inputClass =
-    'w-full rounded-lg px-4 py-3 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400';
+  const inputClass = 'w-full rounded-lg px-4 py-3 text-sm border focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400';
   const inputStyle = { background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' };
+
+  // ─── Step indicator ──────────────────────────────────────────────────────────
+  const StepIndicator = () => (
+    <div className="flex items-center justify-center mb-8">
+      {STEP_LABELS.map((label, i) => {
+        const s = i + 1;
+        const done = step > s;
+        const active = step === s;
+        return (
+          <div key={s} className="flex items-center">
+            <button
+              type="button"
+              onClick={() => { if (done) setStep(s); }}
+              className={`flex items-center gap-2 ${done ? 'cursor-pointer' : 'cursor-default'}`}
+            >
+              <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border transition-colors ${
+                active  ? 'bg-indigo-500 border-indigo-500 text-white' :
+                done    ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' :
+                          'bg-transparent border-[#444] text-[#52525b]'
+              }`}>
+                {done ? '✓' : s}
+              </span>
+              <span className={`text-sm ${active ? 'text-white font-medium' : done ? 'text-indigo-300' : 'text-[#52525b]'}`}>
+                {label}
+              </span>
+            </button>
+            {s < STEP_LABELS.length && (
+              <div className={`w-12 h-px mx-3 transition-colors ${step > s ? 'bg-indigo-500/40' : 'bg-[#333]'}`} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // ─── Summary chips shown at top of later steps ────────────────────────────
+  const TopicSummary = () => (
+    step > 1 && form.topic ? (
+      <div className="flex flex-wrap gap-2 mb-5 p-3 rounded-lg border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+        <span className="text-xs text-[#52525b]">Topic:</span>
+        <span className="text-xs text-[#a1a1aa] truncate max-w-[360px]">{form.topic}</span>
+        {selectedAngle && (
+          <>
+            <span className="text-xs text-[#444]">·</span>
+            <span className="text-xs text-indigo-300">{selectedAngle.angle}</span>
+          </>
+        )}
+      </div>
+    ) : null
+  );
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
@@ -265,387 +492,544 @@ export default function NewScriptPage() {
       <p className="text-[#71717a] text-sm mb-8">Claude will write a script modelled on the selected channel analysis.</p>
 
       {loading ? (
-        <div
-          className="rounded-xl border p-12 text-center"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-        >
-          <div className="text-4xl mb-4 animate-pulse">
-            {progress?.includes('director') ? '🎬' : '✍️'}
-          </div>
-          <h2 className="font-semibold mb-2">
-            {progress?.includes('director') ? 'Directing production…' : 'Writing your script…'}
-          </h2>
-          <p className="text-sm text-[#71717a]">{progress || `Generating ~${targetWords} words across scenes…`}</p>
-          <p className="text-xs text-[#52525b] mt-2">
-            {directorMode ? 'Script + director plan — this takes 60–120 seconds' : 'This takes 30–60 seconds'}
-          </p>
+        <div className="rounded-xl border p-12 text-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+          {waitingToRetry ? (
+            <>
+              <div className="text-4xl mb-4">📡</div>
+              <h2 className="font-semibold mb-2">Connection lost</h2>
+              <p className="text-sm text-[#71717a]">Waiting for internet to reconnect…</p>
+              <p className="text-xs text-[#52525b] mt-2">Generation will resume automatically when you&apos;re back online.</p>
+            </>
+          ) : (
+            <>
+              <div className="text-4xl mb-4 animate-pulse">
+                {progress?.includes('director') ? '🎬' : '✍️'}
+              </div>
+              <h2 className="font-semibold mb-2">
+                {progress?.includes('director') ? 'Directing production…' : 'Writing your script…'}
+              </h2>
+              <p className="text-sm text-[#71717a]">{progress || `Generating ~${targetWords} words across scenes…`}</p>
+              <p className="text-xs text-[#52525b] mt-2">
+                {directorMode ? 'Script + director plan — this takes 60–120 seconds' : 'This takes 30–60 seconds'}
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <form onSubmit={generate} className="space-y-5">
-          {/* Channel Analysis */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Channel Analysis</label>
-            <select
-              value={form.analysisId}
-              onChange={e => {
-                const newId = e.target.value;
-                setForm(f => ({ ...f, analysisId: newId }));
-                setSuggestions([]);
-                if (newId) loadCached(newId);
-              }}
-              required
-              className={inputClass}
-              style={inputStyle}
-            >
-              <option value="">Select an analysis…</option>
-              {analyses.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-            {analyses.length === 0 && (
-              <p className="text-xs text-[#52525b] mt-1">No analyses yet — run a channel analysis first.</p>
-            )}
-          </div>
+          <StepIndicator />
 
-          {/* Video Topic */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium">Video Topic *</label>
-              <button
-                type="button"
-                onClick={() => suggestTopics()}
-                disabled={!form.analysisId || loadingTopics}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium border border-[#333] hover:border-indigo-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#71717a]"
-              >
-                {loadingTopics ? (
-                  <><span className="animate-spin inline-block">⚡</span> Generating…</>
-                ) : suggestions.length > 0 ? (
-                  <>↺ Regenerate</>
-                ) : (
-                  <>✨ Suggest Topics</>
+          {/* ── STEP 1: Channel + Topic + Angles ───────────────────────────── */}
+          {step === 1 && (
+            <>
+              {/* Channel Analysis */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Channel Analysis</label>
+                <select
+                  value={form.analysisId}
+                  onChange={e => {
+                    const newId = e.target.value;
+                    setForm(f => ({ ...f, analysisId: newId }));
+                    setSuggestions([]);
+                    if (newId) loadCached(newId);
+                  }}
+                  required
+                  className={inputClass}
+                  style={inputStyle}
+                >
+                  <option value="">Select an analysis…</option>
+                  {analyses.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                {analyses.length === 0 && (
+                  <p className="text-xs text-[#52525b] mt-1">No analyses yet — run a channel analysis first.</p>
                 )}
-              </button>
-            </div>
-
-            <input
-              value={form.topic}
-              onChange={e => setForm(f => ({ ...f, topic: e.target.value }))}
-              required
-              className={inputClass}
-              style={inputStyle}
-              placeholder="e.g. How to start investing with $100"
-            />
-
-            {form.topic.trim().length >= 3 && form.analysisId && (
-              <button
-                type="button"
-                onClick={() => suggestTopics(form.topic)}
-                disabled={loadingTopics}
-                className="mt-2 flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors"
-              >
-                {loadingTopics
-                  ? <><span className="animate-spin inline-block">⚡</span> Generating variations…</>
-                  : <>✨ Suggest variations of &ldquo;{form.topic.length > 40 ? form.topic.slice(0, 40) + '…' : form.topic}&rdquo;</>}
-              </button>
-            )}
-
-            {topicsError && <p className="text-xs text-red-400 mt-2">{topicsError}</p>}
-            {suggestions.length > 0 && (
-              <div className="mt-3 space-y-1.5">
-                <p className="text-xs text-[#52525b]">
-                  {suggestionSeed
-                    ? <>Variations of &ldquo;{suggestionSeed}&rdquo; — click to use:</>
-                    : <>Click a topic to use it — context will be prefilled:</>}
-                </p>
-                {suggestions.map((s, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, topic: s.topic, additionalInstructions: s.context }))}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-colors ${
-                      form.topic === s.topic
-                        ? 'border-indigo-400 bg-indigo-500/10 text-white'
-                        : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] text-[#a1a1aa] hover:text-white'
-                    }`}
-                  >
-                    <span className="text-[#52525b] mr-2">{i + 1}.</span>{s.topic}
-                  </button>
-                ))}
               </div>
-            )}
-          </div>
 
-          {/* Target Audience */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Target Audience (optional)</label>
-            <input
-              value={form.targetAudience}
-              onChange={e => setForm(f => ({ ...f, targetAudience: e.target.value }))}
-              className={inputClass}
-              style={inputStyle}
-              placeholder="e.g. Beginner investors aged 20–35"
-            />
-          </div>
-
-          {/* Story Context */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium">Story Context (optional)</label>
-              <div className="flex rounded-md overflow-hidden border text-xs" style={{ borderColor: 'var(--border)' }}>
-                {(['manual', 'url'] as const).map(mode => (
+              {/* Video Topic */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Video Topic *</label>
                   <button
-                    key={mode}
                     type="button"
-                    onClick={() => setContextMode(mode)}
-                    className={`px-3 py-1.5 transition-colors ${
-                      contextMode === mode
-                        ? 'bg-indigo-500 text-white'
-                        : 'text-[#71717a] hover:text-white'
-                    }`}
-                    style={contextMode !== mode ? { background: 'var(--surface-2)' } : {}}
+                    onClick={() => suggestTopics()}
+                    disabled={!form.analysisId || loadingTopics}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium border border-[#333] hover:border-indigo-400 hover:text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#71717a]"
                   >
-                    {mode === 'manual' ? 'Write' : '🔗 From URLs'}
+                    {loadingTopics ? (
+                      <><span className="animate-spin inline-block">⚡</span> Generating…</>
+                    ) : suggestions.length > 0 ? <>↺ Regenerate</> : <>✨ Suggest Topics</>}
                   </button>
-                ))}
-              </div>
-            </div>
+                </div>
 
-            {contextMode === 'manual' ? (
-              <>
-                <p className="text-xs text-[#52525b] mb-2">
-                  Add details that give the script writer context — names, locations, key dates, what happened, the outcome.
-                </p>
-                {extractedSources.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    <span className="text-xs text-[#52525b]">Sources:</span>
-                    {extractedSources.map((url, i) => {
-                      let hostname = url;
-                      try { hostname = new URL(url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
-                      return (
-                        <a
+                <input
+                  value={form.topic}
+                  onChange={e => setForm(f => ({ ...f, topic: e.target.value }))}
+                  required
+                  className={inputClass}
+                  style={inputStyle}
+                  placeholder="e.g. How to start investing with $100"
+                />
+
+                {form.topic.trim().length >= 3 && form.analysisId && (
+                  <button
+                    type="button"
+                    onClick={() => suggestTopics(form.topic)}
+                    disabled={loadingTopics}
+                    className="mt-2 flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors"
+                  >
+                    {loadingTopics
+                      ? <><span className="animate-spin inline-block">⚡</span> Generating variations…</>
+                      : <>✨ Suggest variations of &ldquo;{form.topic.length > 40 ? form.topic.slice(0, 40) + '…' : form.topic}&rdquo;</>}
+                  </button>
+                )}
+
+                {topicsError && <p className="text-xs text-red-400 mt-2">{topicsError}</p>}
+                {suggestions.length > 0 && (
+                  <div className="mt-3 space-y-1.5">
+                    <p className="text-xs text-[#52525b]">
+                      {suggestionSeed
+                        ? <>Variations of &ldquo;{suggestionSeed}&rdquo; — click to use:</>
+                        : <>Click a topic to use it — context will be prefilled:</>}
+                    </p>
+                    {suggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setForm(f => ({ ...f, topic: s.topic, additionalInstructions: s.context }));
+                          setSelectedAngle(null);
+                          setSelectedTone(null);
+                          suggestAngles(s.topic, s.context);
+                          suggestTones(s.topic, s.context);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-colors ${
+                          form.topic === s.topic
+                            ? 'border-indigo-400 bg-indigo-500/10 text-white'
+                            : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] text-[#a1a1aa] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-[#52525b] mr-2">{i + 1}.</span>{s.topic}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Story Angles */}
+              {(loadingAngles || angles.length > 0 || anglesError) && (
+                <div className="rounded-lg border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Story Angle</p>
+                    {angles.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => { setAngles([]); setSelectedAngle(null); suggestAngles(form.topic, form.additionalInstructions, true); }}
+                        disabled={loadingAngles}
+                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors"
+                      >
+                        {loadingAngles ? <><span className="animate-spin inline-block">⚡</span> Regenerating…</> : <>↺ Regenerate</>}
+                      </button>
+                    )}
+                  </div>
+                  {loadingAngles && angles.length === 0 && (
+                    <p className="text-xs text-[#52525b] flex items-center gap-1.5">
+                      <span className="animate-spin inline-block">⚡</span> Analyzing story angles…
+                    </p>
+                  )}
+                  {anglesError && <p className="text-xs text-red-400">{anglesError}</p>}
+                  {angles.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-[#52525b] mb-2">Select a perspective — or skip and Claude will choose:</p>
+                      {angles.map((a, i) => (
+                        <button
                           key={i}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-[#333] text-[#71717a] hover:text-indigo-300 hover:border-indigo-400/50 transition-colors"
+                          type="button"
+                          onClick={() => setSelectedAngle(prev => prev?.angle === a.angle ? null : a)}
+                          className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-colors ${
+                            selectedAngle?.angle === a.angle
+                              ? 'border-indigo-400 bg-indigo-500/10'
+                              : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a]'
+                          }`}
                         >
-                          🔗 {hostname}
-                        </a>
+                          <div className="flex items-center gap-2">
+                            <p className={`font-medium text-sm flex-1 ${selectedAngle?.angle === a.angle ? 'text-indigo-300' : 'text-[#e4e4e7]'}`}>
+                              {a.angle}
+                            </p>
+                            {a.channelFavors && (
+                              <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 font-medium">
+                                Channel style
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-[#71717a] mt-0.5 leading-relaxed">{a.description}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 1 nav */}
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep(2);
+                    if (tones.length === 0) suggestTones(form.topic, form.additionalInstructions);
+                  }}
+                  disabled={!form.analysisId || !form.topic.trim()}
+                  className="px-6 py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+                >
+                  Continue →
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── STEP 2: Tone + Story Context + Target Audience ──────────────── */}
+          {step === 2 && (
+            <>
+              <TopicSummary />
+
+              {/* Narration Tone */}
+              <div className="rounded-lg border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Narration Tone</p>
+                  <div className="flex items-center gap-3">
+                    {tones.length > 0 && (
+                      <button type="button" onClick={() => { setTones([]); setSelectedTone(null); suggestTones(form.topic, form.additionalInstructions, true); }}
+                        disabled={loadingTones}
+                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors">
+                        {loadingTones ? <><span className="animate-spin inline-block">⚡</span> Regenerating…</> : <>↺ Regenerate</>}
+                      </button>
+                    )}
+                    {selectedTone && (
+                      <button type="button" onClick={() => setSelectedTone(null)} className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-[#52525b] mb-3">Choose how the script sounds — or skip and Claude will match the channel&apos;s natural voice.</p>
+                {loadingTones && tones.length === 0 && (
+                  <p className="text-xs text-[#52525b] flex items-center gap-1.5"><span className="animate-spin inline-block">⚡</span> Analyzing tone options…</p>
+                )}
+                {tonesError && <p className="text-xs text-red-400">{tonesError}</p>}
+                {tones.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {tones.map((t, i) => {
+                      const isSelected = selectedTone?.tone === t.tone;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setSelectedTone(prev => prev?.tone === t.tone ? null : t)}
+                          className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                            isSelected ? 'border-indigo-400 bg-indigo-500/10' : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className={`text-sm font-medium ${isSelected ? 'text-indigo-300' : 'text-[#e4e4e7]'}`}>{t.tone}</span>
+                            {t.channelFavors && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 font-medium">
+                                Channel style
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-[#71717a] leading-relaxed">{t.description}</p>
+                        </button>
                       );
                     })}
                   </div>
                 )}
-                <textarea
-                  value={form.additionalInstructions}
-                  onChange={e => { setForm(f => ({ ...f, additionalInstructions: e.target.value })); setExtractedSources([]); }}
-                  rows={4}
-                  className={inputClass}
-                  style={inputStyle}
-                  placeholder="e.g. The story is about John Doe, a 34-year-old from Atlanta who turned $500 into $50k trading options in 2023…"
-                />
-              </>
-            ) : (
-              <>
-                <p className="text-xs text-[#52525b] mb-2">
-                  Paste article or public page URLs. Claude will fetch and extract the relevant story details.
+              </div>
+
+              {/* Detail Level */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Story Detail Level</label>
+                <p className="text-xs text-[#52525b] mb-3">
+                  Controls how graphic and descriptive the narration gets. Claude will never invent facts — it uses as much detail as the story allows.
                 </p>
-                <p className="text-xs text-[#a1a1aa] mb-2">
-                  Note: Some sitesAnalyze channels and generate scripts block automated requests and may not work. News articles and blogs tend to work best.
-                </p>
-                <div className="space-y-2">
-                  {urls.map((url, i) => (
-                    <div key={i} className="flex gap-2">
-                      <input
-                        value={url}
-                        onChange={e => {
-                          const next = [...urls];
-                          next[i] = e.target.value;
-                          setUrls(next);
-                        }}
-                        className={inputClass}
-                        style={inputStyle}
-                        placeholder="https://en.wikipedia.org/wiki/…"
-                        type="url"
-                      />
-                      {urls.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setUrls(urls.filter((_, j) => j !== i))}
-                          className="px-3 rounded-lg border text-[#52525b] hover:text-red-400 hover:border-red-400/50 transition-colors flex-shrink-0"
-                          style={{ borderColor: 'var(--border)' }}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <div className="flex items-center gap-3 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setUrls([...urls, ''])}
-                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-                    >
-                      + Add URL
-                    </button>
-                    <button
-                      type="button"
-                      onClick={extractContext}
-                      disabled={extracting || !urls.some(u => u.trim())}
-                      className="px-4 py-1.5 rounded-md text-xs font-medium bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                    >
-                      {extracting ? <><span className="animate-spin inline-block">⚡</span> Extracting…</> : '⚡ Extract Context'}
-                    </button>
-                  </div>
-                  {extractError && <p className="text-xs text-red-400 whitespace-pre-wrap">{extractError}</p>}
-                  {!extractError && extractWarnings.length > 0 && (
-                    <div className="text-xs text-yellow-400/80 space-y-0.5">
-                      <p className="font-medium">Some URLs could not be fetched:</p>
-                      {extractWarnings.map((w, i) => <p key={i} className="text-yellow-400/60">• {w}</p>)}
-                    </div>
-                  )}
+                <div className="grid grid-cols-4 gap-1.5 mb-2">
+                  {DETAIL_LEVELS.map(level => {
+                    const isSelected = detailLevel === level.id;
+                    const isRecommended = form.analysisId ? getRecommendedDetailLevel(getAnalysis()!) === level.id : false;
+                    return (
+                      <button
+                        key={level.id}
+                        type="button"
+                        onClick={() => setDetailLevel(level.id)}
+                        className={`relative px-3 py-2.5 rounded-lg border text-center transition-colors ${
+                          isSelected
+                            ? 'border-indigo-400 bg-indigo-500/10'
+                            : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a]'
+                        }`}
+                      >
+                        <p className={`text-sm font-medium ${isSelected ? 'text-indigo-300' : 'text-[#e4e4e7]'}`}>{level.label}</p>
+                        {isRecommended && (
+                          <span className="mt-1 inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 font-medium leading-tight">
+                            Channel style
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-                {!extractError && form.additionalInstructions && (
-                  <div className="mt-3">
-                    <p className="text-xs text-green-400 mb-1">✓ Context extracted — switch to Write to review or edit</p>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Settings row */}
-          <div
-            className="rounded-lg border p-4 space-y-4"
-            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-          >
-            <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Script Settings</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-[#71717a] mb-1">Video Length (minutes)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={60}
-                  value={form.videoLength}
-                  onChange={e => setForm(f => ({ ...f, videoLength: Number(e.target.value) }))}
-                  className="w-full rounded-md px-3 py-2 text-sm border focus:border-indigo-400"
-                  style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-[#71717a] mb-1">Narration Speed (WPM)</label>
-                <input
-                  type="number"
-                  min={80}
-                  max={300}
-                  value={form.wpm}
-                  onChange={e => setForm(f => ({ ...f, wpm: Number(e.target.value) }))}
-                  className="w-full rounded-md px-3 py-2 text-sm border focus:border-indigo-400"
-                  style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                />
-              </div>
-            </div>
-            <p className="text-xs text-[#52525b]">
-              Target: ~<strong className="text-[#a1a1aa]">{targetWords.toLocaleString()} words</strong>{' '}
-              ({form.videoLength} min × {form.wpm} WPM)
-            </p>
-          </div>
-
-          {/* Director Mode toggle */}
-          <div
-            className="rounded-lg border p-4"
-            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                const next = !directorMode;
-                setDirectorMode(next);
-                if (next) resetMixToChannel();
-              }}
-              className="w-full flex items-start gap-3 text-left"
-            >
-              <div className={`mt-0.5 w-9 h-5 rounded-full flex-shrink-0 transition-colors relative ${directorMode ? 'bg-indigo-500' : 'bg-[#333]'}`}>
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${directorMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
-              </div>
-              <div>
-                <p className="text-sm font-medium flex items-center gap-1.5">
-                  🎬 Director Mode
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-normal">Beta</span>
-                </p>
-                <p className="text-xs text-[#52525b] mt-0.5 leading-relaxed">
-                  AI acts as a director — breaks each scene into precise visual segments, ranks the best media type for each (video, image, stock), and auto-generates all prompts on demand. Fully informed by the channel&apos;s visual style and editing rhythm.
+                <p className="text-xs text-[#52525b] leading-relaxed">
+                  {DETAIL_LEVELS.find(l => l.id === detailLevel)?.description}
                 </p>
               </div>
-            </button>
 
-            {/* Asset mix editor — visible when director mode is on */}
-            {directorMode && (
-              <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-medium text-[#71717a] uppercase tracking-wide">Asset Mix</p>
-                  <button
-                    type="button"
-                    onClick={resetMixToChannel}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-                  >
-                    Reset to channel
-                  </button>
-                </div>
-                <div className="flex items-center gap-4">
-                  {/* Sliders */}
-                  <div className="flex-1 space-y-2">
-                    {ALL_ASSET_TYPES.map(type => (
-                      <div key={type} className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ASSET_MIX_COLORS[type] }} />
-                        <span className="text-xs text-[#71717a] w-[72px] flex-shrink-0">{ASSET_MIX_LABELS[type]}</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={assetMix[type]}
-                          onChange={e => setMixValue(type, Number(e.target.value))}
-                          className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
-                          style={{ accentColor: ASSET_MIX_COLORS[type] }}
-                        />
-                        <span className="text-xs text-[#a1a1aa] w-8 text-right flex-shrink-0">{assetMix[type]}%</span>
-                      </div>
+              {/* Story Context */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Story Context (optional)</label>
+                  <div className="flex rounded-md overflow-hidden border text-xs" style={{ borderColor: 'var(--border)' }}>
+                    {(['manual', 'url'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setContextMode(mode)}
+                        className={`px-3 py-1.5 transition-colors ${
+                          contextMode === mode ? 'bg-indigo-500 text-white' : 'text-[#71717a] hover:text-white'
+                        }`}
+                        style={contextMode !== mode ? { background: 'var(--surface-2)' } : {}}
+                      >
+                        {mode === 'manual' ? 'Write' : '🔗 From URLs'}
+                      </button>
                     ))}
                   </div>
-                  {/* Live pie preview */}
-                  {(() => {
-                    let cum = 0;
-                    const stops = ALL_ASSET_TYPES
-                      .filter(t => assetMix[t] > 0)
-                      .map(t => {
-                        const start = cum;
-                        cum += assetMix[t];
-                        return `${ASSET_MIX_COLORS[t]} ${start}% ${cum}%`;
-                      });
-                    return (
-                      <div
-                        className="flex-shrink-0 rounded-full"
-                        style={{
-                          width: 52, height: 52,
-                          background: stops.length > 0 ? `conic-gradient(${stops.join(', ')})` : '#3f3f46',
-                        }}
-                      />
-                    );
-                  })()}
                 </div>
+
+                {contextMode === 'manual' ? (
+                  <>
+                    <p className="text-xs text-[#52525b] mb-2">
+                      Add details that give the script writer context — names, locations, key dates, what happened, the outcome.
+                    </p>
+                    {extractedSources.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        <span className="text-xs text-[#52525b]">Sources:</span>
+                        {extractedSources.map((url, i) => {
+                          let hostname = url;
+                          try { hostname = new URL(url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+                          return (
+                            <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-[#333] text-[#71717a] hover:text-indigo-300 hover:border-indigo-400/50 transition-colors">
+                              🔗 {hostname}
+                            </a>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <textarea
+                      value={form.additionalInstructions}
+                      onChange={e => { setForm(f => ({ ...f, additionalInstructions: e.target.value })); setExtractedSources([]); }}
+                      rows={4}
+                      className={inputClass}
+                      style={inputStyle}
+                      placeholder="e.g. The story is about John Doe, a 34-year-old from Atlanta who turned $500 into $50k trading options in 2023…"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-[#52525b] mb-2">
+                      Paste article or public page URLs. Claude will fetch and extract the relevant story details.
+                    </p>
+                    <p className="text-xs text-[#a1a1aa] mb-2">
+                      Note: Some sites block automated requests. News articles and blogs tend to work best.
+                    </p>
+                    <div className="space-y-2">
+                      {urls.map((url, i) => (
+                        <div key={i} className="flex gap-2">
+                          <input
+                            value={url}
+                            onChange={e => { const next = [...urls]; next[i] = e.target.value; setUrls(next); }}
+                            className={inputClass}
+                            style={inputStyle}
+                            placeholder="https://en.wikipedia.org/wiki/…"
+                            type="url"
+                          />
+                          {urls.length > 1 && (
+                            <button type="button" onClick={() => setUrls(urls.filter((_, j) => j !== i))}
+                              className="px-3 rounded-lg border text-[#52525b] hover:text-red-400 hover:border-red-400/50 transition-colors flex-shrink-0"
+                              style={{ borderColor: 'var(--border)' }}>
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-3 pt-1">
+                        <button type="button" onClick={() => setUrls([...urls, ''])}
+                          className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+                          + Add URL
+                        </button>
+                        <button type="button" onClick={extractContext}
+                          disabled={extracting || !urls.some(u => u.trim())}
+                          className="px-4 py-1.5 rounded-md text-xs font-medium bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+                          {extracting ? <><span className="animate-spin inline-block">⚡</span> Extracting…</> : '⚡ Extract Context'}
+                        </button>
+                      </div>
+                      {extractError && <p className="text-xs text-red-400 whitespace-pre-wrap">{extractError}</p>}
+                      {!extractError && extractWarnings.length > 0 && (
+                        <div className="text-xs text-yellow-400/80 space-y-0.5">
+                          <p className="font-medium">Some URLs could not be fetched:</p>
+                          {extractWarnings.map((w, i) => <p key={i} className="text-yellow-400/60">• {w}</p>)}
+                        </div>
+                      )}
+                    </div>
+                    {!extractError && form.additionalInstructions && (
+                      <div className="mt-3">
+                        <p className="text-xs text-green-400 mb-1">✓ Context extracted — switch to Write to review or edit</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            )}
-          </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+              {/* Target Audience */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Target Audience (optional)</label>
+                <input
+                  value={form.targetAudience}
+                  onChange={e => setForm(f => ({ ...f, targetAudience: e.target.value }))}
+                  className={inputClass}
+                  style={inputStyle}
+                  placeholder="e.g. Beginner investors aged 20–35"
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={!form.analysisId || !form.topic.trim()}
-            className="w-full py-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
-          >
-            {directorMode ? '🎬 Generate Script + Director Plan →' : 'Generate Script →'}
-          </button>
+              {/* Step 2 nav */}
+              <div className="flex items-center justify-between pt-2">
+                <button type="button" onClick={() => setStep(1)}
+                  className="px-4 py-2 rounded-lg border text-sm text-[#71717a] hover:text-white transition-colors"
+                  style={{ borderColor: 'var(--border)' }}>
+                  ← Back
+                </button>
+                <button type="button" onClick={() => setStep(3)}
+                  className="px-6 py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors">
+                  Continue →
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── STEP 3: Settings + Director Mode + Generate ─────────────────── */}
+          {step === 3 && (
+            <>
+              <TopicSummary />
+
+              {/* Script Settings */}
+              <div className="rounded-lg border p-4 space-y-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Script Settings</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-[#71717a] mb-1">Video Length (minutes)</label>
+                    <input
+                      type="number" min={1} max={60}
+                      value={form.videoLength}
+                      onChange={e => setForm(f => ({ ...f, videoLength: Number(e.target.value) }))}
+                      className="w-full rounded-md px-3 py-2 text-sm border focus:border-indigo-400"
+                      style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#71717a] mb-1">Narration Speed (WPM)</label>
+                    <input
+                      type="number" min={80} max={300}
+                      value={form.wpm}
+                      onChange={e => setForm(f => ({ ...f, wpm: Number(e.target.value) }))}
+                      className="w-full rounded-md px-3 py-2 text-sm border focus:border-indigo-400"
+                      style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-[#52525b]">
+                  Target: ~<strong className="text-[#a1a1aa]">{targetWords.toLocaleString()} words</strong>{' '}
+                  ({form.videoLength} min × {form.wpm} WPM)
+                </p>
+              </div>
+
+              {/* Director Mode */}
+              <div className="rounded-lg border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                <button
+                  type="button"
+                  onClick={() => { const next = !directorMode; setDirectorMode(next); if (next) resetMixToChannel(); }}
+                  className="w-full flex items-start gap-3 text-left"
+                >
+                  <div className={`mt-0.5 w-9 h-5 rounded-full flex-shrink-0 transition-colors relative ${directorMode ? 'bg-indigo-500' : 'bg-[#333]'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${directorMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium flex items-center gap-1.5">
+                      🎬 Director Mode
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-normal">Beta</span>
+                    </p>
+                    <p className="text-xs text-[#52525b] mt-0.5 leading-relaxed">
+                      AI acts as a director — breaks each scene into precise visual segments, ranks the best media type for each (video, image, stock), and auto-generates all prompts on demand.
+                    </p>
+                  </div>
+                </button>
+
+                {directorMode && (
+                  <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-medium text-[#71717a] uppercase tracking-wide">Asset Mix</p>
+                      <button type="button" onClick={resetMixToChannel}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+                        Reset to channel
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 space-y-2">
+                        {ALL_ASSET_TYPES.map(type => (
+                          <div key={type} className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ASSET_MIX_COLORS[type] }} />
+                            <span className="text-xs text-[#71717a] w-[72px] flex-shrink-0">{ASSET_MIX_LABELS[type]}</span>
+                            <input type="range" min={0} max={100} value={assetMix[type]}
+                              onChange={e => setMixValue(type, Number(e.target.value))}
+                              className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
+                              style={{ accentColor: ASSET_MIX_COLORS[type] }} />
+                            <span className="text-xs text-[#a1a1aa] w-8 text-right flex-shrink-0">{assetMix[type]}%</span>
+                          </div>
+                        ))}
+                      </div>
+                      {(() => {
+                        let cum = 0;
+                        const stops = ALL_ASSET_TYPES.filter(t => assetMix[t] > 0).map(t => {
+                          const start = cum; cum += assetMix[t];
+                          return `${ASSET_MIX_COLORS[t]} ${start}% ${cum}%`;
+                        });
+                        return (
+                          <div className="flex-shrink-0 rounded-full"
+                            style={{ width: 52, height: 52, background: stops.length > 0 ? `conic-gradient(${stops.join(', ')})` : '#3f3f46' }} />
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {error && <p className="text-sm text-red-400">{error}</p>}
+
+              {/* Step 3 nav */}
+              <div className="flex items-center justify-between pt-2">
+                <button type="button" onClick={() => setStep(2)}
+                  className="px-4 py-2 rounded-lg border text-sm text-[#71717a] hover:text-white transition-colors"
+                  style={{ borderColor: 'var(--border)' }}>
+                  ← Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={!form.analysisId || !form.topic.trim()}
+                  className="px-6 py-3 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+                >
+                  {directorMode ? '🎬 Generate Script + Director Plan →' : 'Generate Script →'}
+                </button>
+              </div>
+            </>
+          )}
         </form>
       )}
     </div>

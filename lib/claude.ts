@@ -1107,8 +1107,10 @@ interface RawDirectorAsset {
   rank: number;
   type: string;
   note: string;
-  durationEach?: number;   // omitted by model for ai-image and stock/real assets
-  searchQuery?: string;    // omitted by model for ai-video and ai-image
+  durationEach?: number;
+  searchQuery?: string;
+  slot?: number;
+  narrationSlice?: string;
 }
 
 interface RawDirectorSegment {
@@ -1194,6 +1196,34 @@ function snapWordEnd(text: string, e: number): number {
   return e;
 }
 
+// Guard against incomplete multi-slot segments from the AI.
+// If a declared slot has no rank-1 asset: promote its rank-2 if one exists, else collapse
+// the whole segment to single-shot by stripping all slot/narrationSlice fields.
+export function sanitizeDirectorSegment(segment: DirectorSegment): DirectorSegment {
+  const hasSlots = segment.assets.some(a => a.slot !== undefined);
+  if (!hasSlots) return segment;
+
+  const slotMax = Math.max(...segment.assets.map(a => a.slot ?? 0));
+  let assets = [...segment.assets];
+
+  for (let slot = 0; slot <= slotMax; slot++) {
+    const slotAssets = assets.filter(a => (a.slot ?? 0) === slot);
+    if (slotAssets.some(a => a.rank === 1)) continue;
+    const rank2 = slotAssets.find(a => a.rank === 2);
+    if (rank2) {
+      assets = assets.map(a => a.id === rank2.id ? { ...a, rank: 1 } : a);
+    } else {
+      // Slot is entirely empty — collapse whole segment to single-shot
+      return {
+        ...segment,
+        assets: assets.map(a => ({ ...a, slot: undefined, narrationSlice: undefined })),
+      };
+    }
+  }
+
+  return { ...segment, assets };
+}
+
 // Map raw Claude segments to DirectorSegments, respecting Claude's intended s/e offsets
 // (snapped to word boundaries) so assets stay aligned with the narration they were designed for.
 // Slight overlap between adjacent segments is preferable to shifting content away from its assets.
@@ -1210,7 +1240,7 @@ function mapDirectorScene(rawScene: RawDirectorScene, narration: string): Direct
       const e = i === sorted.length - 1
         ? narration.length
         : snapWordEnd(narration, Math.min(rawSeg.e, narration.length));
-      return {
+      const segment: DirectorSegment = {
         id: uuid(),
         narrationExcerpt: narration.slice(s, e).trim(),
         durationSeconds: rawSeg.dur,
@@ -1224,8 +1254,11 @@ function mapDirectorScene(rawScene: RawDirectorScene, narration: string): Direct
           durationEach: rawAsset.durationEach ?? undefined,
           totalDuration: rawSeg.dur,
           generated: false,
+          slot: rawAsset.slot ?? undefined,
+          narrationSlice: rawAsset.narrationSlice ?? undefined,
         })),
       };
+      return sanitizeDirectorSegment(segment);
     }),
   };
 }

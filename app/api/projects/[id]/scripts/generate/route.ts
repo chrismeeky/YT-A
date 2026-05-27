@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
-import { generateScript } from '@/lib/claude';
+import { generateScript, sanitizeDirectorSegment } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
@@ -18,6 +18,9 @@ export async function POST(
     topic: string;
     targetAudience?: string;
     additionalInstructions?: string;
+    storyAngle?: string;
+    narrationTone?: string;
+    detailLevel?: string;
     videoLength?: number;
     wpm?: number;
     anthropicApiKey?: string;
@@ -59,13 +62,19 @@ export async function POST(
         let inputTokens: number;
         let outputTokens: number;
         try {
+          const instructionParts = [
+            body.additionalInstructions,
+            body.storyAngle ? `Narrative angle — write the script from this specific perspective: ${body.storyAngle}` : null,
+            body.narrationTone ? `Narration tone — write the entire script in this tone: ${body.narrationTone}` : null,
+            body.detailLevel ? `Story detail level — ${body.detailLevel}` : null,
+          ].filter(Boolean);
           ({ result: generated, inputTokens, outputTokens } = await generateScript(
             anthropicApiKey,
             body.analysis,
             scriptSettings,
             body.topic,
-            body.targetAudience        ?? '',
-            body.additionalInstructions ?? '',
+            body.targetAudience ?? '',
+            instructionParts.join('\n\n'),
             directorMode,
             body.assetMixOverride,
           ));
@@ -80,7 +89,7 @@ export async function POST(
           if (directorMode && Array.isArray(s.segments) && s.segments.length > 0) {
             const narration = s.segments.map(seg => seg.text).join(' ');
 
-            const directorSegments: DirectorSegment[] = s.segments.map(seg => ({
+            const directorSegments: DirectorSegment[] = s.segments.map(seg => sanitizeDirectorSegment({
               id: uuid(),
               narrationExcerpt: seg.text,
               durationSeconds: seg.durationSeconds,
