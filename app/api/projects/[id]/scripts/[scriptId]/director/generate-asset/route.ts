@@ -128,6 +128,7 @@ export async function POST(
       channelBrollPattern: visualGuide?.brollPattern,
       channelEditingRhythm: visualGuide?.editingRhythm,
       contentNature: analysis.channelInsights.contentNature?.classification,
+      narrativeLens: analysis.channelInsights.narrativeLens,
       // For user-added assets (no directorNote), synthesise one from story context so
       // the prompt has the same narrative grounding as AI-selected assets.
       directorNote: directorNote || [

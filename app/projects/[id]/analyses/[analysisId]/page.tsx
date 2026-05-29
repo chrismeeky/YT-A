@@ -35,7 +35,7 @@ function Section({ icon, title, children }: { icon: string; title: string; child
   );
 }
 
-function Row({ label, value }: { label: string; value: string | boolean | number }) {
+function Row({ label, value }: { label: string; value: string | boolean | number | undefined }) {
   if (value === undefined || value === null || value === '') return null;
   return (
     <div className="flex gap-3">
@@ -373,6 +373,20 @@ function ChannelInsightsView({ analysis }: { analysis: Analysis }) {
         <Row label="Color Scheme" value={ci.visualBrand?.colorScheme} />
         <Row label="Typography" value={ci.visualBrand?.typography} />
         <Row label="Face in Thumbnail" value={ci.visualBrand?.faceInThumbnail} />
+      </Section>
+
+      <Section icon="🎬" title="Visual Scene Guide">
+        <Row label="Scene Description Style" value={ci.visualSceneGuide?.sceneDescriptionStyle} />
+        <Row label="B-Roll Pattern" value={ci.visualSceneGuide?.brollPattern} />
+        <Row label="Editing Rhythm" value={ci.visualSceneGuide?.editingRhythm} />
+        <Row label="Graphics & Text Usage" value={ci.visualSceneGuide?.graphicsAndTextUsage} />
+        <Row label="Audio Mood" value={ci.visualSceneGuide?.audioMood} />
+        <Row
+          label="Cut Rate (shots/min)"
+          value={ci.visualSceneGuide?.cutRateShotsPerMinute
+            ? `${ci.visualSceneGuide.cutRateShotsPerMinute} shots/min (~${Math.round(60 / ci.visualSceneGuide.cutRateShotsPerMinute)}s per shot)`
+            : undefined}
+        />
       </Section>
 
       <Section icon="👥" title="Audience Profile">

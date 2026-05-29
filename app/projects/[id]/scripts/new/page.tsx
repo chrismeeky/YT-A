@@ -7,17 +7,11 @@ import type { Analysis, Script, DirectorAssetType } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import { readSSE } from '@/lib/sse';
 
-type StoryAngle = { angle: string; description: string; focus: string; channelFavors?: boolean };
-type NarrationTone = { tone: string; description: string; instruction: string; channelFavors?: boolean };
 type ScriptDraft = {
   topic: string;
   additionalInstructions: string;
   suggestions: { topic: string; context: string }[];
   suggestionSeed: string | null;
-  angles: StoryAngle[];
-  selectedAngle: StoryAngle | null;
-  tones: NarrationTone[];
-  selectedTone: NarrationTone | null;
   detailLevel: DetailLevelId;
   step: number;
 };
@@ -149,14 +143,6 @@ export default function NewScriptPage() {
   const [suggestionSeed, setSuggestionSeed] = useState<string | null>(null);
   const [loadingTopics, setLoadingTopics] = useState(false);
   const [topicsError, setTopicsError] = useState('');
-  const [angles, setAngles] = useState<StoryAngle[]>([]);
-  const [selectedAngle, setSelectedAngle] = useState<StoryAngle | null>(null);
-  const [loadingAngles, setLoadingAngles] = useState(false);
-  const [anglesError, setAnglesError] = useState('');
-  const [tones, setTones] = useState<NarrationTone[]>([]);
-  const [selectedTone, setSelectedTone] = useState<NarrationTone | null>(null);
-  const [loadingTones, setLoadingTones] = useState(false);
-  const [tonesError, setTonesError] = useState('');
   const [detailLevel, setDetailLevel] = useState<DetailLevelId>('balanced');
   const [contextMode, setContextMode] = useState<'manual' | 'url'>('manual');
   const [urls, setUrls] = useState<string[]>(['']);
@@ -179,25 +165,12 @@ export default function NewScriptPage() {
     try { localStorage.setItem(cacheKey(analysisId), JSON.stringify(data)); } catch { /* ignore */ }
   };
 
-  const anglesCacheKey = (topic: string) => `story-angles:${topic}`;
-  const tonesCacheKey  = (topic: string) => `story-tones:${topic}`;
-
-  const saveAnglesCache = (topic: string, data: StoryAngle[]) => {
-    try { localStorage.setItem(anglesCacheKey(topic), JSON.stringify(data)); } catch { /* ignore */ }
-  };
-
-  const saveToneCache = (topic: string, data: NarrationTone[]) => {
-    try { localStorage.setItem(tonesCacheKey(topic), JSON.stringify(data)); } catch { /* ignore */ }
-  };
-
   // Restore draft from in-memory cache on mount
   useEffect(() => {
     const draft = scriptDraftCache.get(draftKey);
     if (!draft) return;
     if (draft.topic) setForm(f => ({ ...f, topic: draft.topic, additionalInstructions: draft.additionalInstructions }));
     if (draft.suggestions?.length) { setSuggestions(draft.suggestions); setSuggestionSeed(draft.suggestionSeed); }
-    if (draft.angles?.length) { setAngles(draft.angles); setSelectedAngle(draft.selectedAngle); }
-    if (draft.tones?.length) { setTones(draft.tones); setSelectedTone(draft.selectedTone); }
     if (draft.detailLevel) setDetailLevel(draft.detailLevel);
     if (draft.step) setStep(draft.step);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -212,9 +185,9 @@ export default function NewScriptPage() {
   useEffect(() => {
     scriptDraftCache.set(draftKey, {
       topic: form.topic, additionalInstructions: form.additionalInstructions,
-      suggestions, suggestionSeed, angles, selectedAngle, tones, selectedTone, detailLevel, step,
+      suggestions, suggestionSeed, detailLevel, step,
     });
-  }, [form.topic, form.additionalInstructions, suggestions, suggestionSeed, angles, selectedAngle, tones, selectedTone, detailLevel, step, draftKey]);
+  }, [form.topic, form.additionalInstructions, suggestions, suggestionSeed, detailLevel, step, draftKey]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -282,70 +255,6 @@ export default function NewScriptPage() {
     }
   };
 
-  const suggestTones = async (topic: string, context: string, force = false) => {
-    const analysis = getAnalysis();
-    if (!analysis || !topic.trim()) return;
-    if (!force) {
-      const cached = localStorage.getItem(tonesCacheKey(topic));
-      if (cached) {
-        try { setTones(JSON.parse(cached)); return; } catch { /* fall through */ }
-      }
-    }
-    setLoadingTones(true);
-    setTonesError('');
-    setTones([]);
-    try {
-      const settings = await storage.getSettings();
-      const res = await fetch(`/api/projects/${id}/scripts/suggest-tones`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, context: context || undefined, analysis, anthropicApiKey: settings.anthropicApiKey }),
-      });
-      const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
-      if (!res.ok) { setTonesError(data.error ?? 'Unknown server error'); return; }
-      const fetched: NarrationTone[] = data.tones ?? [];
-      setTones(fetched);
-      setSelectedTone(null);
-      saveToneCache(topic, fetched);
-    } catch {
-      setTonesError('Failed to generate narration tones.');
-    } finally {
-      setLoadingTones(false);
-    }
-  };
-
-  const suggestAngles = async (topic: string, context: string, force = false) => {
-    const analysis = getAnalysis();
-    if (!analysis || !topic.trim()) return;
-    if (!force) {
-      const cached = localStorage.getItem(anglesCacheKey(topic));
-      if (cached) {
-        try { setAngles(JSON.parse(cached)); return; } catch { /* fall through */ }
-      }
-    }
-    setLoadingAngles(true);
-    setAnglesError('');
-    setAngles([]);
-    try {
-      const settings = await storage.getSettings();
-      const res = await fetch(`/api/projects/${id}/scripts/suggest-angles`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, context: context || undefined, analysis, anthropicApiKey: settings.anthropicApiKey }),
-      });
-      const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
-      if (!res.ok) { setAnglesError(data.error ?? 'Unknown server error'); return; }
-      const fetched: StoryAngle[] = data.angles ?? [];
-      setAngles(fetched);
-      setSelectedAngle(null);
-      saveAnglesCache(topic, fetched);
-    } catch {
-      setAnglesError('Failed to generate story angles.');
-    } finally {
-      setLoadingAngles(false);
-    }
-  };
-
   const extractContext = async () => {
     const validUrls = urls.filter(u => u.trim());
     if (!validUrls.length) return;
@@ -387,8 +296,6 @@ export default function NewScriptPage() {
       ...form,
       analysis,
       directorMode,
-      ...(selectedAngle ? { storyAngle: selectedAngle.focus } : {}),
-      ...(selectedTone ? { narrationTone: `${selectedTone.tone} — ${selectedTone.instruction}` } : {}),
       detailLevel: DETAIL_LEVELS.find(l => l.id === detailLevel)?.instruction ?? '',
       ...(directorMode ? { assetMixOverride: assetMix } : {}),
     };
@@ -470,12 +377,6 @@ export default function NewScriptPage() {
       <div className="flex flex-wrap gap-2 mb-5 p-3 rounded-lg border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
         <span className="text-xs text-[#52525b]">Topic:</span>
         <span className="text-xs text-[#a1a1aa] truncate max-w-[360px]">{form.topic}</span>
-        {selectedAngle && (
-          <>
-            <span className="text-xs text-[#444]">·</span>
-            <span className="text-xs text-indigo-300">{selectedAngle.angle}</span>
-          </>
-        )}
       </div>
     ) : null
   );
@@ -599,10 +500,6 @@ export default function NewScriptPage() {
                         type="button"
                         onClick={() => {
                           setForm(f => ({ ...f, topic: s.topic, additionalInstructions: s.context }));
-                          setSelectedAngle(null);
-                          setSelectedTone(null);
-                          suggestAngles(s.topic, s.context);
-                          suggestTones(s.topic, s.context);
                         }}
                         className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-colors ${
                           form.topic === s.topic
@@ -617,68 +514,11 @@ export default function NewScriptPage() {
                 )}
               </div>
 
-              {/* Story Angles */}
-              {(loadingAngles || angles.length > 0 || anglesError) && (
-                <div className="rounded-lg border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Story Angle</p>
-                    {angles.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => { setAngles([]); setSelectedAngle(null); suggestAngles(form.topic, form.additionalInstructions, true); }}
-                        disabled={loadingAngles}
-                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors"
-                      >
-                        {loadingAngles ? <><span className="animate-spin inline-block">⚡</span> Regenerating…</> : <>↺ Regenerate</>}
-                      </button>
-                    )}
-                  </div>
-                  {loadingAngles && angles.length === 0 && (
-                    <p className="text-xs text-[#52525b] flex items-center gap-1.5">
-                      <span className="animate-spin inline-block">⚡</span> Analyzing story angles…
-                    </p>
-                  )}
-                  {anglesError && <p className="text-xs text-red-400">{anglesError}</p>}
-                  {angles.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs text-[#52525b] mb-2">Select a perspective — or skip and Claude will choose:</p>
-                      {angles.map((a, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setSelectedAngle(prev => prev?.angle === a.angle ? null : a)}
-                          className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-colors ${
-                            selectedAngle?.angle === a.angle
-                              ? 'border-indigo-400 bg-indigo-500/10'
-                              : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <p className={`font-medium text-sm flex-1 ${selectedAngle?.angle === a.angle ? 'text-indigo-300' : 'text-[#e4e4e7]'}`}>
-                              {a.angle}
-                            </p>
-                            {a.channelFavors && (
-                              <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 font-medium">
-                                Channel style
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-[#71717a] mt-0.5 leading-relaxed">{a.description}</p>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Step 1 nav */}
               <div className="flex justify-end pt-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setStep(2);
-                    if (tones.length === 0) suggestTones(form.topic, form.additionalInstructions);
-                  }}
+                  onClick={() => setStep(2)}
                   disabled={!form.analysisId || !form.topic.trim()}
                   className="px-6 py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors"
                 >
@@ -692,59 +532,6 @@ export default function NewScriptPage() {
           {step === 2 && (
             <>
               <TopicSummary />
-
-              {/* Narration Tone */}
-              <div className="rounded-lg border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Narration Tone</p>
-                  <div className="flex items-center gap-3">
-                    {tones.length > 0 && (
-                      <button type="button" onClick={() => { setTones([]); setSelectedTone(null); suggestTones(form.topic, form.additionalInstructions, true); }}
-                        disabled={loadingTones}
-                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors">
-                        {loadingTones ? <><span className="animate-spin inline-block">⚡</span> Regenerating…</> : <>↺ Regenerate</>}
-                      </button>
-                    )}
-                    {selectedTone && (
-                      <button type="button" onClick={() => setSelectedTone(null)} className="text-xs text-[#52525b] hover:text-[#a1a1aa] transition-colors">
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-[#52525b] mb-3">Choose how the script sounds — or skip and Claude will match the channel&apos;s natural voice.</p>
-                {loadingTones && tones.length === 0 && (
-                  <p className="text-xs text-[#52525b] flex items-center gap-1.5"><span className="animate-spin inline-block">⚡</span> Analyzing tone options…</p>
-                )}
-                {tonesError && <p className="text-xs text-red-400">{tonesError}</p>}
-                {tones.length > 0 && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {tones.map((t, i) => {
-                      const isSelected = selectedTone?.tone === t.tone;
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setSelectedTone(prev => prev?.tone === t.tone ? null : t)}
-                          className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
-                            isSelected ? 'border-indigo-400 bg-indigo-500/10' : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className={`text-sm font-medium ${isSelected ? 'text-indigo-300' : 'text-[#e4e4e7]'}`}>{t.tone}</span>
-                            {t.channelFavors && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 font-medium">
-                                Channel style
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-[#71717a] leading-relaxed">{t.description}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
 
               {/* Detail Level */}
               <div>

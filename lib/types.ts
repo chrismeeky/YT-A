@@ -29,6 +29,10 @@ export interface VideoAnalysis {
   videoUrl: string;
   thumbnail: string;
   channelName: string;
+  transcriptExcerpt?: string;  // body setup: 15–30% of transcript
+  transcriptHook?: string;     // opening: first ~800 chars
+  transcriptClimax?: string;   // peak tension: 60–75% of transcript
+  transcriptOutro?: string;    // closing: last ~600 chars
 
   // 1. Topic & Positioning
   topicPositioning: {
@@ -215,8 +219,17 @@ export interface WritingStyle {
   voiceAndPersonality: string;
   openingFormula: string;
   bodySceneOpenings?: string;
-  sceneTransitionLanguage?: string; // how this channel closes scenes and hands off to the next
-  signatureExpressions?: string[];  // actual verbatim phrases/sentences from the analyzed transcripts
+  sceneTransitionLanguage?: string;
+  signatureExpressions?: string[];
+  proseFingerprint?: string;    // prose quality: show vs tell, editorial restraint, vocabulary precision, forbidden moves
+  // Quantitative voice fingerprint
+  avgSentenceLengthWords?: number;
+  sentenceLengthVariance?: string;
+  directAddressFrequency?: string;
+  rhetoricalQuestionRate?: string;
+  readingLevel?: string;
+  beatLength?: string;
+  microRhythmBlueprint?: string;
 }
 
 export interface VisualSceneGuide {
@@ -260,6 +273,12 @@ export interface VisualAssetMix {
   reasoning: string; // 1-sentence explanation of the mix
 }
 
+export interface OpenLoopProfile {
+  peakSimultaneousLoops: number;
+  avgResolutionPoint: string;
+  loopTypes: string[];
+}
+
 export interface ChannelInsights {
   channelOverview: string;
   contentPillars: string[];
@@ -268,7 +287,7 @@ export interface ChannelInsights {
   scriptStructureTemplate: ScriptStructureTemplate;
   visualBrand: VisualBrand;
   visualSceneGuide?: VisualSceneGuide;
-  visualAssetMix?: VisualAssetMix; // estimated % breakdown of visual asset types this channel uses
+  visualAssetMix?: VisualAssetMix;
   audienceProfile: AudienceProfile;
   uniqueValueProposition: string;
   engagementPatterns: string[];
@@ -278,6 +297,9 @@ export interface ChannelInsights {
     classification: ContentNature;
     reasoning: string;
   };
+  narrativeLens?: string;        // who the camera stays on and why — the channel's primary subject and perspective
+  voiceExcerpts?: string[];      // 2-3 verbatim transcript passages (200-300 words) showing the channel's actual voice
+  openLoopProfile?: OpenLoopProfile;
   videoLength: { typical: string; reasoning: string };
   replicationFormula: string;
   thingsToSteal: string[];

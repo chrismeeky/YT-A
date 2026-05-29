@@ -23,8 +23,8 @@ export async function POST(
 
   const { videos, channelUrl, analysisName } = body;
 
-  if (!videos?.length || videos.length > 3) {
-    return NextResponse.json({ error: 'Select between 1 and 3 videos' }, { status: 400 });
+  if (!videos?.length || videos.length > 10) {
+    return NextResponse.json({ error: 'Select between 1 and 10 videos' }, { status: 400 });
   }
 
   const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');

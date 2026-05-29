@@ -173,7 +173,7 @@ export default function AnalyzePage() {
       const next = new Set(prev);
       if (next.has(videoId)) {
         next.delete(videoId);
-      } else if (next.size < 3) {
+      } else if (next.size < 10) {
         next.add(videoId);
       }
       return next;
@@ -319,7 +319,7 @@ export default function AnalyzePage() {
       </div>
 
       <h1 className="text-2xl font-semibold mb-1">Analyse a YouTube Channel</h1>
-      <p className="text-[#71717a] text-sm mb-8">Paste a channel URL, pick up to 3 videos, and let Claude do the rest.</p>
+      <p className="text-[#71717a] text-sm mb-8">Paste a channel URL, pick up to 10 videos, and let Claude do the rest.</p>
 
       {/* Step 1 — Input */}
       {(step === 'input' || step === 'select') && (
@@ -406,10 +406,10 @@ export default function AnalyzePage() {
             <div className="flex items-center justify-between">
               <h2 className="font-medium text-sm">
                 Step 2 — Select Videos{' '}
-                <span className="text-[#52525b]">({selected.size}/3 selected)</span>
+                <span className="text-[#52525b]">({selected.size}/10 selected)</span>
               </h2>
               <div className="flex items-center gap-2">
-                {selected.size === 3 && (
+                {selected.size === 10 && (
                   <span className="text-xs text-yellow-500">Maximum reached</span>
                 )}
                 <div className="flex rounded-lg border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
@@ -455,7 +455,7 @@ export default function AnalyzePage() {
                   : new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()
               ).map(video => {
                 const isSelected = selected.has(video.id);
-                const isDisabled = !isSelected && selected.size >= 3;
+                const isDisabled = !isSelected && selected.size >= 10;
                 return (
                   <button
                     key={video.id}

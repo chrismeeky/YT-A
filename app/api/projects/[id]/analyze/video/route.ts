@@ -31,6 +31,17 @@ export async function POST(
       anthropicApiKey, body.video, transcript, thumbnail.data,
     );
 
+    // Capture full-arc transcript slices for voice bible injection at generation time
+    if (transcript) {
+      const len = transcript.length;
+      result.transcriptHook    = transcript.slice(0, Math.min(len, 800)).trim();
+      const bodyStart          = Math.floor(len * 0.15);
+      result.transcriptExcerpt = transcript.slice(bodyStart, Math.min(len, bodyStart + 1500)).trim();
+      const climaxStart        = Math.floor(len * 0.60);
+      result.transcriptClimax  = transcript.slice(climaxStart, Math.min(len, climaxStart + 1200)).trim();
+      result.transcriptOutro   = transcript.slice(Math.max(0, len - 600)).trim();
+    }
+
     void trackUsage({
       operation: 'analyze',
       api: 'anthropic',

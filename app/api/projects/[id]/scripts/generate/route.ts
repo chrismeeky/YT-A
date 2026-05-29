@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
-import { generateScript, sanitizeDirectorSegment } from '@/lib/claude';
+import { generateScript, refineScriptVoice, sanitizeDirectorSegment } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
@@ -18,8 +18,6 @@ export async function POST(
     topic: string;
     targetAudience?: string;
     additionalInstructions?: string;
-    storyAngle?: string;
-    narrationTone?: string;
     detailLevel?: string;
     videoLength?: number;
     wpm?: number;
@@ -64,8 +62,6 @@ export async function POST(
         try {
           const instructionParts = [
             body.additionalInstructions,
-            body.storyAngle ? `Narrative angle — write the script from this specific perspective: ${body.storyAngle}` : null,
-            body.narrationTone ? `Narration tone — write the entire script in this tone: ${body.narrationTone}` : null,
             body.detailLevel ? `Story detail level — ${body.detailLevel}` : null,
           ].filter(Boolean);
           ({ result: generated, inputTokens, outputTokens } = await generateScript(
@@ -75,8 +71,7 @@ export async function POST(
             body.topic,
             body.targetAudience ?? '',
             instructionParts.join('\n\n'),
-            directorMode,
-            body.assetMixOverride,
+            false, // Pass 1 always writes plain narration; director segmentation is done in Pass 2
           ));
         } finally {
           clearInterval(keepalive);
@@ -84,66 +79,90 @@ export async function POST(
 
         emit({ message: `Parsing ${generated.scenes.length} scenes…` });
 
-        const scenes: Scene[] = generated.scenes.map(s => {
-          // Director mode: build narration from segments and attach directorSegments
-          if (directorMode && Array.isArray(s.segments) && s.segments.length > 0) {
-            const narration = s.segments.map(seg => seg.text).join(' ');
+        // Pass 1 always produces plain narration scenes; director segments are built in Pass 2
+        const scenes: Scene[] = generated.scenes.map(s => ({
+          id: uuid(),
+          number: s.number,
+          title: s.title,
+          narration: s.narration ?? '',
+          sceneDescription: s.sceneDescription,
+          estimatedDurationSeconds: s.estimatedDurationSeconds,
+          wordCount: s.wordCount,
+          includeImagePrompt: true,
+          includeVideoPrompt: true,
+          includeStockUrl: false,
+          includeStockPhotos: false,
+          includeRealImages: false,
+          includeStockVideos: false,
+          mediaFiles: [],
+        }));
 
-            const directorSegments: DirectorSegment[] = s.segments.map(seg => sanitizeDirectorSegment({
-              id: uuid(),
-              narrationExcerpt: seg.text,
-              durationSeconds: seg.durationSeconds,
-              assets: (seg.assets ?? []).map((a): DirectorAsset => ({
-                id: uuid(),
-                rank: a.rank,
-                type: a.type as DirectorAsset['type'],
-                rationale: a.note,
-                searchQuery: a.searchQuery ?? undefined,
-                prompts: [],
-                totalDuration: seg.durationSeconds,
-                generated: false,
-                slot: a.slot ?? undefined,
-                narrationSlice: a.narrationSlice ?? undefined,
-              })),
-            }));
+        // ── Pass 2: voice refinement ─────────────────────────────────────────
+        let pass2InputTokens = 0;
+        let pass2OutputTokens = 0;
+        try {
+          emit({ message: directorMode ? 'Script drafted. Refining voice and generating director segments…' : 'Script drafted. Refining voice to match channel…' });
 
-            return {
-              id: uuid(),
-              number: s.number,
-              title: s.title,
-              narration,
-              sceneDescription: s.sceneDescription,
-              estimatedDurationSeconds: s.estimatedDurationSeconds,
-              wordCount: s.wordCount,
-              includeImagePrompt: true,
-              includeVideoPrompt: true,
-              includeStockUrl: false,
-              includeStockPhotos: false,
-              includeRealImages: false,
-              includeStockVideos: false,
-              mediaFiles: [],
-              directorSegments,
-            };
+          const refineKeepalive = setInterval(() => {
+            try { emit({ message: 'Still refining voice…' }); } catch { /* stream closed */ }
+          }, 15_000);
+
+          let refined: Awaited<ReturnType<typeof refineScriptVoice>>;
+          try {
+            refined = await refineScriptVoice(
+              anthropicApiKey,
+              body.topic,
+              body.analysis,
+              scenes,
+              scriptSettings,
+              directorMode,
+              body.assetMixOverride,
+            );
+          } finally {
+            clearInterval(refineKeepalive);
           }
 
-          // Regular mode
-          return {
-            id: uuid(),
-            number: s.number,
-            title: s.title,
-            narration: s.narration ?? '',
-            sceneDescription: s.sceneDescription,
-            estimatedDurationSeconds: s.estimatedDurationSeconds,
-            wordCount: s.wordCount,
-            includeImagePrompt: true,
-            includeVideoPrompt: true,
-            includeStockUrl: false,
-            includeStockPhotos: false,
-            includeRealImages: false,
-            includeStockVideos: false,
-            mediaFiles: [],
-          };
-        });
+          if (refined) {
+            pass2InputTokens  = refined.inputTokens;
+            pass2OutputTokens = refined.outputTokens;
+
+            const refinedMap = new Map(refined.result.map(r => [r.number, r]));
+
+            for (const scene of scenes) {
+              const r = refinedMap.get(scene.number);
+              if (!r) continue;
+
+              if (directorMode && r.segments?.length) {
+                // Director mode: Pass 2 owns all segmentation — build DirectorSegments from scratch
+                scene.directorSegments = r.segments.map(seg => sanitizeDirectorSegment({
+                  id: uuid(),
+                  narrationExcerpt: seg.text,
+                  durationSeconds: seg.durationSeconds,
+                  assets: (seg.assets ?? []).map((a): DirectorAsset => ({
+                    id: uuid(),
+                    rank: a.rank,
+                    type: a.type as DirectorAsset['type'],
+                    rationale: a.note,
+                    searchQuery: a.searchQuery ?? undefined,
+                    prompts: [],
+                    totalDuration: seg.durationSeconds,
+                    generated: false,
+                    slot: a.slot ?? undefined,
+                    narrationSlice: a.narrationSlice ?? undefined,
+                  })),
+                }));
+                scene.narration = r.segments.map(s => s.text).join(' ');
+              } else if (!directorMode && r.narration) {
+                scene.narration = r.narration;
+              }
+            }
+          }
+        } catch (refineErr) {
+          // Pass 2 failure is non-fatal — keep Pass 1 result
+          const msg = refineErr instanceof Error ? refineErr.message : 'Voice refinement failed';
+          emit({ message: `Voice refinement skipped (${msg}). Using draft script.` });
+        }
+        // ────────────────────────────────────────────────────────────────────
 
         const script: Script = {
           id: uuid(),
@@ -167,9 +186,9 @@ export async function POST(
           api: 'anthropic',
           project_id: params.id,
           user_id: userId,
-          input_tokens: inputTokens,
-          output_tokens: outputTokens,
-          estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+          input_tokens: inputTokens + pass2InputTokens,
+          output_tokens: outputTokens + pass2OutputTokens,
+          estimated_cost_usd: calcAnthropicCost(inputTokens + pass2InputTokens, outputTokens + pass2OutputTokens),
         });
 
         emit({ done: true, result: script });
