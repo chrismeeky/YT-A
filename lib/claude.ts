@@ -491,6 +491,8 @@ export async function generateSearchQuery(
     contentNature?: string;
     productionStyle?: string;
     channelBrollPattern?: string;
+    siblingVisuals?: string[]; // other assets in the same segment, for visual cohesion
+    directorNote?: string;    // selected variation concept — overrides narration as the visual anchor
   },
 ): Promise<string> {
   const ai = client(apiKey);
@@ -499,29 +501,45 @@ export async function generateSearchQuery(
     ? `CHARACTERS: ${ctx.characters.map(c => `${c.name} — ${c.fullDescription}`).join('; ')}`
     : null;
 
+  const siblingBlock = ctx?.siblingVisuals?.length
+    ? `EXISTING VISUALS IN THIS SEGMENT (complement, don't duplicate): ${ctx.siblingVisuals.join(' | ')}`
+    : null;
+
+  // When a director note (variation concept) is present, it is the direct visual brief.
+  // Build the query to realise that concept, using narration only as supporting context.
+  const hasNote = !!ctx?.directorNote;
+
+  const instruction = {
+    'stock-photo': hasNote
+      ? `Write a 3–5 word Pexels stock photo search query that finds footage matching the VISUAL BRIEF exactly.`
+      : 'Write a 3–5 word Pexels stock photo search query. ANCHOR ON THE NARRATION — describe the specific action, scene, or object visible in those sentences. Do not use story locations or names unless they are the visual subject.',
+    'stock-video': hasNote
+      ? `Write a 3–5 word Pexels stock video search query that finds footage matching the VISUAL BRIEF exactly.`
+      : 'Write a 3–5 word Pexels stock video search query. ANCHOR ON THE NARRATION — describe what is literally happening in those sentences (action, mood, setting). Do not drift to story backstory or location names.',
+    'real-image': hasNote
+      ? `Write a 3–6 word archival/historical image search query that finds imagery matching the VISUAL BRIEF. Use the correct subject name from CHARACTERS if relevant.`
+      : (characterBlock
+          ? 'Write a 3–6 word archival/historical image search query. Use the correct character name from the context and anchor it to the specific moment described in the narration.'
+          : 'Write a 3–6 word archival image search query anchored to the specific moment in the narration. Resolve any pronouns to the named subject using the context.'),
+  }[assetType];
+
+  // Director note (variation) is the primary anchor when present; otherwise narration leads
   const lines = [
+    ctx?.directorNote && `VISUAL BRIEF (primary anchor — build the query to realise this exactly): "${ctx.directorNote}"`,
+    `NARRATION${hasNote ? ' (context only)' : ' (primary anchor — query must visualise THIS)'}: "${narration.slice(0, 500)}"`,
+    siblingBlock,
+    ctx?.scriptTitle       && `STORY TITLE: ${ctx.scriptTitle}`,
+    ctx?.sceneTitle        && `SCENE: ${ctx.sceneTitle}`,
+    characterBlock,
     ctx?.contentNature     && `CONTENT NATURE: ${ctx.contentNature}`,
     ctx?.productionStyle   && `PRODUCTION STYLE: ${ctx.productionStyle}`,
     ctx?.channelBrollPattern && `BROLL PATTERN: ${ctx.channelBrollPattern}`,
-    ctx?.scriptTitle       && `VIDEO TITLE: ${ctx.scriptTitle}`,
-    ctx?.sceneTitle        && `SCENE: ${ctx.sceneTitle}`,
-    ctx?.sceneDescription  && `SCENE DESCRIPTION: ${ctx.sceneDescription}`,
-    characterBlock,
-    `NARRATION: "${narration.slice(0, 500)}"`,
   ].filter(Boolean);
-
-  const instruction = {
-    'stock-photo': 'Write a 3–5 word Pexels stock photo search query capturing the visual mood or scene. Do not include person names.',
-    'stock-video': 'Write a 3–5 word Pexels stock video search query for the atmosphere or action. Do not include person names.',
-    'real-image': characterBlock
-      ? 'Write a 3–6 word archival/historical image search query. You have the character names above — use the correct name in the query.'
-      : 'Write a 3–6 word archival image search query. Resolve any pronouns to the named subject using the context above.',
-  }[assetType];
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 30,
-    system: 'You are a documentary film researcher. Given production context and a narration excerpt, output ONLY a concise image/video search query (3–6 words). No explanation, no punctuation at the end, no quotes.',
+    system: 'You are a stock footage researcher. Output ONLY a concise search query (3–6 words) that would find footage matching what the narration describes. No explanation, no punctuation at the end, no quotes.',
     messages: [{ role: 'user', content: `${lines.join('\n')}\n\n${instruction}` }],
   });
   const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '';

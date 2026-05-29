@@ -26,6 +26,8 @@ export async function POST(
     visualStyle?: string;
     directorNote?: string;
     characters?: Array<{ name: string; fullDescription: string }>;
+    siblingAssets?: Array<{ rationale: string; searchQuery?: string }>;
+    page?: number;
     anthropicApiKey?: string;
     pexelsApiKey?: string;
     braveApiKey?: string;
@@ -34,7 +36,13 @@ export async function POST(
   };
 
   const userId = await getUserIdFromRequest(request);
-  const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, wpm } = body;
+  const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, siblingAssets, page = 1, wpm } = body;
+
+  // Build a sibling visuals list for search query generation: prefer searchQuery over rationale
+  // so the context is as specific as possible (e.g. "Edmund Kemper 1973 mugshot" vs "subject portrait")
+  const siblingVisuals = siblingAssets
+    ?.map(a => a.searchQuery || a.rationale)
+    .filter(Boolean) as string[] | undefined;
 
   // ── Search query resolution ───────────────────────────────────────────────
   // If a query was already generated (by the director plan or a previous request), use it as-is.
@@ -60,6 +68,8 @@ export async function POST(
       contentNature:       queryContentNature,
       productionStyle:     queryProductionStyle,
       channelBrollPattern: queryBrollPattern,
+      siblingVisuals,
+      directorNote:        directorNote || undefined,
     });
   };
 
@@ -69,7 +79,7 @@ export async function POST(
     if (!pexelsApiKey) return NextResponse.json({ error: 'Pexels API key required.' }, { status: 400 });
     const query = await resolveQuery('stock-photo');
     void trackUsage({ operation: 'director-search', api: 'pexels', project_id: params.id, user_id: userId, requests: 1 });
-    const photos = await searchPexels(query, pexelsApiKey, 6);
+    const photos = await searchPexels(query, pexelsApiKey, 6, page);
     return NextResponse.json({ photos, autoSearchQuery: query });
   }
 
@@ -78,21 +88,22 @@ export async function POST(
     if (!pexelsApiKey) return NextResponse.json({ error: 'Pexels API key required.' }, { status: 400 });
     const query = await resolveQuery('stock-video');
     void trackUsage({ operation: 'director-search', api: 'pexels', project_id: params.id, user_id: userId, requests: 1 });
-    const videos = await searchPexelsVideos(query, pexelsApiKey, 6);
+    const videos = await searchPexelsVideos(query, pexelsApiKey, 6, page);
     return NextResponse.json({ videos, autoSearchQuery: query });
   }
 
   if (assetType === 'real-image') {
     const provider = body.realImageProvider ?? 'brave';
     const query = await resolveQuery('real-image');
+    const offset = (page - 1) * 6;
     if (provider === 'brave') {
       const braveApiKey = resolveKeyWithFallback(body.braveApiKey, 'NEXT_PUBLIC_BRAVE_API_KEY');
       if (!braveApiKey) return NextResponse.json({ error: 'Brave API key required.' }, { status: 400 });
-      const images = await searchBraveImages(query, braveApiKey, 6);
+      const images = await searchBraveImages(query, braveApiKey, 6, offset);
       return NextResponse.json({ images, autoSearchQuery: query });
     }
     if (provider === 'duckduckgo') {
-      const images = await searchDuckDuckGoImages(query, 6);
+      const images = await searchDuckDuckGoImages(query, 6, undefined, offset);
       return NextResponse.json({ images, autoSearchQuery: query });
     }
     return NextResponse.json({ images: [], autoSearchQuery: query });

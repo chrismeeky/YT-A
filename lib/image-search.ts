@@ -3,10 +3,11 @@ import type { StockPhoto, RealImage, StockVideo } from './types';
 export async function searchPexels(
   query: string,
   apiKey: string,
-  count = 6
+  count = 6,
+  page = 1,
 ): Promise<StockPhoto[]> {
   const res = await fetch(
-    `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${count}&orientation=landscape`,
+    `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${count}&page=${page}&orientation=landscape`,
     { headers: { Authorization: apiKey } }
   );
   if (!res.ok) throw new Error(`Pexels photos API error ${res.status}: ${res.statusText}`);
@@ -25,11 +26,12 @@ export async function searchPexels(
 export async function searchDuckDuckGoImages(
   query: string,
   count = 6,
-  proxyUrl?: string
+  proxyUrl?: string,
+  offset = 0,
 ): Promise<RealImage[]> {
   const proxy = proxyUrl ?? process.env.NEXT_PUBLIC_DDG_PROXY_URL ?? '';
   if (proxy) {
-    const url = `${proxy.replace(/\/$/, '')}?q=${encodeURIComponent(query)}&count=${count}`;
+    const url = `${proxy.replace(/\/$/, '')}?q=${encodeURIComponent(query)}&count=${count}&offset=${offset}`;
     const r = await fetch(url);
     const d = await r.json() as { images?: RealImage[]; error?: string };
     if (!r.ok) throw new Error(d.error ?? 'DDG proxy search failed');
@@ -58,7 +60,7 @@ export async function searchDuckDuckGoImages(
   const vqd = vqdMatch[1];
 
   const res = await fetch(
-    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&o=json&p=1&s=0&u=bing&f=,,,&l=en-us`,
+    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&o=json&p=1&s=${offset}&u=bing&f=,,,&l=en-us`,
     {
       headers: {
         'User-Agent': UA,
@@ -83,10 +85,11 @@ export async function searchDuckDuckGoImages(
 export async function searchBraveImages(
   query: string,
   apiKey: string,
-  count = 6
+  count = 6,
+  offset = 0,
 ): Promise<RealImage[]> {
   const res = await fetch(
-    `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=${count}`,
+    `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=${count}&offset=${offset}`,
     {
       headers: {
         'Accept': 'application/json',
@@ -111,10 +114,11 @@ export async function searchBraveImages(
 export async function searchPexelsVideos(
   query: string,
   apiKey: string,
-  count = 4
+  count = 4,
+  page = 1,
 ): Promise<StockVideo[]> {
   const res = await fetch(
-    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${count}&orientation=landscape`,
+    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${count}&page=${page}&orientation=landscape`,
     { headers: { Authorization: apiKey } }
   );
   if (!res.ok) throw new Error(`Pexels videos API error ${res.status}: ${res.statusText}`);

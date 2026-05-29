@@ -473,6 +473,8 @@ export interface DirectorAsset {
   stockPhotos?: StockPhoto[];
   stockVideos?: StockVideo[];
   realImages?: RealImage[];
+  // Visual concept variations for this asset (alternative director briefs)
+  variations?: string[];
 }
 
 export interface DirectorSegment {

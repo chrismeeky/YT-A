@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { Script, Analysis, DirectorScene, DirectorSegment, DirectorAsset, DirectorAssetType, StockPhoto, StockVideo, RealImage, VisualAssetMix } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import MediaUploadModal from '@/components/MediaUploadModal';
@@ -100,8 +101,16 @@ function AssetCard({
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [variationsOpen, setVariationsOpen] = useState(false);
+  const [variationsLoading, setVariationsLoading] = useState(false);
+  const [variationsError, setVariationsError] = useState('');
+  const [variationsPos, setVariationsPos] = useState<{ anchorTop: number; anchorBottom: number; left: number; openUpward: boolean } | null>(null);
   const generateRef = useRef<(() => void) | null>(null);
   const autoFired = useRef(false);
+  const rationaleRef = useRef<HTMLParagraphElement>(null);
+  const variationsRef = useRef<HTMLDivElement>(null);
 
   const targetScene = script.scenes.find(s => s.id === scene.sceneId);
   const savedNames = new Set(targetScene?.directorMediaFiles?.map(f => f.originalName) ?? []);
@@ -125,36 +134,39 @@ function AssetCard({
 
   const sceneData = script.scenes.find(s => s.id === scene.sceneId);
 
+  const buildRequestBody = (page = 1) => ({
+    assetType: asset.type,
+    narrationExcerpt: asset.narrationSlice ?? segment.narrationExcerpt,
+    durationSeconds: effectiveDurationSeconds,
+    durationEach: asset.durationEach,
+    wpm: script.settings.wpm,
+    searchQuery: asset.searchQuery,
+    directorNote: asset.rationale,
+    sceneTitle: sceneData?.title ?? '',
+    sceneDescription: sceneData?.sceneDescription ?? '',
+    scriptTitle: script.title,
+    analysis,
+    visualStyle: script.visualStyle,
+    characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
+    siblingAssets: segment.assets
+      .filter(a => a.id !== asset.id)
+      .map(a => ({ rationale: a.rationale, searchQuery: a.searchQuery })),
+    page,
+    anthropicApiKey,
+    pexelsApiKey,
+    braveApiKey,
+    realImageProvider,
+  });
+
   const generate = async () => {
     if (!analysis) return;
     setLoading(true);
     setError('');
+    setCurrentPage(1);
     try {
       const res = await fetch(
         `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-asset`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            assetType: asset.type,
-            narrationExcerpt: asset.narrationSlice ?? segment.narrationExcerpt,
-            durationSeconds: effectiveDurationSeconds,
-            durationEach: asset.durationEach,
-            wpm: script.settings.wpm,
-            searchQuery: asset.searchQuery,
-            directorNote: asset.rationale,
-            sceneTitle: sceneData?.title ?? '',
-            sceneDescription: sceneData?.sceneDescription ?? '',
-            scriptTitle: script.title,
-            analysis,
-            visualStyle: script.visualStyle,
-            characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
-            anthropicApiKey,
-            pexelsApiKey,
-            braveApiKey,
-            realImageProvider,
-          }),
-        }
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildRequestBody(1)) },
       );
       const data = await res.json() as {
         prompts?: string[];
@@ -185,8 +197,118 @@ function AssetCard({
     }
   };
 
+  const loadMore = async () => {
+    if (!analysis || loadingMore) return;
+    const nextPage = currentPage + 1;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-asset`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildRequestBody(nextPage)) },
+      );
+      const data = await res.json() as {
+        photos?: StockPhoto[];
+        videos?: StockVideo[];
+        images?: RealImage[];
+        error?: string;
+      };
+      if (!res.ok || data.error) return;
+
+      onUpdate({
+        ...asset,
+        stockPhotos: data.photos ? [...(asset.stockPhotos ?? []), ...data.photos] : asset.stockPhotos,
+        stockVideos: data.videos ? [...(asset.stockVideos ?? []), ...data.videos] : asset.stockVideos,
+        realImages: data.images ? [...(asset.realImages ?? []), ...data.images] : asset.realImages,
+      });
+      setCurrentPage(nextPage);
+    } catch {
+      // silently ignore load-more failures
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   // Keep the ref current so the mount effect can call the latest version
   generateRef.current = generate;
+
+  const generateVariations = async () => {
+    if (!analysis) return;
+    setVariationsLoading(true);
+    setVariationsError('');
+    try {
+      const res = await fetch(
+        `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-variations`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            assetType: asset.type,
+            narrationExcerpt: segment.narrationExcerpt,
+            narrationSlice: asset.narrationSlice,
+            currentRationale: asset.rationale,
+            sceneTitle: sceneData?.title ?? '',
+            sceneDescription: sceneData?.sceneDescription ?? '',
+            scriptTitle: script.title,
+            analysis,
+            characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
+            anthropicApiKey,
+          }),
+        }
+      );
+      const data = await res.json() as { variations?: string[]; error?: string };
+      if (!res.ok || data.error) { setVariationsError(data.error ?? 'Failed to generate variations'); return; }
+      onUpdate({ ...asset, variations: data.variations ?? [] });
+    } catch {
+      setVariationsError('Request failed');
+    } finally {
+      setVariationsLoading(false);
+    }
+  };
+
+  const handleRationaleClick = () => {
+    if (!variationsOpen) {
+      const rect = rationaleRef.current?.getBoundingClientRect();
+      if (rect) {
+        const estimatedHeight = 220;
+        const openUpward = window.innerHeight - rect.bottom < estimatedHeight;
+        setVariationsPos({ anchorTop: rect.top, anchorBottom: rect.bottom, left: rect.left, openUpward });
+      }
+      setVariationsOpen(true);
+      // Only auto-fetch when no variations exist yet — re-opening reuses cached list
+      if (!asset.variations?.length) generateVariations();
+    } else {
+      setVariationsOpen(false);
+    }
+  };
+
+  const selectVariation = (variation: string) => {
+    onUpdate({
+      ...asset,
+      rationale: variation,
+      // Clear generated content so user can regen with new concept
+      generated: false,
+      prompts: [],
+      clipLabels: undefined,
+      searchQuery: undefined,
+      stockPhotos: undefined,
+      stockVideos: undefined,
+      realImages: undefined,
+    });
+    setVariationsOpen(false);
+  };
+
+  // Close variations dropdown on outside click
+  useEffect(() => {
+    if (!variationsOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const insidePortal = variationsRef.current?.contains(target);
+      const insideAnchor = rationaleRef.current?.contains(target);
+      if (!insidePortal && !insideAnchor) setVariationsOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [variationsOpen]);
 
   // Auto-fire for user-added assets (rationale === '' signals added via picker, not by AI)
   useEffect(() => {
@@ -285,7 +407,72 @@ function AssetCard({
 
       {/* Rationale + search query */}
       <div className="px-3 pb-2">
-        {asset.rationale && <p className="text-[11px] text-[#52525b] leading-relaxed">{asset.rationale}</p>}
+        {asset.rationale && (
+          <>
+            <p
+              ref={rationaleRef}
+              onClick={handleRationaleClick}
+              className="text-[11px] text-[#52525b] leading-relaxed cursor-pointer hover:text-[#a1a1aa] transition-colors select-none"
+              title="Click to see visual variations"
+            >
+              {asset.rationale}
+            </p>
+
+            {variationsOpen && variationsPos && typeof document !== 'undefined' && createPortal(
+              <div
+                ref={variationsRef}
+                className="fixed z-[9999] rounded-lg border py-1 min-w-[200px] max-w-[280px]"
+                style={{
+                  ...(variationsPos.openUpward
+                    ? { bottom: window.innerHeight - variationsPos.anchorTop + 4 }
+                    : { top: variationsPos.anchorBottom + 4 }),
+                  left: variationsPos.left,
+                  background: '#18181b',
+                  borderColor: '#3f3f46',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                }}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: '#3f3f46' }}>
+                  <span className="text-[10px] text-[#71717a] font-medium uppercase tracking-wide">Variations</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); generateVariations(); }}
+                    disabled={variationsLoading}
+                    className="text-[10px] text-[#52525b] hover:text-[#a1a1aa] transition-colors disabled:opacity-40 flex items-center gap-1"
+                  >
+                    {variationsLoading
+                      ? <><span className="animate-spin inline-block">⚡</span> Generating…</>
+                      : '↺ Regenerate'}
+                  </button>
+                </div>
+
+                {/* Loading state */}
+                {variationsLoading && !asset.variations?.length && (
+                  <div className="px-3 py-2.5">
+                    <p className="text-[11px] text-[#52525b] italic">Generating variations…</p>
+                  </div>
+                )}
+
+                {/* Error */}
+                {variationsError && (
+                  <p className="px-3 py-2 text-[11px] text-red-400">{variationsError}</p>
+                )}
+
+                {/* Variation options */}
+                {(asset.variations ?? []).map((v, i) => (
+                  <button
+                    key={i}
+                    onClick={() => selectVariation(v)}
+                    className="w-full text-left px-3 py-2 text-[11px] text-[#a1a1aa] hover:text-white hover:bg-white/5 transition-colors leading-relaxed"
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>,
+              document.body,
+            )}
+          </>
+        )}
         {asset.searchQuery && (
           <p className="text-[10px] text-[#3f3f46] mt-1">
             Search: <span className="text-[#52525b] font-mono">{asset.searchQuery}</span>
@@ -435,6 +622,18 @@ function AssetCard({
                 );
               })}
             </div>
+          )}
+
+          {/* Load more */}
+          {isSearch && hasResults && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="w-full py-1.5 rounded text-[11px] transition-colors disabled:opacity-40"
+              style={{ background: 'var(--surface)', color: '#71717a', border: '1px solid #3f3f46' }}
+            >
+              {loadingMore ? 'Loading…' : '+ Load more'}
+            </button>
           )}
         </div>
       )}
