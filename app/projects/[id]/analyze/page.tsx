@@ -72,9 +72,12 @@ export default function AnalyzePage() {
   const [bookmarks, setBookmarks] = useState<ChannelBookmark[]>([]);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'popular'>(() => draft?.sortBy ?? 'newest');
+  const [cancelConfirm, setCancelConfirm] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     storage.listBookmarks().then(setBookmarks);
@@ -168,12 +171,74 @@ export default function AnalyzePage() {
     return () => observer.disconnect();
   }, [loadMore, nextPageToken]);
 
+  const MAX_VIDEOS = 3;
+
+  // Warn before leaving while analysis is in progress (reload / tab close)
+  useEffect(() => {
+    if (step !== 'analyzing') return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [step]);
+
+  // Warn before SPA navigation (Next.js Link clicks and browser back/forward)
+  useEffect(() => {
+    if (step !== 'analyzing') return;
+
+    const message = 'Analysis is in progress. Leave this page? Progress will be lost.';
+
+    // Intercept link clicks in the capture phase, before React/Next.js processes them
+    const handleClick = (e: MouseEvent) => {
+      const anchor = (e.target as Element).closest('a');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      // Ignore anchors, external links, and mailto/tel
+      if (!href || href.startsWith('#') || href.startsWith('http') || anchor.target === '_blank') return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (window.confirm(message)) {
+        cancelledRef.current = true;
+        analysisAbortRef.current?.abort();
+        router.push(href);
+      }
+    };
+
+    // Back/forward buttons
+    const handlePopState = () => {
+      if (window.confirm(message)) {
+        cancelledRef.current = true;
+        analysisAbortRef.current?.abort();
+      } else {
+        history.pushState(null, '', window.location.href);
+      }
+    };
+
+    document.addEventListener('click', handleClick, true);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      document.removeEventListener('click', handleClick, true);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [step, router]);
+
+  const cancelAnalysis = () => {
+    setCancelConfirm(false);
+    cancelledRef.current = true;
+    analysisAbortRef.current?.abort();
+    setProgressSteps([]);
+    setAnalyzeError('Analysis cancelled.');
+    setStep('select');
+  };
+
   const toggleVideo = (videoId: string) => {
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(videoId)) {
         next.delete(videoId);
-      } else if (next.size < 10) {
+      } else if (next.size < MAX_VIDEOS) {
         next.add(videoId);
       }
       return next;
@@ -188,7 +253,10 @@ export default function AnalyzePage() {
     const selectedVideos = videos.filter(v => selected.has(v.id));
     const settings = await storage.getSettings();
 
-    // Build the step list upfront
+    const abort = new AbortController();
+    analysisAbortRef.current = abort;
+    cancelledRef.current = false;
+
     const steps: ProgressStep[] = [
       ...selectedVideos.map((v, i) => ({
         id: `video-${i}`,
@@ -207,22 +275,23 @@ export default function AnalyzePage() {
       const videoAnalyses: VideoAnalysis[] = [];
 
       for (let i = 0; i < selectedVideos.length; i++) {
+        if (cancelledRef.current) return;
         const video = selectedVideos[i];
         const stepId = `video-${i}`;
         updateStep(stepId, 'loading');
 
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 270_000);
+        const timer = setTimeout(() => abort.abort(), 270_000);
         let res: Response;
         try {
           res = await fetch(`/api/projects/${id}/analyze/video`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey }),
-            signal: ctrl.signal,
+            signal: abort.signal,
           });
         } catch (e) {
           clearTimeout(timer);
+          if (cancelledRef.current) return;
           const msg = e instanceof DOMException && e.name === 'AbortError'
             ? 'Analysis timed out after 4.5 minutes. Try a shorter video (under 15 min works best).'
             : 'Network error — could not reach the server. Check your connection.';
@@ -232,11 +301,11 @@ export default function AnalyzePage() {
           return;
         }
         clearTimeout(timer);
+        if (cancelledRef.current) return;
         const data = await res.json() as { result?: VideoAnalysis; error?: string };
 
         if (!res.ok || data.error) {
           updateStep(stepId, 'error');
-          // Skip this video but continue with the rest
           continue;
         }
 
@@ -244,26 +313,25 @@ export default function AnalyzePage() {
         updateStep(stepId, 'done');
       }
 
+      if (cancelledRef.current) return;
+
       if (videoAnalyses.length === 0) {
         setAnalyzeError('All selected videos were declined or failed. Please choose different videos.');
         setStep('select');
         return;
       }
 
-      // Synthesize
       updateStep('synthesize', 'loading');
-      const synthCtrl = new AbortController();
-      const synthTimer = setTimeout(() => synthCtrl.abort(), 270_000);
       let synthRes: Response;
       try {
         synthRes = await fetch(`/api/projects/${id}/analyze/synthesize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey }),
-          signal: synthCtrl.signal,
+          signal: abort.signal,
         });
       } catch (e) {
-        clearTimeout(synthTimer);
+        if (cancelledRef.current) return;
         const msg = e instanceof DOMException && e.name === 'AbortError'
           ? 'Synthesis timed out. Try again — it usually completes faster on retry.'
           : 'Network error during synthesis. Check your connection.';
@@ -272,7 +340,7 @@ export default function AnalyzePage() {
         setStep('select');
         return;
       }
-      clearTimeout(synthTimer);
+      if (cancelledRef.current) return;
       const synthData = await synthRes.json() as { result?: unknown; error?: string };
 
       if (!synthRes.ok || synthData.error) {
@@ -283,7 +351,6 @@ export default function AnalyzePage() {
       }
       updateStep('synthesize', 'done');
 
-      // Save
       updateStep('save', 'loading');
       const analysis: Analysis = {
         id: uuid(),
@@ -299,11 +366,11 @@ export default function AnalyzePage() {
       await storage.saveAnalysis(id, analysis);
       updateStep('save', 'done');
 
-      // Small pause so the user sees all green ticks
       await new Promise(r => setTimeout(r, 600));
       analyzeCache.delete(draftKey);
       router.push(`/projects/${id}`);
     } catch (err) {
+      if (cancelledRef.current) return;
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed. Check your API key in Settings.');
       setStep('select');
     }
@@ -319,7 +386,7 @@ export default function AnalyzePage() {
       </div>
 
       <h1 className="text-2xl font-semibold mb-1">Analyse a YouTube Channel</h1>
-      <p className="text-[#71717a] text-sm mb-8">Paste a channel URL, pick up to 10 videos, and let Claude do the rest.</p>
+      <p className="text-[#71717a] text-sm mb-8">Paste a channel URL, pick up to {MAX_VIDEOS} videos, and let Claude do the rest.</p>
 
       {/* Step 1 — Input */}
       {(step === 'input' || step === 'select') && (
@@ -406,10 +473,10 @@ export default function AnalyzePage() {
             <div className="flex items-center justify-between">
               <h2 className="font-medium text-sm">
                 Step 2 — Select Videos{' '}
-                <span className="text-[#52525b]">({selected.size}/10 selected)</span>
+                <span className="text-[#52525b]">({selected.size}/{MAX_VIDEOS} selected)</span>
               </h2>
               <div className="flex items-center gap-2">
-                {selected.size === 10 && (
+                {selected.size === MAX_VIDEOS && (
                   <span className="text-xs text-yellow-500">Maximum reached</span>
                 )}
                 <div className="flex rounded-lg border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
@@ -455,7 +522,7 @@ export default function AnalyzePage() {
                   : new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()
               ).map(video => {
                 const isSelected = selected.has(video.id);
-                const isDisabled = !isSelected && selected.size >= 10;
+                const isDisabled = !isSelected && selected.size >= MAX_VIDEOS;
                 return (
                   <button
                     key={video.id}
@@ -502,7 +569,35 @@ export default function AnalyzePage() {
           className="rounded-xl border p-8"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
         >
-          <h2 className="font-semibold mb-6">Analysing…</h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="font-semibold">Analysing…</h2>
+            {!cancelConfirm ? (
+              <button
+                onClick={() => setCancelConfirm(true)}
+                className="text-xs px-3 py-1.5 rounded-lg border transition-colors hover:border-red-400/60 hover:text-red-400"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+              >
+                Cancel
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs" style={{ color: 'var(--text-3)' }}>Cancel analysis?</span>
+                <button
+                  onClick={cancelAnalysis}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-400/40 text-red-400 hover:bg-red-500/20 transition-colors"
+                >
+                  Yes, cancel
+                </button>
+                <button
+                  onClick={() => setCancelConfirm(false)}
+                  className="text-xs px-3 py-1.5 rounded-lg border transition-colors hover:border-[#555]"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+                >
+                  Keep going
+                </button>
+              </div>
+            )}
+          </div>
           <div className="space-y-4">
             {progressSteps.map(s => (
               <div key={s.id} className="flex items-center gap-3">
