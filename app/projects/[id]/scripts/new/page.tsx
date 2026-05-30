@@ -202,6 +202,44 @@ export default function NewScriptPage() {
     return () => window.removeEventListener('online', handleOnline);
   }, []);
 
+  // Warn before leaving while script is generating
+  useEffect(() => {
+    if (!loading) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [loading]);
+
+  useEffect(() => {
+    if (!loading) return;
+    const message = 'Script generation is in progress. Leave this page? Progress will be lost.';
+
+    const handleClick = (e: MouseEvent) => {
+      const anchor = (e.target as Element).closest('a');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('http') || anchor.target === '_blank') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.confirm(message)) router.push(href);
+    };
+
+    const handlePopState = () => {
+      if (window.confirm(message)) {
+        // allow back — nothing to restore
+      } else {
+        history.pushState(null, '', window.location.href);
+      }
+    };
+
+    document.addEventListener('click', handleClick, true);
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      document.removeEventListener('click', handleClick, true);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [loading, router]);
+
   useEffect(() => {
     Promise.all([
       storage.listAnalyses(id),
