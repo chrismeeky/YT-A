@@ -511,10 +511,10 @@ export async function generateSearchQuery(
 
   const instruction = {
     'stock-photo': hasNote
-      ? `Write a 3–5 word Pexels stock photo search query that finds footage matching the VISUAL BRIEF exactly.`
+      ? `Write a 3–5 word Pexels stock photo search query (generic evocative terms only, no names or specific events) that finds imagery matching the VISUAL BRIEF exactly.`
       : 'Write a 3–5 word Pexels stock photo search query. ANCHOR ON THE NARRATION — describe the specific action, scene, or object visible in those sentences. Do not use story locations or names unless they are the visual subject.',
     'stock-video': hasNote
-      ? `Write a 3–5 word Pexels stock video search query that finds footage matching the VISUAL BRIEF exactly.`
+      ? `Write a 3–5 word Pexels stock video search query (generic evocative terms only, no names or specific events) that finds footage matching the VISUAL BRIEF exactly.`
       : 'Write a 3–5 word Pexels stock video search query. ANCHOR ON THE NARRATION — describe what is literally happening in those sentences (action, mood, setting). Do not drift to story backstory or location names.',
     'real-image': hasNote
       ? `Write a 3–6 word archival/historical image search query that finds imagery matching the VISUAL BRIEF. Use the correct subject name from CHARACTERS if relevant.`

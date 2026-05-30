@@ -41,6 +41,9 @@ export async function POST(
     'real-image':  'real archival photograph or documented image',
   };
 
+  const isStock = assetType === 'stock-video' || assetType === 'stock-photo';
+  const isReal = assetType === 'real-image';
+
   const contentNature = analysis.channelInsights.contentNature?.classification ?? '';
   const productionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
   const brollPattern = analysis.channelInsights.visualSceneGuide?.brollPattern ?? '';
@@ -74,8 +77,8 @@ CHANNEL STYLE: ${contentNature}${productionStyle ? ` — ${productionStyle}` : '
 
 Rules:
 - Each variation is a director's brief: 3–6 words, lowercase, highly specific
-- Use the actual named subjects, locations, and events from the narration — not generic stand-ins
-- Cover genuinely different visual approaches: literal (show the person/event), symbolic, atmospheric, abstract
+${isStock ? `- STOCK FOOTAGE RULE: Generate GENERIC, searchable B-roll concepts (mood, atmosphere, environment, motion, textures, lighting, time of day). NEVER include specific people names, character names, or story-specific events/locations — stock libraries do not have them. Think like a documentary editor cutting generic illustrative footage.` : `- Use the actual named subjects, locations, and events from the narration when they are the visual focus — not generic stand-ins`}
+- Cover genuinely different visual approaches: ${isStock ? 'wide landscape, close detail, atmospheric, symbolic, motion-based' : 'literal (show the person/event), symbolic, atmospheric, abstract'}
 - Do NOT repeat or paraphrase the current visual
 - Match the channel's production style
 

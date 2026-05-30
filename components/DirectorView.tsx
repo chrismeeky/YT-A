@@ -118,6 +118,9 @@ function AssetCard({
   const isAI = asset.type === 'ai-video' || asset.type === 'ai-image';
   const isSearch = asset.type === 'stock-photo' || asset.type === 'stock-video' || asset.type === 'real-image';
 
+  const concept = asset.rationale || (isSearch && asset.searchQuery ? asset.searchQuery : '');
+  const showSearchLine = !!asset.searchQuery && !!asset.rationale;
+
   // Use the narration slice (if this is a multi-shot asset) or the full segment narration
   // to compute the actual TTS duration from word count × WPM rather than the pre-computed
   // segment.durationSeconds (which covers the entire segment, not just this slot).
@@ -245,7 +248,7 @@ function AssetCard({
             assetType: asset.type,
             narrationExcerpt: segment.narrationExcerpt,
             narrationSlice: asset.narrationSlice,
-            currentRationale: asset.rationale,
+            currentRationale: asset.rationale || asset.searchQuery || '',
             sceneTitle: sceneData?.title ?? '',
             sceneDescription: sceneData?.sceneDescription ?? '',
             scriptTitle: script.title,
@@ -405,9 +408,9 @@ function AssetCard({
         </button>
       </div>
 
-      {/* Rationale + search query */}
+      {/* Rationale / search concept + search query */}
       <div className="px-3 pb-2">
-        {asset.rationale && (
+        {concept && (
           <>
             <p
               ref={rationaleRef}
@@ -415,7 +418,7 @@ function AssetCard({
               className="text-[11px] text-[#52525b] leading-relaxed cursor-pointer hover:text-[#a1a1aa] transition-colors select-none"
               title="Click to see visual variations"
             >
-              {asset.rationale}
+              {asset.rationale ? asset.rationale : `Search: ${concept}`}
             </p>
 
             {variationsOpen && variationsPos && typeof document !== 'undefined' && createPortal(
@@ -473,7 +476,7 @@ function AssetCard({
             )}
           </>
         )}
-        {asset.searchQuery && (
+        {showSearchLine && (
           <p className="text-[10px] text-[#3f3f46] mt-1">
             Search: <span className="text-[#52525b] font-mono">{asset.searchQuery}</span>
           </p>
