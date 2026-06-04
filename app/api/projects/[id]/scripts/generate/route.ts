@@ -23,6 +23,7 @@ export async function POST(
     wpm?: number;
     anthropicApiKey?: string;
     directorMode?: boolean;
+    skipPass2?: boolean;
     assetMixOverride?: Record<string, number>;
   };
   const userId = await getUserIdFromRequest(request);
@@ -37,6 +38,7 @@ export async function POST(
   }
 
   const directorMode = body.directorMode ?? false;
+  const skipPass2 = body.skipPass2 ?? false;
   const videoLength = body.videoLength ?? 5;
   const wpm        = body.wpm        ?? 150;
   const targetWordCount = Math.round(videoLength * wpm);
@@ -100,7 +102,7 @@ export async function POST(
         // ── Pass 2: voice refinement ─────────────────────────────────────────
         let pass2InputTokens = 0;
         let pass2OutputTokens = 0;
-        try {
+        if (!skipPass2) try {
           emit({ message: directorMode ? 'Script drafted. Refining voice and generating director segments…' : 'Script drafted. Refining voice to match channel…' });
 
           const refineKeepalive = setInterval(() => {
@@ -158,11 +160,9 @@ export async function POST(
             }
           }
         } catch (refineErr) {
-          // Pass 2 failure is non-fatal — keep Pass 1 result
-          const msg = refineErr instanceof Error ? refineErr.message : 'Voice refinement failed';
-          emit({ message: `Voice refinement skipped (${msg}). Using draft script.` });
+          throw refineErr;
         }
-        // ────────────────────────────────────────────────────────────────────
+        // ── end Pass 2 ───────────────────────────────────────────────────────
 
         const script: Script = {
           id: uuid(),

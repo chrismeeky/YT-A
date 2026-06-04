@@ -747,13 +747,16 @@ function SegmentCard({
   const [addPickerSlot, setAddPickerSlot] = useState<number | 'single' | null>(null);
   const [highlightedSlot, setHighlightedSlot] = useState<number | null>(null);
   const slotRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const segmentRef = useRef(segment);
+  segmentRef.current = segment;
 
   const updateAsset = useCallback((updatedAsset: DirectorAsset) => {
+    const seg = segmentRef.current;
     onSegmentUpdate({
-      ...segment,
-      assets: segment.assets.map(a => a.id === updatedAsset.id ? updatedAsset : a),
+      ...seg,
+      assets: seg.assets.map(a => a.id === updatedAsset.id ? updatedAsset : a),
     });
-  }, [segment, onSegmentUpdate]);
+  }, [onSegmentUpdate]);
 
   const addAsset = useCallback((type: DirectorAssetType, slot?: number) => {
     const newAsset: DirectorAsset = {
@@ -971,6 +974,8 @@ function SegmentCard({
 
 export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
   const storage = useStorage();
+  const scriptRef = useRef(script);
+  scriptRef.current = script;
   const [showChart, setShowChart] = useState(false);
   const [internalActiveSceneId, setInternalActiveSceneId] = useState<string | null>(
     script.directorPlan?.[0]?.sceneId ?? null
@@ -1016,8 +1021,9 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
   const saveToScene = useCallback(async (url: string, originalName: string, sceneId: string) => {
     setSavingUrl(url);
     try {
+      const current = scriptRef.current;
       const res = await fetch(
-        `/api/projects/${script.projectId}/scripts/${script.id}/scenes/${sceneId}/media/download`,
+        `/api/projects/${current.projectId}/scripts/${current.id}/scenes/${sceneId}/media/download`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, originalName }) }
       );
       if (!res.ok) return;
@@ -1026,26 +1032,28 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
       const buffer = await res.arrayBuffer();
       const isVideo = ['.mp4', '.mov', '.webm'].includes(ext);
       const mediaFile = await storage.saveMediaFile(
-        script.projectId, script.id, sceneId, filename, buffer, originalName, isVideo ? 'video' : 'image',
+        current.projectId, current.id, sceneId, filename, buffer, originalName, isVideo ? 'video' : 'image',
       );
+      const latest = scriptRef.current;
       onScriptChange({
-        ...script,
-        scenes: script.scenes.map(s =>
+        ...latest,
+        scenes: latest.scenes.map(s =>
           s.id === sceneId ? { ...s, directorMediaFiles: [...(s.directorMediaFiles ?? []), mediaFile] } : s
         ),
       });
     } finally {
       setSavingUrl(null);
     }
-  }, [script, onScriptChange, storage]);
+  }, [onScriptChange, storage]);
 
   const generateAudio = useCallback(async (sceneId: string, narration: string, sceneNumber: number) => {
     setGeneratingAudioFor(sceneId);
     setAudioMsg(null);
     try {
       const settings = await storage.getSettings();
+      const current = scriptRef.current;
       const res = await fetch(
-        `/api/projects/${script.projectId}/scripts/${script.id}/scenes/${sceneId}/audio`,
+        `/api/projects/${current.projectId}/scripts/${current.id}/scenes/${sceneId}/audio`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1068,15 +1076,16 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
       }
       const filename = res.headers.get('X-Filename') ?? `audio_scene_${String(sceneNumber).padStart(3, '0')}.mp3`;
       const buffer = await res.arrayBuffer();
-      await storage.saveAudioFile(script.projectId, script.id, sceneId, filename, buffer);
-      onScriptChange({ ...script, scenes: script.scenes.map(s => s.id === sceneId ? { ...s, audioFile: filename } : s) });
+      const latest = scriptRef.current;
+      await storage.saveAudioFile(latest.projectId, latest.id, sceneId, filename, buffer);
+      onScriptChange({ ...latest, scenes: latest.scenes.map(s => s.id === sceneId ? { ...s, audioFile: filename } : s) });
       setAudioMsg({ sceneId, text: `Saved: ${filename}`, ok: true });
     } catch {
       setAudioMsg({ sceneId, text: 'Audio generation failed', ok: false });
     } finally {
       setGeneratingAudioFor(null);
     }
-  }, [script, onScriptChange, storage]);
+  }, [onScriptChange, storage]);
 
 
 
@@ -1096,25 +1105,25 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
     });
 
   const updateSegment = useCallback((sceneId: string, updatedSegment: DirectorSegment) => {
-    // Update in directorSegments (new) or directorPlan (legacy)
-    const targetScene = script.scenes.find(s => s.id === sceneId);
+    const latest = scriptRef.current;
+    const targetScene = latest.scenes.find(s => s.id === sceneId);
     if (targetScene?.directorSegments) {
       onScriptChange({
-        ...script,
-        scenes: script.scenes.map(s =>
+        ...latest,
+        scenes: latest.scenes.map(s =>
           s.id === sceneId
             ? { ...s, directorSegments: s.directorSegments!.map(seg => seg.id === updatedSegment.id ? updatedSegment : seg) }
             : s
         ),
       });
     } else {
-      const newPlan = (script.directorPlan ?? []).map(s => {
+      const newPlan = (latest.directorPlan ?? []).map(s => {
         if (s.sceneId !== sceneId) return s;
         return { ...s, segments: s.segments.map(seg => seg.id === updatedSegment.id ? updatedSegment : seg) };
       });
-      onScriptChange({ ...script, directorPlan: newPlan });
+      onScriptChange({ ...latest, directorPlan: newPlan });
     }
-  }, [script, onScriptChange]);
+  }, [onScriptChange]);
 
   if (plan.length === 0) {
     return (

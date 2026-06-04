@@ -434,7 +434,7 @@ Return ONLY valid JSON:
     "beatLength": "X–Y sentences before a thought break, scene cut, or topic shift — describe what triggers the break",
     "microRhythmBlueprint": "Describe the sentence-length cadence pattern in each script section: HOOK (e.g. 'rapid-fire short sentences 5–8 words, staccato urgency'), BODY (e.g. 'alternates long explanatory sentences 15–20 words with short punchy summaries 4–7 words'), CLIMAX (e.g. 'returns to short punchy sentences at peak tension'), OUTRO (e.g. 'medium-length wrap sentences, warm and conclusive'). Use actual word counts from the transcripts."
   },
-  "narrativeLens": "1-2 sentences describing WHO the camera stays on and WHY. Identify the primary subject of every script this channel produces (e.g. 'The killer is always the primary subject — their psychology, social camouflage, and ordinariness. Victims and geography exist as backdrop to the central question: how did this person live among us undetected?'). Be specific enough that a writer knows immediately whose interiority to inhabit and what question the script is fundamentally trying to answer. Include what the channel NEVER centres (e.g. 'never victim-focused, never systemic critique — always the perpetrator's hidden life').",
+  "narrativeLens": "1-2 sentences describing WHO the camera stays on and WHY. Identify the primary subject of every script this channel produces (e.g. 'The founder is always the primary subject — their decision-making, blind spots, and personality. Market forces and competitors exist as backdrop.' or 'The dish is always the primary subject — its ingredients, technique, and cultural origin. The chef exists to illuminate the food, not the reverse.'). Be specific enough that a writer knows immediately whose interiority or story to inhabit and what question the script is fundamentally trying to answer. Include what the channel NEVER centres.",
   "voiceExcerpts": [
     "HOOK: A verbatim passage (100–200 words) from the opening of one of the transcriptExcerpt fields — the very first sentences of the video, before any context has been established. Copy it exactly. This is the most important excerpt: the writer needs to see exactly how this channel opens, word for word.",
     "BODY-SETUP: A 200–300 word verbatim passage from the early body of a transcript — the first scene after the hook, where context and character are being established. Copy exactly as it appears. Shows how this channel transitions from hook into storytelling.",
@@ -452,7 +452,17 @@ Return ONLY valid JSON:
   },
   "styleFingerprint": ["Distinctive quality 1 — something a reader could identify in a blind test as belonging to this channel", "Quality 2", "Quality 3", "Quality 4"],
   "replicationFormula": "Describe the creative PROCESS — how to find the right angle, how to open the narrative tension, how to sustain it. Focus on decisions a writer makes, not sentence-level patterns.",
-  "thingsToSteal": ["Principle 1: describe what makes it effective and how to apply it to a new topic — not what it looks like on the surface", "Principle 2", "Principle 3", "Principle 4", "Principle 5"]
+  "thingsToSteal": ["Principle 1: describe what makes it effective and how to apply it to a new topic — not what it looks like on the surface", "Principle 2", "Principle 3", "Principle 4", "Principle 5"],
+  "narrativeStructure": {
+    "hookAnchorType": "What does the FIRST SENTENCE of every hook anchor on in these transcripts? Options include: a physical object or artifact, a concrete moment-in-progress, a stark ironic contrast, a pattern or trend being observed, a provocative question, a data point or statistic. Name the exact type this channel uses and explain why it works — what psychological gap does it open? Be specific to what you actually see in the transcripts.",
+    "hookNameRevealTiming": "When and exactly how does the central subject's name or identity first appear? Is it in the first sentence, withheld for ~X words, or revealed via a specific formula? Quote the reveal pattern verbatim if it appears consistently (e.g. 'His name was X. And by the time...' or 'That company was [name].'). If there is no consistent pattern, describe what varies and why.",
+    "hookCloseFormula": "How do hooks close before the story body begins? Does this channel end hooks with a scale statement (number of people, time span, money, geography), a question, a stakes promise, an ironic reversal, or something else? Extract the structural closing move from what you actually see in the transcripts.",
+    "backstoryBlueprint": "How does this channel structure backstory or origin sections? What information appears and in what order — founding date, place, key people (ordinary or notable), the first sign of the central tension, how development is tracked over time? How specific are the anchors (exact dates, ages, incidents)? Be prescriptive enough that a writer can replicate the architecture for any topic.",
+    "settingFunctionBlueprint": "Does this channel describe settings as atmosphere/mood — sensory details for immersion — OR as systems/mechanisms that explain how or why events happened? If the latter, what is the structural formula? Quote an example pattern if visible: e.g. '[Place] in [year] was [condition] — [how this condition shaped events]'. Describe the approach precisely.",
+    "subjectIntroBlueprint": "How are individual people (subjects, case studies, interviewees, companies, etc.) introduced? What is the data set — name, age/year-founded, what they were doing at the time, a temporal anchor, their intersection with the central story? Is there a consistent sentence-structure formula? Extract it from the transcripts.",
+    "institutionalBeat": "Does this channel use a beat involving an organisation, system, institution, or process — for example: a report that existed but was ignored, a company that succeeded where others failed, a regulatory failure, a bureaucratic irony? If so, what is the structural formula — how is the institutional moment set up and paid off? If this channel does not use such beats, write null.",
+    "bodySceneTypeFormulas": "List the distinct scene TYPES this channel uses in its body sections (e.g. origin/backstory, setting/context, incident sequence, institutional beat, double-life reveal, resolution/outcome, legacy). For each type, describe the structural formula: what the scene opens with, what information it delivers and in what order, and how it ends. Focus on architecture, not style."
+  }
 }`,
       },
     ],
@@ -660,9 +670,9 @@ ${vg?.editingRhythm ? `- Editing rhythm: ${vg.editingRhythm}` : ''}
 ${vg?.graphicsAndTextUsage ? `- Graphics/text usage: ${vg.graphicsAndTextUsage}` : ''}
 
 AVAILABLE ASSET TYPES — use each type for the right situation:
-- "real-image"  → named real people, documented events, specific locations. searchQuery = "Samuel Little 1982 mugshot" / "Guadalupe County Texas courthouse"
-- "stock-video" → moving B-roll that evokes motion, atmosphere, or passage of time. searchQuery = visual mood, NOT the narration subject — "crowded city street night", "prison cell corridor", "highway empty dusk"
-- "stock-photo" → a single still that establishes place, object, or mood — use when motion is unnecessary. searchQuery = "old motel room dark", "FBI evidence board", "newspaper clipping crime"
+- "real-image"  → named real people, documented events, specific locations. searchQuery = "Steve Jobs 2007 iPhone keynote" / "Neil Armstrong moon landing 1969"
+- "stock-video" → moving B-roll that evokes motion, atmosphere, or passage of time. searchQuery = visual mood, NOT the narration subject — "crowded city street night", "empty highway dusk", "factory floor workers"
+- "stock-photo" → a single still that establishes place, object, or mood — use when motion is unnecessary. searchQuery = "empty boardroom glass table", "vintage newspaper front page", "abandoned warehouse dusk"
 - "ai-video"    → slow cinematic pans, abstract or impossible visuals, dramatic reconstructions, stylised sequences that stock libraries cannot provide
 - "ai-image"    → illustrated or stylised stills; use when the visual concept is too specific, abstract, or stylised for stock libraries and does not need motion
 
@@ -735,7 +745,7 @@ Return ONLY valid JSON:
     // especially now that multi-shot segments are mandatory and increase asset count further.
     max_tokens: directorMode
       ? Math.min(64000, Math.max(18000, Math.round(settings.targetWordCount * 20)))
-      : Math.min(16000, Math.max(8000, Math.round(settings.targetWordCount * 4))),
+      : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 6))),
     system:
       'You are an expert YouTube scriptwriter. Respond ONLY with valid JSON, no markdown code blocks, no prose.',
     messages: [
@@ -785,7 +795,7 @@ All sceneDescriptions and thumbnailConcept must be written assuming this visual 
 
 ` : ''}${strategy.narrativeLens ? `NARRATIVE LENS — this defines the channel's primary subject and default perspective:
 ${strategy.narrativeLens}
-When the narration is ambiguous about whose perspective or interiority to inhabit, default to this subject. When the narration explicitly describes another person (e.g. the victim's mother, the detective, a bystander), follow the narration — do not force the primary subject into scenes where they are not present. The lens is a default, not an override.
+When the narration is ambiguous about whose perspective or interiority to inhabit, default to this subject. When the narration explicitly describes another person or place, follow the narration — do not force the primary subject into scenes where they are not present. The lens is a default, not an override.
 
 ` : ''}${strategy.proseFingerprint ? `PROSE QUALITY — this describes the texture of the writing at the sentence level. Apply every point below to every sentence you write:
 ${strategy.proseFingerprint}
@@ -847,7 +857,7 @@ ${strategy.engagementPatterns.map((p: string) => `- ${p}`).join('\n')}
 This channel covers ${isStrict ? 'real documented events and real people' : 'a mix of real events and fictional content'}.
 ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to publish:
 - Do NOT invent any specific person's name, date, case number, exhibit label, court name, quote, or location that is not explicitly provided in the topic or additional instructions above.
-- Instead of inventing specifics, write around them using general language: "a man serving forty years" not a fabricated name; "in the late 1980s" not an invented year; "a prison in the Midwest" not a specific facility unless stated.
+- Instead of inventing specifics, write around them using general language: "a company founded in the 1980s" not a fabricated name; "in the late 1980s" not an invented year; "a facility in the Midwest" not a specific location unless stated.
 - You may describe documented patterns, systemic failures, emotional truths, and general timelines without inventing the specific details that fill them.
 - The script must be compelling without fabricating a single verifiable fact.
 ` : `PARTIAL RULES — apply to real-world segments only:
@@ -902,17 +912,35 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
     cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
   }
 
+  // First attempt — raw parse
   try {
     return {
       result: JSON.parse(cleaned) as GeneratedScriptPayload,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     };
-  } catch {
-    throw new Error(
-      `Failed to parse script JSON. Raw response starts with: ${cleaned.slice(0, 300)}`
+  } catch { /* fall through to repair */ }
+
+  // Second attempt — repair common model JSON errors:
+  // Replace literal control characters (newlines, tabs, carriage returns) inside JSON string values
+  // with their escaped equivalents. This handles the case where the model writes multi-line narration
+  // without escaping the newlines.
+  try {
+    const repaired = cleaned.replace(
+      /"((?:[^"\\]|\\.)*)"/gs,
+      (_match, inner: string) =>
+        `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`,
     );
-  }
+    return {
+      result: JSON.parse(repaired) as GeneratedScriptPayload,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
+  } catch { /* fall through to error */ }
+
+  throw new Error(
+    `Failed to parse script JSON. Raw response starts with: ${cleaned.slice(0, 300)}`
+  );
 }
 
 // ─── Voice Refinement (Pass 2) ───────────────────────────────────────────────
@@ -949,11 +977,18 @@ export async function refineScriptVoice(
   const rawBible = buildVoiceBible(analysis.videoAnalyses);
   const voiceExcerpts = analysis.channelInsights.voiceExcerpts ?? [];
 
+  const VOICE_CAP = 8000;
   let voiceMaterial = '';
-  if (rawBible) voiceMaterial += `RAW TRANSCRIPT PASSAGES — copied verbatim from published videos:\n${rawBible}`;
   if (voiceExcerpts.length > 0) {
     const block = voiceExcerpts.map((e, i) => `[Excerpt ${i + 1}]\n${e}`).join('\n\n');
-    voiceMaterial += (voiceMaterial ? '\n\n' : '') + `SYNTHESIZED VOICE EXAMPLES:\n${block}`;
+    const excerptText = `SYNTHESIZED VOICE EXAMPLES:\n${block}`;
+    voiceMaterial = excerptText.slice(0, VOICE_CAP);
+    const remaining = VOICE_CAP - voiceMaterial.length;
+    if (rawBible && remaining > 500) {
+      voiceMaterial = `RAW TRANSCRIPT PASSAGES:\n${rawBible.slice(0, remaining - 30)}\n\n` + voiceMaterial;
+    }
+  } else if (rawBible) {
+    voiceMaterial = `RAW TRANSCRIPT PASSAGES — copied verbatim from published videos:\n${rawBible.slice(0, VOICE_CAP)}`;
   }
   if (!voiceMaterial) return null;
 
@@ -995,15 +1030,55 @@ END OF CHANNEL VOICE
     .map(s => `SCENE ${s.number}: ${s.title}\n${s.narration}`)
     .join('\n\n---\n\n');
 
-  const commonRules = `TOPIC: ${topic}
-${proseFingerprint ? `\nPROSE FINGERPRINT — enforce every rule at the sentence level:\n${proseFingerprint}` : ''}${writingStyleBlock}${hookInstruction}
+  const ns2 = analysis.channelInsights.narrativeStructure;
+  const hs2 = analysis.channelInsights.hookStrategies;
+  const sst2 = analysis.channelInsights.scriptStructureTemplate;
 
-REWRITE RULES:
-1. Preserve all facts, story beats, and scene structure — do NOT add, remove, or reorder any plot points.
-2. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
-3. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE.
-4. Keep approximately the same word count per scene as the draft (within ±15%).
-5. Do NOT change scene numbers, titles, or structure.`;
+  const tr2 = (s: string, max = 300) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
+
+  const structuralBlock2 = (() => {
+    const parts: string[] = [];
+    if (ns2) {
+      const lines = [
+        `STRUCTURAL BLUEPRINTS:`,
+        ns2.hookAnchorType           ? `HOOK ANCHOR: ${tr2(ns2.hookAnchorType)}` : '',
+        ns2.hookNameRevealTiming     ? `NAME REVEAL: ${tr2(ns2.hookNameRevealTiming)}` : '',
+        ns2.hookCloseFormula         ? `HOOK CLOSE: ${tr2(ns2.hookCloseFormula)}` : '',
+        ns2.backstoryBlueprint       ? `BACKSTORY FORMULA: ${tr2(ns2.backstoryBlueprint)}` : '',
+        ns2.settingFunctionBlueprint ? `SETTING PATTERN: ${tr2(ns2.settingFunctionBlueprint)}` : '',
+        ns2.subjectIntroBlueprint    ? `SUBJECT INTRO: ${tr2(ns2.subjectIntroBlueprint)}` : '',
+        ns2.institutionalBeat && ns2.institutionalBeat !== 'null' ? `INSTITUTIONAL BEAT: ${tr2(ns2.institutionalBeat)}` : '',
+        ns2.bodySceneTypeFormulas    ? `SCENE TYPE FORMULAS: ${tr2(ns2.bodySceneTypeFormulas)}` : '',
+      ].filter(Boolean).join('\n');
+      parts.push(lines);
+    } else {
+      if (hs2?.length) parts.push(`HOOK STRATEGIES:\n${hs2.slice(0, 2).map((s, i) => `${i + 1}. ${tr2(s)}`).join('\n')}`);
+      if (sst2?.intro) parts.push(`HOOK ARCHITECTURE: ${tr2(sst2.intro)}`);
+      if (sst2?.body)  parts.push(`BODY ARCHITECTURE: ${tr2(sst2.body)}`);
+    }
+    return parts.length ? `\n\n${parts.join('\n\n')}` : '';
+  })();
+
+  const commonRules = `TOPIC: ${topic}
+${proseFingerprint ? `\nPROSE FINGERPRINT — enforce every rule at the sentence level:\n${proseFingerprint}` : ''}${writingStyleBlock}${hookInstruction}${structuralBlock2}
+
+REWRITE RULES — STRUCTURAL first, then sentence-level:
+1. ARCHITECTURE MATCH (most important): For each scene, identify its type (hook, backstory, setting, subject-intro, escalation, resolution, etc.) and apply the structural blueprint for that type from the section above. Match what each scene DOES before matching how it sounds.
+2. Hook (Scene 1): Anchor on the channel's hook anchor type. Apply name-reveal timing. Close with the hook-close formula.
+3. Settings: If this channel treats settings as mechanisms rather than atmosphere, rewrite to show HOW the context shaped events — not just what it looked like or felt like.
+4. Preserve all facts, story beats, and scene structure — do NOT add, remove, or reorder any plot points. Rhetorical devices and meta-commentary in the draft that align with the channel (e.g. "you think you know...", direct address, "the most disturbing part is not X but that he...") must be kept and amplified, not stripped.
+5. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
+6. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE. Vary sentence length the way the channel does: long, flowing, atmospheric sentences for setup and environment; short, punchy ones for reveals, horror beats, and key facts.
+7. Keep approximately the same word count per scene as the draft (within ±15%). Adjust phrasing to serve the rhythm even if it means slight expansion or contraction.
+8. Do NOT change scene numbers, titles, or structure.
+9. CHANNEL SIGNATURE DEVICES (study the Voice Bible excerpts and apply): 
+   - Openings and beats often start with a concrete, visual, damning detail or routine (a specific photograph, "he kissed his wife goodbye every morning before...", "for 13 years women were vanishing...", a man at the bar waving at neighbors). 
+   - Then deliver the contrast: the horror/monster was happening in plain sight, "right there", "living in the dead center of the city", "the man responsible was right there".
+   - For origins/background: frame as "context, not excuse" ("that matters, not as an excuse, as a context"); describe absorbing "the specific grammar of that household", "something in the walls, in the silences between adults", "contempt dressed as religion, violence dressed as discipline".
+   - Use the "most disturbing part is not what was happening to her — it is the fact that he took the time to set up the shot, to frame it, to make sure the lighting was right. This was not impulsive. This was a man who planned it, who savored it."
+   - "You think you know the names that defined [era/violence]... You don't know this one."
+   - End sections with the "no one knew", "the FBI had no file on him while he was moving", "nobody had a system for connecting them".
+10. Make the narration feel like it was written by the same person who wrote the Voice Bible passages — same restraint, same way of letting specific details do the work, same building of dread through the ordinary turned monstrous.`;
 
   // ── Director mode: rewrite narration AND generate all segments + assets + slots ──
   if (directorMode) {
@@ -1034,7 +1109,7 @@ RULES:
 
     const response = await ai.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: Math.min(64000, Math.max(18000, Math.round(settings.targetWordCount * 20))),
+      max_tokens: 64000,
       system: 'You are an expert YouTube scriptwriter and visual director. Respond ONLY with valid JSON, no markdown fences, no prose.',
       messages: [{
         role: 'user',
@@ -1058,9 +1133,9 @@ ${di.narrativeLens ? `- Narrative lens (default visual subject when narration is
 ${assetMixBlock}
 
 AVAILABLE ASSET TYPES:
-- "real-image"  → named real people, documented events, specific locations. searchQuery = "Edmund Kemper 1973 mugshot"
-- "stock-video" → moving B-roll — atmosphere, motion, passage of time. searchQuery = visual mood, NOT narration subject — "empty highway dusk", "prison corridor fluorescent"
-- "stock-photo" → a single still for place, object, or mood. searchQuery = "FBI evidence board 1970s", "old motel room dark"
+- "real-image"  → named real people, documented events, specific locations. searchQuery = "Steve Jobs 2007 keynote" / "Chernobyl reactor 1986 aerial"
+- "stock-video" → moving B-roll — atmosphere, motion, passage of time. searchQuery = visual mood, NOT narration subject — "empty highway dusk", "factory floor workers night shift"
+- "stock-photo" → a single still for place, object, or mood. searchQuery = "vintage stock ticker 1970s", "abandoned office building"
 - "ai-video"    → cinematic pans, abstract/impossible visuals, dramatic reconstructions
 - "ai-image"    → illustrated or stylised stills when stock or real won't fit
 
@@ -1091,7 +1166,7 @@ Return ONLY valid JSON:
           "text": "Voice-matched narration for this segment.",
           "durationSeconds": 10,
           "assets": [
-            { "rank": 1, "type": "real-image", "note": "subject 1964 portrait", "searchQuery": "Edmund Kemper 1964" },
+            { "rank": 1, "type": "real-image", "note": "subject early career portrait", "searchQuery": "Steve Jobs 1984 Macintosh launch" },
             { "rank": 2, "type": "stock-photo", "note": "suburban street 1960s", "searchQuery": "suburban California 1960s street" }
           ]
         },
@@ -1099,7 +1174,7 @@ Return ONLY valid JSON:
           "text": "First sentence here. Second sentence here. Third sentence here.",
           "durationSeconds": 22,
           "assets": [
-            { "rank": 1, "type": "real-image", "note": "crime scene exterior", "searchQuery": "Santa Cruz 1972", "slot": 0, "narrationSlice": "First sentence here." },
+            { "rank": 1, "type": "real-image", "note": "location establishing shot", "searchQuery": "downtown Chicago 1972", "slot": 0, "narrationSlice": "First sentence here." },
             { "rank": 2, "type": "stock-photo", "note": "rural road dusk", "searchQuery": "rural highway dusk", "slot": 0, "narrationSlice": "First sentence here." },
             { "rank": 1, "type": "stock-video", "note": "police lights night", "searchQuery": "police lights night highway", "slot": 1, "narrationSlice": "Second sentence here. Third sentence here." },
             { "rank": 2, "type": "ai-image", "note": "dread atmospheric", "slot": 1, "narrationSlice": "Second sentence here. Third sentence here." }
@@ -1131,7 +1206,7 @@ Return ONLY valid JSON:
   // ── Regular mode: scene-level narration rewrite ───────────────────────────
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: Math.min(16000, Math.max(6000, Math.round(settings.targetWordCount * 2))),
+    max_tokens: 64000,
     system: 'You are a voice editor. Respond ONLY with valid JSON, no markdown fences, no prose.',
     messages: [{
       role: 'user',
@@ -1165,6 +1240,290 @@ Return ONLY valid JSON:
   const parsed = JSON.parse(cleaned) as { scenes: RefinedSceneNarration[] };
   return {
     result: parsed.scenes,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+}
+
+// ─── Voice Refinement — single scene (Pass 2, per-scene) ────────────────────
+
+export async function refineSceneVoice(
+  apiKey: string,
+  topic: string,
+  analysis: Analysis,
+  targetScene: Scene,
+  allScenes: Scene[],
+  settings: ScriptSettings,
+  directorMode = false,
+  assetMixOverride?: Record<string, number>,
+): Promise<{ result: RefinedSceneNarration; inputTokens: number; outputTokens: number } | null> {
+  const rawBible = buildVoiceBible(analysis.videoAnalyses);
+  const voiceExcerpts = analysis.channelInsights.voiceExcerpts ?? [];
+
+  // Cap voice material at ~8 000 chars so the cached block stays lean.
+  // Synthesized excerpts are higher quality than raw captions — prefer them first.
+  const VOICE_CAP = 8000;
+  let voiceMaterial = '';
+  if (voiceExcerpts.length > 0) {
+    const block = voiceExcerpts.map((e, i) => `[Excerpt ${i + 1}]\n${e}`).join('\n\n');
+    const excerptText = `SYNTHESIZED VOICE EXAMPLES:\n${block}`;
+    voiceMaterial = excerptText.slice(0, VOICE_CAP);
+    const remaining = VOICE_CAP - voiceMaterial.length;
+    if (rawBible && remaining > 500) {
+      voiceMaterial = `RAW TRANSCRIPT PASSAGES:\n${rawBible.slice(0, remaining - 30)}\n\n` + voiceMaterial;
+    }
+  } else if (rawBible) {
+    voiceMaterial = `RAW TRANSCRIPT PASSAGES — copied verbatim from published videos:\n${rawBible.slice(0, VOICE_CAP)}`;
+  }
+  if (!voiceMaterial) return null;
+
+  const ai = client(apiKey);
+  const ws = analysis.channelInsights.writingStyle;
+  const proseFingerprint = ws?.proseFingerprint ?? '';
+  const openingFormula = ws?.openingFormula ?? '';
+
+  const writingStyleBlock = ws ? `\nWRITING STYLE:
+- Sentence structure: ${ws.sentenceStructure}
+- Vocabulary: ${ws.vocabularyLevel}
+- Directness: ${ws.directnessLevel}
+- Pace and rhythm: ${ws.paceAndRhythm}
+${ws.avgSentenceLengthWords ? `- Target avg sentence length: ~${ws.avgSentenceLengthWords} words` : ''}
+${ws.sentenceLengthVariance ? `- Sentence length variance: ${ws.sentenceLengthVariance}` : ''}
+${ws.microRhythmBlueprint ? `- Micro-rhythm blueprint: ${ws.microRhythmBlueprint}` : ''}` : '';
+
+  const hookInstruction = targetScene.number === 1
+    ? (openingFormula
+        ? `\nSCENE 1 HOOK — HARD STRUCTURAL RULES (override everything else for Scene 1):
+${openingFormula}
+STEP 1 — Read this scene. Identify the single most haunting, specific detail. That is your hook anchor.
+STEP 2 — Write the opening sentence using the channel's opening type. The subject's name must NOT appear.
+STEP 3 — Build tension for 3-6 sentences using physical specificity tied to the anchor. Still no name.
+STEP 4 — Reveal the name in its own standalone sentence using the exact channel formula.
+STEP 5 — Close with 1-2 sentences establishing scale: victims, years, reach of impact.`
+        : `\nINSTRUCTION FOR SCENE 1: Find the single most haunting, specific detail in this scene. Anchor the opening on that — not a generic formula.`)
+    : '';
+
+  const voiceBlock = `================================================================
+CHANNEL VOICE — these are the channel's actual words. Your output must be INDISTINGUISHABLE from these.
+================================================================
+${voiceMaterial}
+================================================================
+END OF CHANNEL VOICE
+================================================================`;
+
+  const otherScenes = allScenes.filter(s => s.id !== targetScene.id);
+  const narrativeContext = otherScenes.length > 0
+    ? `STORY CONTEXT — other scenes for narrative continuity (do NOT rewrite these):
+${otherScenes.map(s => `Scene ${s.number}: ${s.title} — ${s.narration}`).join('\n')}`
+    : '';
+
+  // ── Split prompt: stable prefix (cached) vs per-scene suffix (not cached) ──
+  // The Voice Bible + channel analysis are identical across all scene calls — cache them.
+  // Only the hook instruction (scene 1), narrative context, and target scene vary per call.
+
+  const ns = analysis.channelInsights.narrativeStructure;
+  const hs = analysis.channelInsights.hookStrategies;
+  const sst = analysis.channelInsights.scriptStructureTemplate;
+
+  // Truncate helper — keeps the structural block concise to avoid oversized prompts
+  const tr = (s: string, max = 300) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
+
+  const structuralBlueprintBlock = (() => {
+    const parts: string[] = [];
+    // Use narrativeStructure (precise) if available; fall back to hookStrategies / scriptStructureTemplate
+    if (ns) {
+      const nsLines = [
+        `STRUCTURAL BLUEPRINTS:`,
+        ns.hookAnchorType           ? `HOOK ANCHOR: ${tr(ns.hookAnchorType)}` : '',
+        ns.hookNameRevealTiming     ? `NAME REVEAL: ${tr(ns.hookNameRevealTiming)}` : '',
+        ns.hookCloseFormula         ? `HOOK CLOSE: ${tr(ns.hookCloseFormula)}` : '',
+        ns.backstoryBlueprint       ? `BACKSTORY FORMULA: ${tr(ns.backstoryBlueprint)}` : '',
+        ns.settingFunctionBlueprint ? `SETTING PATTERN: ${tr(ns.settingFunctionBlueprint)}` : '',
+        ns.subjectIntroBlueprint    ? `SUBJECT INTRO: ${tr(ns.subjectIntroBlueprint)}` : '',
+        ns.institutionalBeat && ns.institutionalBeat !== 'null' ? `INSTITUTIONAL BEAT: ${tr(ns.institutionalBeat)}` : '',
+        ns.bodySceneTypeFormulas    ? `SCENE TYPE FORMULAS: ${tr(ns.bodySceneTypeFormulas)}` : '',
+      ].filter(Boolean).join('\n');
+      parts.push(nsLines);
+    } else {
+      // Fall back to coarser fields only when narrativeStructure isn't available
+      if (hs?.length) parts.push(`HOOK STRATEGIES:\n${hs.slice(0, 2).map((s, i) => `${i + 1}. ${tr(s)}`).join('\n')}`);
+      if (sst?.intro) parts.push(`HOOK ARCHITECTURE: ${tr(sst.intro)}`);
+      if (sst?.body)  parts.push(`BODY ARCHITECTURE: ${tr(sst.body)}`);
+    }
+    return parts.length ? `\n\n${parts.join('\n\n')}` : '';
+  })();
+
+  const baseRules = `TOPIC: ${topic}
+${proseFingerprint ? `\nPROSE FINGERPRINT — enforce every rule at the sentence level:\n${proseFingerprint}` : ''}${writingStyleBlock}${structuralBlueprintBlock}
+
+REWRITE RULES — STRUCTURAL first, then sentence-level:
+1. ARCHITECTURE MATCH (most important): Identify what TYPE of scene this is (hook, backstory, setting, subject-intro, escalation, resolution, etc.). Apply the structural blueprint for that scene type from the section above. Match what the scene DOES architecturally, not just how it sounds.
+2. Hook scenes (Scene 1): Anchor on the channel's hook anchor type. Apply the name-reveal timing. Close with the hook-close formula.
+3. Setting scenes: If this channel treats settings as mechanisms rather than atmosphere, rewrite to show HOW the place or context shaped events — not just what it looked like or felt like.
+4. Preserve all facts, story beats, and scene structure — do NOT add, remove, or reorder any plot points. Rhetorical devices and meta-commentary in the draft that align with the channel (e.g. "you think you know...", direct address, "the most disturbing part is not X but that he...") must be kept and amplified, not stripped.
+5. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
+6. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE. Vary sentence length the way the channel does: long, flowing, atmospheric sentences for setup and environment; short, punchy ones for reveals, horror beats, and key facts.
+7. Keep approximately the same word count as the draft (within ±15%). Adjust phrasing to serve the rhythm even if it means slight expansion or contraction.
+8. Do NOT change the scene number or title.
+9. CHANNEL SIGNATURE DEVICES (study the Voice Bible excerpts and apply): 
+   - Openings and beats often start with a concrete, visual, damning detail or routine (a specific photograph, "he kissed his wife goodbye every morning before...", "for 13 years women were vanishing...", a man at the bar waving at neighbors). 
+   - Then deliver the contrast: the horror/monster was happening in plain sight, "right there", "living in the dead center of the city", "the man responsible was right there".
+   - For origins/background: frame as "context, not excuse" ("that matters, not as an excuse, as a context"); describe absorbing "the specific grammar of that household", "something in the walls, in the silences between adults", "contempt dressed as religion, violence dressed as discipline".
+   - Use the "most disturbing part is not what was happening to her — it is the fact that he took the time to set up the shot, to frame it, to make sure the lighting was right. This was not impulsive. This was a man who planned it, who savored it."
+   - "You think you know the names that defined [era/violence]... You don't know this one."
+   - End sections with the "no one knew", "the FBI had no file on him while he was moving", "nobody had a system for connecting them".
+10. Make the narration feel like it was written by the same person who wrote the Voice Bible passages — same restraint, same way of letting specific details do the work, same building of dread through the ordinary turned monstrous.`;
+
+  if (directorMode) {
+    const di = analysis.channelInsights;
+    const vg = di.visualSceneGuide;
+    const cn = di.contentNature?.classification ?? 'unknown';
+    const ps = di.visualBrand?.productionStyle ?? 'not specified';
+    const cutRate = vg?.cutRateShotsPerMinute;
+    const secsPerShot = cutRate ? Math.round(60 / cutRate) : 12;
+    const triggerSecs = Math.round(secsPerShot * 1.8);
+
+    // Stable across all scenes — put in cached block
+    const staticDirectorBlock = `CHANNEL VISUAL DNA:
+- Production style: ${ps}
+- Content nature: ${cn}${di.contentNature?.reasoning ? ` — ${di.contentNature.reasoning}` : ''}
+- Energy / tone: ${di.contentStyle?.energy ?? ''}${di.contentStyle?.tone ? ` · ${di.contentStyle.tone}` : ''}
+${vg?.brollPattern ? `- Broll pattern: ${vg.brollPattern}` : ''}
+${vg?.editingRhythm ? `- Editing rhythm: ${vg.editingRhythm}` : ''}
+${di.narrativeLens ? `- Narrative lens: ${di.narrativeLens}` : ''}
+
+AVAILABLE ASSET TYPES:
+- "real-image"  → named real people, documented events, specific locations. searchQuery = "Edmund Kemper 1973 mugshot"
+- "stock-video" → moving B-roll — atmosphere, motion, passage of time. searchQuery = visual mood, NOT narration subject — "empty highway dusk"
+- "stock-photo" → a single still for place, object, or mood. searchQuery = "FBI evidence board 1970s"
+- "ai-video"    → cinematic pans, abstract/impossible visuals, dramatic reconstructions
+- "ai-image"    → illustrated or stylised stills
+
+SEGMENT RULES:
+- Each segment = 1–4 complete sentences forming one coherent visual idea.
+- Segment boundaries MUST fall at sentence ends — never mid-sentence.
+- Segments concatenated = the full rewritten scene narration with no gaps or added words.
+- Every segment MUST have exactly 2 assets (rank 1, rank 2).
+- Asset "note": ≤5 words — the director's brief.
+- "searchQuery": required for stock-video, stock-photo, real-image; omit for ai-video and ai-image.
+- durationSeconds = round((segmentWordCount / ${settings.wpm}) × 60)
+
+MULTI-SHOT SLOTS — this channel cuts every ~${secsPerShot}s:
+  IF durationSeconds < ${triggerSecs}  →  single-shot. 2 assets, no "slot" or "narrationSlice".
+  IF durationSeconds ≥ ${triggerSecs}  →  multi-shot. REQUIRED.
+    - slots = floor(durationSeconds ÷ ${secsPerShot}), minimum 2.
+    - Divide the segment's text into that many groups of consecutive sentences at natural thought breaks.
+    - Every asset gets "slot" (0-indexed) and "narrationSlice" (exact verbatim sentences from that slot).
+    - 2 assets per slot. Every sentence covered exactly once.`;
+
+    // Per-scene asset mix (varies: estimatedSegments differs per scene)
+    const rawMix = assetMixOverride ?? di.visualAssetMix;
+    const assetMixBlock = rawMix ? (() => {
+      const sceneWords = targetScene.wordCount ?? Math.round(settings.targetWordCount / Math.max(1, allScenes.length));
+      const estimatedSegments = Math.max(3, Math.round(sceneWords / 55));
+      const types = (['ai-video', 'ai-image', 'stock-video', 'stock-photo', 'real-image'] as const).filter(t => (rawMix[t] ?? 0) > 0);
+      const reasoning = !assetMixOverride && di.visualAssetMix ? di.visualAssetMix.reasoning : 'Custom mix set by the user.';
+      return `
+TARGET ASSET MIX${assetMixOverride ? ' (user-specified)' : ' — match this channel distribution'}:
+Estimated segments in this scene: ~${estimatedSegments}. Your rank-1 choices must hit approximately:
+${types.map(t => `  • ${t}: ${rawMix[t]}%  →  ~${Math.round(estimatedSegments * (rawMix[t] as number) / 100)} segments`).join('\n')}
+Reasoning: ${reasoning}
+
+RULES: ai-video must appear. stock-photo must appear. ai-image must not crowd out other types.`;
+    })() : '';
+
+    const response = await ai.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 16000,
+      system: 'You are an expert YouTube scriptwriter and visual director. Respond ONLY with valid JSON, no markdown fences, no prose.',
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            // Stable across all scenes for this script — will be cache-hit after scene 1
+            type: 'text' as const,
+            text: `Rewrite a scene to match the channel's voice exactly, and break it into director-mode visual segments with asset assignments.\n\n${voiceBlock}\n\n${baseRules}\n\n${staticDirectorBlock}`,
+            cache_control: { type: 'ephemeral' as const },
+          },
+          {
+            // Per-scene content — changes every call
+            type: 'text' as const,
+            text: `${hookInstruction ? hookInstruction + '\n\n' : ''}${assetMixBlock ? assetMixBlock + '\n\n' : ''}${narrativeContext ? narrativeContext + '\n\n' : ''}TARGET SCENE TO REWRITE:
+SCENE ${targetScene.number}: ${targetScene.title}
+${targetScene.narration}
+
+Return ONLY valid JSON:
+{
+  "number": ${targetScene.number},
+  "segments": [
+    {
+      "text": "Voice-matched narration for this segment.",
+      "durationSeconds": 10,
+      "assets": [
+        { "rank": 1, "type": "real-image", "note": "subject portrait", "searchQuery": "..." },
+        { "rank": 2, "type": "stock-photo", "note": "location exterior", "searchQuery": "..." }
+      ]
+    }
+  ]
+}`,
+          },
+        ],
+      }],
+    }, { timeout: 100_000 });
+
+    if (response.stop_reason === 'max_tokens') {
+      throw new Error(`Scene ${targetScene.number} refinement was truncated.`);
+    }
+
+    const raw = response.content[0].type === 'text' ? response.content[0].text : '';
+    let cleaned = raw.trim();
+    if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+    const parsed = JSON.parse(cleaned) as { number: number; segments: DirectorScriptSegment[] };
+    return {
+      result: { number: parsed.number, narration: '', segments: parsed.segments },
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
+  }
+
+  // ── Regular mode: narration rewrite only ──────────────────────────────────
+  const response = await ai.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 8000,
+    system: 'You are a voice editor. Respond ONLY with valid JSON, no markdown fences, no prose.',
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          // Stable across all scenes for this script — will be cache-hit after scene 1
+          type: 'text' as const,
+          text: `Rewrite a scene so it is INDISTINGUISHABLE from the channel's voice.\n\n${voiceBlock}\n\n${baseRules}`,
+          cache_control: { type: 'ephemeral' as const },
+        },
+        {
+          // Per-scene content — changes every call
+          type: 'text' as const,
+          text: `${hookInstruction ? hookInstruction + '\n\n' : ''}${narrativeContext ? narrativeContext + '\n\n' : ''}TARGET SCENE TO REWRITE:
+SCENE ${targetScene.number}: ${targetScene.title}
+${targetScene.narration}
+
+Return ONLY valid JSON:
+{ "number": ${targetScene.number}, "narration": "Rewritten narration..." }`,
+        },
+      ],
+    }],
+  }, { timeout: 100_000 });
+
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error(`Scene ${targetScene.number} refinement was truncated.`);
+  }
+
+  const raw = response.content[0].type === 'text' ? response.content[0].text : '';
+  let cleaned = raw.trim();
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+  const parsed = JSON.parse(cleaned) as { number: number; narration: string };
+  return {
+    result: { number: parsed.number, narration: parsed.narration },
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   };
@@ -1306,7 +1665,7 @@ ${(() => {
 ${usedFingerprints?.length ? `VISUAL HISTORY — Every shot already committed in this script (${usedFingerprints.length} shots total). You MUST avoid repeating their visual territory:
 ${usedFingerprints.join('\n')}
 
-DIRECTOR'S MANDATE: Do not merely vary camera angle — vary what you SHOW. If history shows a desk of documents, show the person who wrote them. If it shows a location, show who inhabits it with emotion. If it shows an action, show its consequence on a face. A room of evidence → the suspect's cold eyes. A crime scene → the investigator's hands trembling. A battlefield → a single soldier's silent grief. You are building visual tension through contrast. Surprise within the channel's visual DNA — never outside it.
+DIRECTOR'S MANDATE: Do not merely vary camera angle — vary what you SHOW. If narration describes a place, show who inhabits it with emotion. If it describes a decision, show its consequence on a face. If it describes a system or organisation, show a single person caught inside it. An empty boardroom → the person who was fired. A product launch → the engineer who built it. A historical moment → someone living through its aftermath. You are building visual tension through contrast and specificity. Surprise within the channel's visual DNA — never outside it.
 
 ` : ''}${characters.length > 0 ? `
 CHARACTER SHEETS — VISUAL CONSISTENCY REFERENCE:
