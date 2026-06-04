@@ -3,9 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import type { Analysis, Script, DirectorAssetType } from '@/lib/types';
+import type { Analysis, Script, DirectorAssetType, DirectorSegment } from '@/lib/types';
 import { useStorage } from '@/components/StorageProvider';
 import { readSSE } from '@/lib/sse';
+
+// ─── Per-scene refinement types ─────────────────────────────────────────────
+
+type SceneRefineStatus = 'pending' | 'refining' | 'done' | 'approved' | 'error';
+type SceneRefinementResult = { number: number; narration: string; directorSegments?: DirectorSegment[] };
+type SceneRefineState = { status: SceneRefineStatus; result: SceneRefinementResult | null; error: string | null };
 
 type ScriptDraft = {
   topic: string;
@@ -139,6 +145,32 @@ export default function NewScriptPage() {
   const retryFnRef = useRef<(() => Promise<void>) | null>(null);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
+
+  // ── Per-scene refinement state ─────────────────────────────────────────────
+  const [refining, setRefining] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [pass1Script, setPass1Script] = useState<Script | null>(null);
+  const [refinementAnalysis, setRefinementAnalysis] = useState<Analysis | null>(null);
+  const [refinementAssetMix, setRefinementAssetMix] = useState<AssetMix | null>(null);
+  const [sceneRefineStates, setSceneRefineStates] = useState<SceneRefineState[]>([]);
+  const [activeRefineIdx, setActiveRefineIdx] = useState(0);
+  const [autoApprove, setAutoApprove] = useState(false);
+  // refs so async callbacks always read latest values
+  const pass1ScriptRef = useRef<Script | null>(null);
+  const refinementAnalysisRef = useRef<Analysis | null>(null);
+  const refinementAssetMixRef = useRef<AssetMix | null>(null);
+  const autoApproveRef = useRef(false);
+  const activeRefineIdxRef = useRef(0);
+  const refiningScenesRef = useRef<Set<number>>(new Set());
+  const savingRef = useRef(false);
+  const sceneStatusesRef = useRef<SceneRefineStatus[]>([]);
+  const refinementStartedRef = useRef(false);
+  pass1ScriptRef.current = pass1Script;
+  refinementAnalysisRef.current = refinementAnalysis;
+  refinementAssetMixRef.current = refinementAssetMix;
+  autoApproveRef.current = autoApprove;
+  activeRefineIdxRef.current = activeRefineIdx;
+  sceneStatusesRef.current = sceneRefineStates.map(s => s.status);
   const [suggestions, setSuggestions] = useState<{ topic: string; context: string }[]>([]);
   const [suggestionSeed, setSuggestionSeed] = useState<string | null>(null);
   const [loadingTopics, setLoadingTopics] = useState(false);
@@ -321,6 +353,140 @@ export default function NewScriptPage() {
     }
   };
 
+  // ── Refinement helpers ────────────────────────────────────────────────────
+
+  const startRefineAtRef = useRef<((idx: number) => Promise<void>) | null>(null);
+
+  const startRefineAt = async (idx: number) => {
+    const script = pass1ScriptRef.current;
+    const analysis = refinementAnalysisRef.current;
+    if (!script || !analysis || idx >= script.scenes.length) return;
+    // Use sceneStatusesRef (updated every render) for a synchronous pending check
+    if (sceneStatusesRef.current[idx] !== 'pending') return;
+    // Use the Set as a mutex — claim the slot before any await
+    if (refiningScenesRef.current.has(idx)) return;
+    refiningScenesRef.current.add(idx);
+    setSceneRefineStates(prev => {
+      const next = [...prev];
+      next[idx] = { status: 'refining', result: null, error: null };
+      return next;
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 110_000);
+    try {
+      const settings = await storage.getSettings();
+      const res = await fetch(`/api/projects/${id}/scripts/refine-scene`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          targetScene: script.scenes[idx],
+          allScenes: script.scenes.map(s => ({ id: s.id, number: s.number, title: s.title, narration: s.narration, wordCount: s.wordCount })),
+          analysis,
+          topic: script.topic,
+          settings: script.settings,
+          directorMode: script.directorMode ?? false,
+          ...(script.directorMode && refinementAssetMixRef.current ? { assetMixOverride: refinementAssetMixRef.current } : {}),
+          anthropicApiKey: settings.anthropicApiKey,
+        }),
+      });
+      const data = await res.json() as { number: number; narration: string; directorSegments?: DirectorSegment[]; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? 'Scene refinement failed');
+
+      const result: SceneRefinementResult = { number: data.number, narration: data.narration, directorSegments: data.directorSegments };
+
+      if (autoApproveRef.current) {
+        setSceneRefineStates(prev => {
+          const next = [...prev]; next[idx] = { status: 'approved', result, error: null }; return next;
+        });
+        void startRefineAtRef.current?.(idx + 1);
+      } else {
+        setSceneRefineStates(prev => {
+          const next = [...prev]; next[idx] = { status: 'done', result, error: null }; return next;
+        });
+        // Next scene starts only on explicit approve (strictly sequential, one at a time).
+      }
+    } catch (err) {
+      const msg = err instanceof Error
+        ? (err.name === 'AbortError' ? 'Timed out after 110s — Re-refine to retry' : err.message)
+        : 'Refinement failed';
+      setSceneRefineStates(prev => {
+        const next = [...prev];
+        next[idx] = { status: 'error', result: null, error: msg };
+        return next;
+      });
+    } finally {
+      clearTimeout(timeoutId);
+      refiningScenesRef.current.delete(idx);
+    }
+  };
+  startRefineAtRef.current = startRefineAt;
+
+  const approveSceneAt = (idx: number) => {
+    const script = pass1ScriptRef.current!;
+    setSceneRefineStates(prev => {
+      const next = [...prev];
+      if (next[idx]?.status === 'done') next[idx] = { ...next[idx], status: 'approved' };
+      return next;
+    });
+    const nextIdx = idx + 1;
+    if (nextIdx < script.scenes.length) {
+      setActiveRefineIdx(nextIdx);
+      void startRefineAt(nextIdx);
+    }
+  };
+
+  const reRefineAt = (idx: number) => {
+    refiningScenesRef.current.delete(idx);
+    setSceneRefineStates(prev => {
+      const next = [...prev]; next[idx] = { status: 'pending', result: null, error: null }; return next;
+    });
+    void startRefineAt(idx);
+  };
+
+  // Effect: kick off the first scene's refinement once state is committed.
+  // Using useEffect + guard ensures sceneRefineStates + sceneStatusesRef are populated
+  // before the pending check inside startRefineAt runs. Strictly sequential (one at a time);
+  // next only starts on approve (or auto-approve chain).
+  useEffect(() => {
+    if (!refining || sceneRefineStates.length === 0) return;
+    if (refinementStartedRef.current) return;
+    refinementStartedRef.current = true;
+    void startRefineAt(0);
+  }, [refining, sceneRefineStates.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Effect: auto-approve done scenes when toggle is switched on mid-flow
+  useEffect(() => {
+    if (!autoApprove || !refining) return;
+    setSceneRefineStates(prev => {
+      const anyDone = prev.some(s => s.status === 'done');
+      if (!anyDone) return prev;
+      return prev.map(s => s.status === 'done' ? { ...s, status: 'approved' } : s);
+    });
+  }, [autoApprove, refining]);
+
+  // Effect: all scenes approved → build final script, save, redirect
+  useEffect(() => {
+    if (!refining || !pass1Script || sceneRefineStates.length === 0 || savingRef.current) return;
+    if (!sceneRefineStates.every(s => s.status === 'approved')) return;
+    savingRef.current = true;
+    setSaving(true);
+    void (async () => {
+      const finalScript: Script = {
+        ...pass1Script,
+        scenes: pass1Script.scenes.map((scene, i) => {
+          const r = sceneRefineStates[i]?.result;
+          if (!r) return scene;
+          return { ...scene, narration: r.narration, ...(r.directorSegments?.length ? { directorSegments: r.directorSegments } : {}) };
+        }),
+      };
+      await storage.saveScript(id, finalScript);
+      scriptDraftCache.delete(draftKey);
+      router.push(`/projects/${id}/scripts/${finalScript.id}`);
+    })();
+  }, [sceneRefineStates, refining]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const generate = async (e: React.FormEvent) => {
     e.preventDefault();
     const analysis = getAnalysis();
@@ -334,6 +500,7 @@ export default function NewScriptPage() {
       ...form,
       analysis,
       directorMode,
+      skipPass2: true,
       detailLevel: DETAIL_LEVELS.find(l => l.id === detailLevel)?.instruction ?? '',
       ...(directorMode ? { assetMixOverride: assetMix } : {}),
     };
@@ -353,9 +520,16 @@ export default function NewScriptPage() {
           return;
         }
         const data = await readSSE<Script>(res, setProgress);
-        await storage.saveScript(id, data);
-        scriptDraftCache.delete(draftKey);
-        router.push(`/projects/${id}/scripts/${data.id}`);
+        // Transition to per-scene voice refinement
+        const chosenAnalysis = getAnalysis()!;
+        setPass1Script(data);
+        setRefinementAnalysis(chosenAnalysis);
+        setRefinementAssetMix(directorMode ? { ...assetMix } : null);
+        setSceneRefineStates(data.scenes.map(() => ({ status: 'pending' as const, result: null, error: null })));
+        setActiveRefineIdx(0);
+        setLoading(false);
+        setRefining(true);
+        // Kickoff of refinement is handled by the useEffect below (after state commits so statusesRef is populated).
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Script generation failed. Check your API key in Settings.';
         const isNetworkError = /failed to fetch|networkerror|load failed|network request failed/i.test(message);
@@ -419,19 +593,191 @@ export default function NewScriptPage() {
     ) : null
   );
 
+  // ── Refinement derived values ─────────────────────────────────────────────
+  const approvedCount = sceneRefineStates.filter(s => s.status === 'approved').length;
+  const totalScenes = pass1Script?.scenes.length ?? 0;
+  const activeSceneData = pass1Script?.scenes[activeRefineIdx] ?? null;
+  const activeState = sceneRefineStates[activeRefineIdx] ?? null;
+
+  const statusIcon = (s: SceneRefineStatus) => {
+    if (s === 'approved') return <span className="text-green-400 text-xs">✓</span>;
+    if (s === 'refining') return <span className="text-indigo-400 text-xs animate-spin inline-block">⟳</span>;
+    if (s === 'done')     return <span className="text-amber-400 text-xs">●</span>;
+    if (s === 'error')    return <span className="text-red-400 text-xs">✕</span>;
+    return <span className="text-[#3f3f46] text-xs">○</span>;
+  };
+
   return (
-    <div className="p-8 max-w-2xl mx-auto">
-      <div className="flex items-center gap-2 text-sm text-[#52525b] mb-8">
-        <Link href={`/projects/${id}`} className="hover:text-white transition-colors">← Project</Link>
-        <span>/</span>
-        <span>New Script</span>
+    <div className="p-8">
+      <div className="max-w-2xl mx-auto">
+        <div className="flex items-center gap-2 text-sm text-[#52525b] mb-8">
+          <Link href={`/projects/${id}`} className="hover:text-white transition-colors">← Project</Link>
+          <span>/</span>
+          <span>New Script</span>
+        </div>
+
+        {!(saving || refining) && (
+          <>
+            <h1 className="text-2xl font-semibold mb-1">Generate Script</h1>
+            <p className="text-[#71717a] text-sm mb-8">Claude will write a script modelled on the selected channel analysis.</p>
+          </>
+        )}
       </div>
 
-      <h1 className="text-2xl font-semibold mb-1">Generate Script</h1>
-      <p className="text-[#71717a] text-sm mb-8">Claude will write a script modelled on the selected channel analysis.</p>
+      {saving ? (
+        <div className="max-w-2xl mx-auto rounded-xl border p-12 text-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+          <div className="text-4xl mb-4 animate-pulse">💾</div>
+          <h2 className="font-semibold mb-2">Saving script…</h2>
+          <p className="text-sm text-[#71717a]">All {totalScenes} scenes approved. Saving and opening editor.</p>
+        </div>
 
-      {loading ? (
-        <div className="rounded-xl border p-12 text-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+      ) : refining && pass1Script ? (
+        /* ── Per-scene refinement UI ─────────────────────────────────────── */
+        <div className="max-w-5xl mx-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Voice Refinement</h1>
+              <p className="text-sm text-[#71717a] mt-0.5">
+                {approvedCount} of {totalScenes} scenes approved
+              </p>
+            </div>
+            {/* Auto-approve toggle */}
+            <button
+              type="button"
+              onClick={() => setAutoApprove(v => !v)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm transition-colors"
+              style={{ borderColor: autoApprove ? '#818cf8' : 'var(--border)', background: autoApprove ? 'rgba(99,102,241,0.1)' : 'var(--surface)' }}
+            >
+              <span style={{ position: 'relative', display: 'inline-block', width: 32, height: 16, borderRadius: 8, background: autoApprove ? '#6366f1' : '#374151', transition: 'background 0.2s', flexShrink: 0 }}>
+                <span style={{ position: 'absolute', top: 2, left: autoApprove ? 16 : 2, width: 12, height: 12, borderRadius: 6, background: 'white', transition: 'left 0.2s' }} />
+              </span>
+              <span className={autoApprove ? 'text-indigo-300' : 'text-[#71717a]'}>Auto-approve all</span>
+            </button>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-1 rounded-full mb-6" style={{ background: 'var(--border)' }}>
+            <div
+              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+              style={{ width: totalScenes ? `${(approvedCount / totalScenes) * 100}%` : '0%' }}
+            />
+          </div>
+
+          {/* Body */}
+          <div className="flex gap-4" style={{ minHeight: 520 }}>
+            {/* Scene list sidebar */}
+            <div className="w-44 flex-shrink-0 rounded-xl border overflow-hidden" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+              <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+                <p className="text-[10px] font-medium text-[#52525b] uppercase tracking-wider">Scenes</p>
+              </div>
+              <div className="overflow-y-auto" style={{ maxHeight: 480 }}>
+                {pass1Script.scenes.map((scene, i) => {
+                  const st = sceneRefineStates[i];
+                  const isActive = i === activeRefineIdx;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setActiveRefineIdx(i);
+                        if (st?.status === 'pending') void startRefineAt(i);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors border-l-2 ${
+                        isActive
+                          ? 'border-indigo-500 bg-indigo-500/10 text-white'
+                          : 'border-transparent hover:bg-white/5 text-[#a1a1aa]'
+                      }`}
+                    >
+                      <span className="flex-shrink-0 w-4">{st ? statusIcon(st.status) : null}</span>
+                      <span className="truncate">{scene.number}. {scene.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Active scene panel */}
+            <div className="flex-1 rounded-xl border overflow-hidden flex flex-col" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+              {activeSceneData && activeState ? (
+                <>
+                  {/* Scene header */}
+                  <div className="px-5 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+                    <div>
+                      <p className="text-[10px] text-[#52525b] uppercase tracking-wider">Scene {activeSceneData.number} of {totalScenes}</p>
+                      <p className="text-sm font-medium mt-0.5">{activeSceneData.title}</p>
+                    </div>
+                    {activeState.status === 'approved' && (
+                      <span className="text-xs text-green-400 flex items-center gap-1">✓ Approved</span>
+                    )}
+                  </div>
+
+                  {/* Content area */}
+                  <div className="flex-1 overflow-y-auto p-5">
+                    {activeState.status === 'pending' && (
+                      <div className="h-full flex items-center justify-center text-[#52525b] text-sm">
+                        Waiting to start…
+                      </div>
+                    )}
+
+                    {activeState.status === 'refining' && (
+                      <div className="h-full flex flex-col items-center justify-center gap-3 text-sm">
+                        <span className="text-3xl animate-spin inline-block">⟳</span>
+                        <p className="text-[#71717a]">Matching voice to channel…</p>
+                      </div>
+                    )}
+
+                    {(activeState.status === 'done' || activeState.status === 'approved' || activeState.status === 'error') && (
+                      <div className="grid grid-cols-2 gap-4 h-full">
+                        <div>
+                          <p className="text-[10px] font-medium text-[#52525b] uppercase tracking-wider mb-2">Original Draft</p>
+                          <p className="text-sm text-[#a1a1aa] leading-relaxed whitespace-pre-wrap">{activeSceneData.narration}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-medium text-indigo-400 uppercase tracking-wider mb-2">Voice-Matched</p>
+                          {activeState.status === 'error' ? (
+                            <p className="text-sm text-red-400">{activeState.error}</p>
+                          ) : (
+                            <p className="text-sm text-white leading-relaxed whitespace-pre-wrap">{activeState.result?.narration}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action bar */}
+                  {(activeState.status === 'done' || activeState.status === 'error') && !autoApprove && (
+                    <div className="px-5 py-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+                      <button
+                        type="button"
+                        onClick={() => reRefineAt(activeRefineIdx)}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg border text-sm text-[#71717a] hover:text-white transition-colors"
+                        style={{ borderColor: 'var(--border)' }}
+                      >
+                        ↺ Re-refine
+                      </button>
+                      {activeState.status === 'done' && (
+                        <button
+                          type="button"
+                          onClick={() => approveSceneAt(activeRefineIdx)}
+                          className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-sm font-medium transition-colors"
+                        >
+                          {activeRefineIdx < totalScenes - 1 ? 'Approve → Next' : '✓ Approve & Save'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="h-full flex items-center justify-center text-[#52525b] text-sm">
+                  Select a scene to review
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+      ) : loading ? (
+        <div className="max-w-2xl mx-auto rounded-xl border p-12 text-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
           {waitingToRetry ? (
             <>
               <div className="text-4xl mb-4">📡</div>
@@ -449,12 +795,13 @@ export default function NewScriptPage() {
               </h2>
               <p className="text-sm text-[#71717a]">{progress || `Generating ~${targetWords} words across scenes…`}</p>
               <p className="text-xs text-[#52525b] mt-2">
-                {directorMode ? 'Script + director plan — this takes 60–120 seconds' : 'This takes 30–60 seconds'}
+                {directorMode ? 'Script + director plan — this takes 30–60 seconds' : 'This takes 20–40 seconds'}
               </p>
             </>
           )}
         </div>
       ) : (
+        <div className="max-w-2xl mx-auto">
         <form onSubmit={generate} className="space-y-5">
           <StepIndicator />
 
@@ -856,6 +1203,7 @@ export default function NewScriptPage() {
             </>
           )}
         </form>
+        </div>
       )}
     </div>
   );

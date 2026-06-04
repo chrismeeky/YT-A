@@ -262,6 +262,17 @@ export interface ScriptStructureTemplate {
   loopMechanism?: string; // how carry-forward loops are constructed between scenes, if used
 }
 
+export interface NarrativeStructure {
+  hookAnchorType: string;           // what the FIRST sentence anchors on — physical object, in-progress moment, ironic contrast, pattern/trend, question
+  hookNameRevealTiming: string;     // when/how the central subject's name or identity first appears — immediate, withheld X words, revealed via specific formula
+  hookCloseFormula: string;         // how hooks close before moving into the story body — stakes, scale, time span, question, promise
+  backstoryBlueprint: string;       // how this channel structures backstory/origin sections: what information appears and in what order
+  settingFunctionBlueprint: string; // whether settings serve as atmosphere/mood OR as mechanisms/systems — and the structural formula used
+  subjectIntroBlueprint: string;    // how individual people (subjects, guests, case studies, etc.) are introduced: what data points and in what order
+  institutionalBeat?: string;       // does this channel use a beat involving organisations, systems, or processes (success/failure/irony)? How is it structured?
+  bodySceneTypeFormulas?: string;   // additional scene-type structural formulas specific to this channel's content type
+}
+
 export type ContentNature = 'fictional' | 'non-fictional' | 'mixed';
 
 export interface VisualAssetMix {
@@ -298,6 +309,7 @@ export interface ChannelInsights {
     reasoning: string;
   };
   narrativeLens?: string;        // who the camera stays on and why — the channel's primary subject and perspective
+  narrativeStructure?: NarrativeStructure; // structural blueprints: hook architecture, scene-type formulas, setting function, subject intro pattern
   voiceExcerpts?: string[];      // 2-3 verbatim transcript passages (200-300 words) showing the channel's actual voice
   openLoopProfile?: OpenLoopProfile;
   videoLength: { typical: string; reasoning: string };
