@@ -12,7 +12,7 @@ export function calcAnthropicCost(inputTokens: number, outputTokens: number, mod
 
 export interface UsageRecord {
   operation: string;
-  api: 'anthropic' | 'elevenlabs' | 'youtube' | 'pexels';
+  api: 'anthropic' | 'elevenlabs' | 'cartesia' | 'youtube' | 'pexels';
   project_id?: string;
   user_id?: string;
   // Anthropic

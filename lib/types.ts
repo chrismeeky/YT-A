@@ -570,6 +570,9 @@ export interface AppSettings {
   elevenLabsStability: number;
   elevenLabsSimilarity: number;
   elevenLabsStyle: number;
+  cartesiaApiKey: string;
+  cartesiaVoiceId: string;
+  cartesiaSpeed: number;
   pexelsApiKey: string;
   braveApiKey: string;
   realImageProvider: 'brave' | 'duckduckgo';
@@ -587,6 +590,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   elevenLabsStability: 0.5,
   elevenLabsSimilarity: 0.75,
   elevenLabsStyle: 0.0,
+  cartesiaApiKey: '',
+  cartesiaVoiceId: '',
+  cartesiaSpeed: 1.0,
   pexelsApiKey: '',
   braveApiKey: '',
   realImageProvider: 'brave',
