@@ -59,6 +59,8 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
   const [videoPlayer, setVideoPlayer] = useState<{ src: string; title: string } | null>(null);
   const [generatingScenes, setGeneratingScenes] = useState<Set<string>>(new Set());
   const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [showAudioMenu, setShowAudioMenu] = useState(false);
+  const audioMenuRef = useRef<HTMLDivElement>(null);
   const [assetError, setAssetError] = useState('');
   const [audioError, setAudioError] = useState('');
   const [audioSuccess, setAudioSuccess] = useState('');
@@ -276,6 +278,17 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     }, 300);
     return () => clearTimeout(timer);
   }, [newImageKeys]);
+
+  useEffect(() => {
+    if (!showAudioMenu) return;
+    const handle = (e: MouseEvent) => {
+      if (audioMenuRef.current && !audioMenuRef.current.contains(e.target as Node)) {
+        setShowAudioMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [showAudioMenu]);
 
   const scene = activeScene;
   sceneRef.current = scene; // keep live ref current for interval callbacks
@@ -565,8 +578,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
     }
   };
 
-  const generateAudio = async () => {
+  const generateAudio = async (provider: 'elevenlabs' | 'cartesia') => {
     if (!scene) return;
+    setShowAudioMenu(false);
     setGeneratingAudio(true);
     setAudioError('');
     setAudioSuccess('');
@@ -578,6 +592,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            provider,
             narration:            scene.narration,
             sceneNumber:          scene.number,
             elevenLabsApiKey:     settings.elevenLabsApiKey,
@@ -586,6 +601,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             elevenLabsStability:  settings.elevenLabsStability,
             elevenLabsSimilarity: settings.elevenLabsSimilarity,
             elevenLabsStyle:      settings.elevenLabsStyle,
+            cartesiaApiKey:       settings.cartesiaApiKey,
+            cartesiaVoiceId:      settings.cartesiaVoiceId,
+            cartesiaSpeed:        settings.cartesiaSpeed,
           }),
         }
       );
@@ -686,17 +704,40 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={generateAudio}
-            disabled={generatingAudio || !scene.narration?.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#a1a1aa] hover:text-white"
-          >
-            {generatingAudio ? (
-              <><span className="animate-pulse">🎵</span> Generating…</>
-            ) : (
-              <><span>🎵</span> Generate Audio</>
+          <div ref={audioMenuRef} className="relative">
+            <button
+              onClick={() => !generatingAudio && scene.narration?.trim() && setShowAudioMenu(v => !v)}
+              disabled={generatingAudio || !scene.narration?.trim()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#a1a1aa] hover:text-white"
+            >
+              {generatingAudio ? (
+                <><span className="animate-pulse">🎵</span> Generating…</>
+              ) : (
+                <>
+                  <span>🎵</span> Generate Audio
+                  <svg className="w-3 h-3 ml-0.5 opacity-60" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 4l4 4 4-4"/>
+                  </svg>
+                </>
+              )}
+            </button>
+            {showAudioMenu && (
+              <div className="absolute top-full left-0 mt-1 w-36 rounded-md border border-[#333] bg-[#111] shadow-xl z-50 overflow-hidden">
+                <button
+                  onClick={() => generateAudio('elevenlabs')}
+                  className="w-full text-left px-3 py-2 text-xs text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-white transition-colors"
+                >
+                  ElevenLabs
+                </button>
+                <button
+                  onClick={() => generateAudio('cartesia')}
+                  className="w-full text-left px-3 py-2 text-xs text-[#a1a1aa] hover:bg-[#1a1a1a] hover:text-white transition-colors border-t border-[#222]"
+                >
+                  Cartesia
+                </button>
+              </div>
             )}
-          </button>
+          </div>
 
           <button
             onClick={() => setShowModal(true)}
