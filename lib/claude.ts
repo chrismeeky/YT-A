@@ -297,8 +297,12 @@ export async function synthesizeChannelInsights(
     hookOpeningLines: v.hook?.openingLines,
     openLoop: v.hook?.openLoopDescription,
     retentionIntent: v.hook?.retentionIntent,
-    // Representative body-section transcript excerpt for voice fingerprinting
-    transcriptExcerpt: v.transcriptExcerpt,
+    // Full transcript — 100% of spoken content for accurate voice and structure extraction
+    fullTranscript: v.fullTranscript,
+    // Section markers so synthesis can locate hook/climax/outro within the full text
+    transcriptHook: v.transcriptHook,
+    transcriptClimax: v.transcriptClimax,
+    transcriptOutro: v.transcriptOutro,
     // Content structure — how body holds attention across scenes
     usesCarryForwardLoops: v.contentStructure?.usesCarryForwardLoops,
     loopMechanism: v.contentStructure?.loopMechanism,
@@ -352,16 +356,22 @@ export async function synthesizeChannelInsights(
     messages: [
       {
         role: 'user',
-        content: `Synthesise a channel strategy profile from these ${videoAnalyses.length} detailed video analyses. A creator wants to model their channel on this one.
+        content: [
+          {
+            // Full transcripts + metadata — large and stable, cache so retries are free
+            type: 'text' as const,
+            text: `VIDEO ANALYSES — ${videoAnalyses.length} videos including full transcripts:\n${JSON.stringify(summaries, null, 2)}`,
+            cache_control: { type: 'ephemeral' as const },
+          },
+          {
+            type: 'text' as const,
+            text: `Synthesise a channel strategy profile from the video analyses above. A creator wants to model their channel on this one.
 
 CRITICAL INSTRUCTION: For most fields, extract PRINCIPLES and PSYCHOLOGICAL MECHANISMS — describe WHY each technique works and WHAT effect it creates, so a writer can apply the same intent to any topic with fresh language. Avoid reusable sentence starters or copy-paste templates for fields like hookStrategies, scriptStructureTemplate, and replicationFormula.
 EXCEPTION: The writingStyle fields (openingFormula, bodySceneOpenings, sceneTransitionLanguage, signatureExpressions, voiceExcerpts) are deliberately concrete — use ACTUAL phrases, sentences, and passages verbatim from the transcripts wherever possible. These fields exist so a writer can reproduce the channel's exact voice, not approximate it.
 
-QUANTITATIVE METRICS: For the writingStyle numeric/quantitative fields (avgSentenceLengthWords, sentenceLengthVariance, directAddressFrequency, rhetoricalQuestionRate, readingLevel, beatLength, microRhythmBlueprint), compute these from the transcriptExcerpt fields in the video analyses below. Be precise — count actual sentences, measure actual word lengths, identify actual question frequency.
-Also estimate visualSceneGuide.cutRateShotsPerMinute from the editingPace and brollEstimate descriptions in the summaries — fast-cut channels = 10–20 shots/min; moderate documentary style = 5–8 shots/min; slow atmospheric/cinematic = 2–4 shots/min. Return it as an integer greater than 0.
-
-VIDEO ANALYSES:
-${JSON.stringify(summaries, null, 2)}
+QUANTITATIVE METRICS: For the writingStyle numeric/quantitative fields (avgSentenceLengthWords, sentenceLengthVariance, directAddressFrequency, rhetoricalQuestionRate, readingLevel, beatLength, microRhythmBlueprint), compute these from the fullTranscript fields. Be precise — count actual sentences, measure actual word lengths, identify actual question frequency.
+Also estimate visualSceneGuide.cutRateShotsPerMinute from the editingPace and brollEstimate descriptions — fast-cut channels = 10–20 shots/min; moderate documentary style = 5–8 shots/min; slow atmospheric/cinematic = 2–4 shots/min. Return it as an integer greater than 0.
 
 Return ONLY valid JSON:
 {
@@ -432,14 +442,18 @@ Return ONLY valid JSON:
     "rhetoricalQuestionRate": "~X per minute of narration — describe what kind of questions and what they do (e.g. 'rhetorical setup questions before a reveal, ~1 per 90 seconds')",
     "readingLevel": "Grade X — describe what vocabulary signals this (e.g. 'everyday language, no jargon, accessible to all' vs 'domain-specific terms signal authority')",
     "beatLength": "X–Y sentences before a thought break, scene cut, or topic shift — describe what triggers the break",
-    "microRhythmBlueprint": "Describe the sentence-length cadence pattern in each script section: HOOK (e.g. 'rapid-fire short sentences 5–8 words, staccato urgency'), BODY (e.g. 'alternates long explanatory sentences 15–20 words with short punchy summaries 4–7 words'), CLIMAX (e.g. 'returns to short punchy sentences at peak tension'), OUTRO (e.g. 'medium-length wrap sentences, warm and conclusive'). Use actual word counts from the transcripts."
+    "microRhythmBlueprint": "Describe the sentence-length cadence pattern in each script section: HOOK (e.g. 'rapid-fire short sentences 5–8 words, staccato urgency'), BODY (e.g. 'alternates long explanatory sentences 15–20 words with short punchy summaries 4–7 words'), CLIMAX (e.g. 'returns to short punchy sentences at peak tension'), OUTRO (e.g. 'medium-length wrap sentences, warm and conclusive'). Use actual word counts from the transcripts.",
+    "revelationFormula": "Extract the channel's signature contrast or revelation move — the exact structural pattern the channel uses to deliver its key turn or ironic juxtaposition within a scene. Answer: (1) SETUP: what does the channel establish first — a public role, a routine, a belief, a statistic? (2) PIVOT: what word or phrase signals the turn — 'and then', 'but', 'the problem', 'and yet', 'what nobody knew'? (3) PAYOFF: what form does the revelation take — a single declarative sentence, a physical detail, a fact stated without editorial comment? Quote at least one verbatim example from the transcripts showing the full setup → pivot → payoff sequence.",
+    "withinSceneTransitionPattern": "How does this channel move between beats INSIDE a single scene? What linguistic device signals a shift from setup to revelation, from background to incident, from cause to consequence? Extract the specific transition mechanisms used — e.g. a one-sentence fragment that resets the frame, a contrast conjunction, a time jump stated bare, a question left hanging. Quote a verbatim example from the transcripts showing a within-scene beat transition.",
+    "evidencePresentationStyle": "How does this channel present evidence and research? Does it state facts bare (no attribution), use institutional citation ('court documents show', 'the official report stated', 'investigators concluded'), or frame as established record ('what emerged later was')? What specific attribution language appears consistently? What forms of citation does this channel never use? Quote 2–3 verbatim examples from the transcripts of how a key fact or piece of evidence is introduced."
   },
   "narrativeLens": "1-2 sentences describing WHO the camera stays on and WHY. Identify the primary subject of every script this channel produces (e.g. 'The founder is always the primary subject — their decision-making, blind spots, and personality. Market forces and competitors exist as backdrop.' or 'The dish is always the primary subject — its ingredients, technique, and cultural origin. The chef exists to illuminate the food, not the reverse.'). Be specific enough that a writer knows immediately whose interiority or story to inhabit and what question the script is fundamentally trying to answer. Include what the channel NEVER centres.",
   "voiceExcerpts": [
-    "HOOK: A verbatim passage (100–200 words) from the opening of one of the transcriptExcerpt fields — the very first sentences of the video, before any context has been established. Copy it exactly. This is the most important excerpt: the writer needs to see exactly how this channel opens, word for word.",
-    "BODY-SETUP: A 200–300 word verbatim passage from the early body of a transcript — the first scene after the hook, where context and character are being established. Copy exactly as it appears. Shows how this channel transitions from hook into storytelling.",
-    "BODY-ESCALATION: A 200–300 word verbatim passage from a peak tension or climactic moment in one of the transcripts — a revelation, a confrontation, a moment of dread. Copy verbatim. Shows how this channel writes at its most intense.",
-    "OUTRO-OR-TRANSITION: A 100–200 word verbatim passage showing either how this channel closes a video or how it transitions between major scenes. Copy exactly. Shows the channel's closing voice and how it hands off between sections."
+    "HOOK: Copy the verbatim text from the transcriptHook field of ONE of the video analyses — the exact words spoken at the very opening before any context is established. Do NOT reconstruct, paraphrase, or infer. If transcriptHook is empty for all videos, write 'NO TRANSCRIPT AVAILABLE FOR HOOK'. Never fabricate.",
+    "BODY-SETUP: Copy 200–300 words verbatim from the fullTranscript field of one of the video analyses — the first scene after the hook where context and character are established. Use the transcriptHook as a marker to find where the hook ends, then copy what immediately follows. Copy exactly as it appears.",
+    "REVELATION-CONTRAST: Copy 100–200 words verbatim from the fullTranscript showing the channel's key contrast or ironic juxtaposition move — the moment where the gap between public persona and hidden reality is revealed, or where two contradictory facts land together. Search the full transcript for this move, do not limit yourself to the excerpt sections. Copy exactly.",
+    "BODY-ESCALATION: Copy the verbatim text from the transcriptClimax field of ONE of the video analyses — the peak tension or turning point. Do NOT reconstruct or infer. If transcriptClimax is empty, write 'NO TRANSCRIPT AVAILABLE FOR ESCALATION'. Never fabricate.",
+    "OUTRO: Copy the verbatim text from the transcriptOutro field of ONE of the video analyses — exactly how this channel closes. Do NOT reconstruct or infer. If transcriptOutro is empty, write 'NO TRANSCRIPT AVAILABLE FOR OUTRO'. Never fabricate."
   ],
   "openLoopProfile": {
     "peakSimultaneousLoops": 2,
@@ -461,9 +475,11 @@ Return ONLY valid JSON:
     "settingFunctionBlueprint": "Does this channel describe settings as atmosphere/mood — sensory details for immersion — OR as systems/mechanisms that explain how or why events happened? If the latter, what is the structural formula? Quote an example pattern if visible: e.g. '[Place] in [year] was [condition] — [how this condition shaped events]'. Describe the approach precisely.",
     "subjectIntroBlueprint": "How are individual people (subjects, case studies, interviewees, companies, etc.) introduced? What is the data set — name, age/year-founded, what they were doing at the time, a temporal anchor, their intersection with the central story? Is there a consistent sentence-structure formula? Extract it from the transcripts.",
     "institutionalBeat": "Does this channel use a beat involving an organisation, system, institution, or process — for example: a report that existed but was ignored, a company that succeeded where others failed, a regulatory failure, a bureaucratic irony? If so, what is the structural formula — how is the institutional moment set up and paid off? If this channel does not use such beats, write null.",
-    "bodySceneTypeFormulas": "List the distinct scene TYPES this channel uses in its body sections (e.g. origin/backstory, setting/context, incident sequence, institutional beat, double-life reveal, resolution/outcome, legacy). For each type, describe the structural formula: what the scene opens with, what information it delivers and in what order, and how it ends. Focus on architecture, not style."
+    "bodySceneTypeFormulas": "Using the fullTranscript fields, identify the distinct scene TYPES this channel uses in its body sections (e.g. origin/backstory, setting/context, victim introduction, incident sequence, institutional beat, double-life reveal, resolution/outcome, legacy). For each type found, describe the exact structural formula derived from the actual transcript text: what the scene opens with (exact sentence structure), what information it delivers and in what order, and how it ends. Quote at least one verbatim example sentence per scene type. Focus on architecture and exact opening sentence patterns."
   }
 }`,
+          },
+        ],
       },
     ],
   });
@@ -807,20 +823,27 @@ ${strategy.proseFingerprint}
 - Pace and rhythm: ${strategy.writingStyle.paceAndRhythm}
 - Voice and personality: ${strategy.writingStyle.voiceAndPersonality}
 - Rhetorical devices to use: ${strategy.writingStyle.rhetoricalDevices?.join('; ')}
+${strategy.writingStyle.revelationFormula ? `- Revelation/contrast formula: ${strategy.writingStyle.revelationFormula}` : ''}
+${strategy.writingStyle.withinSceneTransitionPattern ? `- Within-scene transition pattern: ${strategy.writingStyle.withinSceneTransitionPattern}` : ''}
+${strategy.writingStyle.evidencePresentationStyle ? `- Evidence/fact presentation style: ${strategy.writingStyle.evidencePresentationStyle}` : ''}
 ${strategy.writingStyle.signatureExpressions?.length ? `- Sentences written in this channel's exact voice (study and match these at the word level):
 ${strategy.writingStyle.signatureExpressions.map(e => `  "${e}"`).join('\n')}` : ''}
 ${strategy.writingStyle.openingFormula ? `
 SCENE 1 HOOK — HARD STRUCTURAL RULES (these override everything else for Scene 1):
-${strategy.writingStyle.openingFormula}
-
-Apply these rules mechanically before writing a single word of Scene 1:
-STEP 1 — Choose your opening type from the formula above. Write the opening sentence using that type. The subject's name must NOT appear in this sentence.
-STEP 2 — Build tension for 3-6 sentences using physical specificity and contrast. Still no name.
-STEP 3 — Reveal the name in its own standalone sentence, using the exact phrasing from the formula above (e.g. "His name was [First Last].").
-STEP 4 — Close the hook with 1-2 sentences establishing scale: victims, years, reach of impact.
-If your Scene 1 opens with the subject's name, you have violated this rule — rewrite it.` : ''}${strategy.writingStyle.bodySceneOpenings ? `
+${strategy.writingStyle.openingFormula}` : ''}${strategy.writingStyle.bodySceneOpenings ? `
 BODY SCENE OPENINGS — how this channel opens Scene 2 and beyond (follow this pattern):
-${strategy.writingStyle.bodySceneOpenings}` : ''}${strategy.writingStyle.sceneTransitionLanguage ? `
+${strategy.writingStyle.bodySceneOpenings}` : ''}${(() => {
+  const ns = analysis.channelInsights.narrativeStructure;
+  if (!ns) return '';
+  const trp1 = (s: string, max: number) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
+  const parts = [
+    ns.bodySceneTypeFormulas  ? `\nSCENE TYPE FORMULAS — identify each scene's type and apply the full structural formula (opening, information order, closing):\n${trp1(ns.bodySceneTypeFormulas, 2000)}` : '',
+    ns.backstoryBlueprint     ? `\nBACKSTORY FORMULA:\n${trp1(ns.backstoryBlueprint, 800)}` : '',
+    ns.subjectIntroBlueprint  ? `\nSUBJECT INTRO FORMULA:\n${trp1(ns.subjectIntroBlueprint, 500)}` : '',
+    ns.settingFunctionBlueprint ? `\nSETTING FORMULA:\n${trp1(ns.settingFunctionBlueprint, 500)}` : '',
+  ].filter(Boolean);
+  return parts.join('');
+})()}${strategy.writingStyle.sceneTransitionLanguage ? `
 SCENE TRANSITION LANGUAGE — how this channel closes each scene (apply this to every scene except the last):
 ${strategy.writingStyle.sceneTransitionLanguage}` : ''}
 ${strategy.writingStyle.avgSentenceLengthWords ? `
@@ -869,6 +892,7 @@ ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to 
 - The OPENING FORMULA and CARRY-FORWARD LOOPS above are exceptions — follow those mechanically. Everything else below applies.
 - The channel strategy describes PRINCIPLES and PSYCHOLOGICAL MECHANISMS. Your job is to find fresh, topic-specific expressions of those principles — not to copy phrasing or templates from the strategy description itself.
 - FORBIDDEN: reproducing sentence structures or grammatical templates from the strategy description text. The strategy describes the style; it is not a writing sample to copy from. EXCEPTION: signatureExpressions and verbatim examples in openingFormula/bodySceneOpenings/sceneTransitionLanguage are real channel language — study them and write with the same vocabulary, rhythm, and personality.
+- Scene titles are labels only — do NOT open a scene by echoing or restating its title. Derive each scene's opening sentence and full structure from the SCENE TYPE FORMULA for that scene's type.
 - Every scene must find its own unique entry point into the material. Do NOT open multiple scenes with the same grammatical structure.
 - The hook must be built from what is specifically surprising, counterintuitive, or emotionally charged about THIS topic — not a generic formula applied to any topic.
 - Apply the tone, pacing, and structural intent described in the strategy, but execute them through language that is entirely native to this specific subject.
@@ -1004,19 +1028,16 @@ export async function refineScriptVoice(
 - Pace and rhythm: ${ws.paceAndRhythm}
 ${ws.avgSentenceLengthWords ? `- Target avg sentence length: ~${ws.avgSentenceLengthWords} words` : ''}
 ${ws.sentenceLengthVariance ? `- Sentence length variance: ${ws.sentenceLengthVariance}` : ''}
-${ws.microRhythmBlueprint ? `- Micro-rhythm blueprint: ${ws.microRhythmBlueprint}` : ''}` : '';
+${ws.microRhythmBlueprint ? `- Micro-rhythm blueprint: ${ws.microRhythmBlueprint}` : ''}
+${ws.bodySceneOpenings ? `- Body scene opening pattern (Scenes 2+): ${ws.bodySceneOpenings}` : ''}
+${ws.revelationFormula ? `- Revelation/contrast formula: ${ws.revelationFormula}` : ''}
+${ws.withinSceneTransitionPattern ? `- Within-scene transition pattern: ${ws.withinSceneTransitionPattern}` : ''}
+${ws.evidencePresentationStyle ? `- Evidence/fact presentation style: ${ws.evidencePresentationStyle}` : ''}` : '';
 
   const hookInstruction = openingFormula
     ? `\nSCENE 1 HOOK — HARD STRUCTURAL RULES (override everything else for Scene 1):
-${openingFormula}
-
-Apply these steps before writing Scene 1:
-STEP 1 — Read the entire draft below. Identify the single most haunting, specific, or defining moment in this story — the detail that would stop a reader cold. That is your hook anchor.
-STEP 2 — Write the opening sentence using the channel's opening type. The subject's name must NOT appear.
-STEP 3 — Build tension for 3-6 sentences using physical specificity tied to the anchor you chose. Still no name.
-STEP 4 — Reveal the name in its own standalone sentence using the exact formula from the channel.
-STEP 5 — Close with 1-2 sentences establishing scale: victims, years, reach of impact.`
-    : `\nINSTRUCTION FOR SCENE 1: Read the entire draft. Find the single most haunting, specific detail in this story. Anchor Scene 1's opening on that detail — not a generic formula.`;
+${openingFormula}`
+    : `\nINSTRUCTION FOR SCENE 1: Read the entire draft. Find the single most defining, specific detail in this story. Anchor Scene 1's opening on that detail — not a generic formula.`;
 
   const voiceBlock = `================================================================
 CHANNEL VOICE — these are the channel's actual words. Your output must be INDISTINGUISHABLE from these.
@@ -1034,7 +1055,7 @@ END OF CHANNEL VOICE
   const hs2 = analysis.channelInsights.hookStrategies;
   const sst2 = analysis.channelInsights.scriptStructureTemplate;
 
-  const tr2 = (s: string, max = 300) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
+  const tr2 = (s: string, max = 500) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
 
   const structuralBlock2 = (() => {
     const parts: string[] = [];
@@ -1044,11 +1065,11 @@ END OF CHANNEL VOICE
         ns2.hookAnchorType           ? `HOOK ANCHOR: ${tr2(ns2.hookAnchorType)}` : '',
         ns2.hookNameRevealTiming     ? `NAME REVEAL: ${tr2(ns2.hookNameRevealTiming)}` : '',
         ns2.hookCloseFormula         ? `HOOK CLOSE: ${tr2(ns2.hookCloseFormula)}` : '',
-        ns2.backstoryBlueprint       ? `BACKSTORY FORMULA: ${tr2(ns2.backstoryBlueprint)}` : '',
+        ns2.backstoryBlueprint       ? `BACKSTORY FORMULA: ${tr2(ns2.backstoryBlueprint, 800)}` : '',
         ns2.settingFunctionBlueprint ? `SETTING PATTERN: ${tr2(ns2.settingFunctionBlueprint)}` : '',
         ns2.subjectIntroBlueprint    ? `SUBJECT INTRO: ${tr2(ns2.subjectIntroBlueprint)}` : '',
         ns2.institutionalBeat && ns2.institutionalBeat !== 'null' ? `INSTITUTIONAL BEAT: ${tr2(ns2.institutionalBeat)}` : '',
-        ns2.bodySceneTypeFormulas    ? `SCENE TYPE FORMULAS: ${tr2(ns2.bodySceneTypeFormulas)}` : '',
+        ns2.bodySceneTypeFormulas    ? `SCENE TYPE FORMULAS:\n${tr2(ns2.bodySceneTypeFormulas, 2000)}` : '',
       ].filter(Boolean).join('\n');
       parts.push(lines);
     } else {
@@ -1065,20 +1086,14 @@ ${proseFingerprint ? `\nPROSE FINGERPRINT — enforce every rule at the sentence
 REWRITE RULES — STRUCTURAL first, then sentence-level:
 1. ARCHITECTURE MATCH (most important): For each scene, identify its type (hook, backstory, setting, subject-intro, escalation, resolution, etc.) and apply the structural blueprint for that type from the section above. Match what each scene DOES before matching how it sounds.
 2. Hook (Scene 1): Anchor on the channel's hook anchor type. Apply name-reveal timing. Close with the hook-close formula.
-3. Settings: If this channel treats settings as mechanisms rather than atmosphere, rewrite to show HOW the context shaped events — not just what it looked like or felt like.
-4. Preserve all facts, story beats, and scene structure — do NOT add, remove, or reorder any plot points. Rhetorical devices and meta-commentary in the draft that align with the channel (e.g. "you think you know...", direct address, "the most disturbing part is not X but that he...") must be kept and amplified, not stripped.
-5. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
-6. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE. Vary sentence length the way the channel does: long, flowing, atmospheric sentences for setup and environment; short, punchy ones for reveals, horror beats, and key facts.
-7. Keep approximately the same word count per scene as the draft (within ±15%). Adjust phrasing to serve the rhythm even if it means slight expansion or contraction.
-8. Do NOT change scene numbers, titles, or structure.
-9. CHANNEL SIGNATURE DEVICES (study the Voice Bible excerpts and apply): 
-   - Openings and beats often start with a concrete, visual, damning detail or routine (a specific photograph, "he kissed his wife goodbye every morning before...", "for 13 years women were vanishing...", a man at the bar waving at neighbors). 
-   - Then deliver the contrast: the horror/monster was happening in plain sight, "right there", "living in the dead center of the city", "the man responsible was right there".
-   - For origins/background: frame as "context, not excuse" ("that matters, not as an excuse, as a context"); describe absorbing "the specific grammar of that household", "something in the walls, in the silences between adults", "contempt dressed as religion, violence dressed as discipline".
-   - Use the "most disturbing part is not what was happening to her — it is the fact that he took the time to set up the shot, to frame it, to make sure the lighting was right. This was not impulsive. This was a man who planned it, who savored it."
-   - "You think you know the names that defined [era/violence]... You don't know this one."
-   - End sections with the "no one knew", "the FBI had no file on him while he was moving", "nobody had a system for connecting them".
-10. Make the narration feel like it was written by the same person who wrote the Voice Bible passages — same restraint, same way of letting specific details do the work, same building of dread through the ordinary turned monstrous.`;
+3. Settings: Apply the SETTING PATTERN from the structural blueprints above — match exactly how this channel uses location and context.
+4. Preserve all facts and story beats — do NOT add, remove, invent, or reorder any narrative events, people, dates, or revelations from the draft. Rhetorical devices and meta-commentary that align with the channel's voice must be kept and amplified, not stripped. Scene-opening patterns are NOT protected by this rule — rewrite them to match the channel's structural blueprints.
+5. Full scene structure (Scenes 2+): For each non-hook scene, identify its type using the SCENE TYPE FORMULAS above and rewrite its full structure — opening, information order, and closing — to match the formula for that type. The body scene opening pattern in WRITING STYLE above governs the first sentence. The scene title is a label only.
+6. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
+7. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE. Vary sentence length according to the Micro-Rhythm Blueprint above.
+8. Keep approximately the same word count per scene as the draft (within ±20%). Structural rewrites that align the scene more closely with the channel's scene type formula may expand or contract beyond this — accuracy to the channel's structure takes precedence over word count preservation.
+9. Do NOT change scene numbers or titles.
+10. Make the narration feel like it was written by the same person who wrote the Voice Bible passages — same restraint, same way of letting specific details do the work.`;
 
   // ── Director mode: rewrite narration AND generate all segments + assets + slots ──
   if (directorMode) {
@@ -1177,7 +1192,7 @@ Return ONLY valid JSON:
             { "rank": 1, "type": "real-image", "note": "location establishing shot", "searchQuery": "downtown Chicago 1972", "slot": 0, "narrationSlice": "First sentence here." },
             { "rank": 2, "type": "stock-photo", "note": "rural road dusk", "searchQuery": "rural highway dusk", "slot": 0, "narrationSlice": "First sentence here." },
             { "rank": 1, "type": "stock-video", "note": "police lights night", "searchQuery": "police lights night highway", "slot": 1, "narrationSlice": "Second sentence here. Third sentence here." },
-            { "rank": 2, "type": "ai-image", "note": "dread atmospheric", "slot": 1, "narrationSlice": "Second sentence here. Third sentence here." }
+            { "rank": 2, "type": "ai-image", "note": "mood atmospheric", "slot": 1, "narrationSlice": "Second sentence here. Third sentence here." }
           ]
         }
       ]
@@ -1289,18 +1304,17 @@ export async function refineSceneVoice(
 - Pace and rhythm: ${ws.paceAndRhythm}
 ${ws.avgSentenceLengthWords ? `- Target avg sentence length: ~${ws.avgSentenceLengthWords} words` : ''}
 ${ws.sentenceLengthVariance ? `- Sentence length variance: ${ws.sentenceLengthVariance}` : ''}
-${ws.microRhythmBlueprint ? `- Micro-rhythm blueprint: ${ws.microRhythmBlueprint}` : ''}` : '';
+${ws.microRhythmBlueprint ? `- Micro-rhythm blueprint: ${ws.microRhythmBlueprint}` : ''}
+${ws.bodySceneOpenings ? `- Body scene opening pattern (Scenes 2+): ${ws.bodySceneOpenings}` : ''}
+${ws.revelationFormula ? `- Revelation/contrast formula: ${ws.revelationFormula}` : ''}
+${ws.withinSceneTransitionPattern ? `- Within-scene transition pattern: ${ws.withinSceneTransitionPattern}` : ''}
+${ws.evidencePresentationStyle ? `- Evidence/fact presentation style: ${ws.evidencePresentationStyle}` : ''}` : '';
 
   const hookInstruction = targetScene.number === 1
     ? (openingFormula
         ? `\nSCENE 1 HOOK — HARD STRUCTURAL RULES (override everything else for Scene 1):
-${openingFormula}
-STEP 1 — Read this scene. Identify the single most haunting, specific detail. That is your hook anchor.
-STEP 2 — Write the opening sentence using the channel's opening type. The subject's name must NOT appear.
-STEP 3 — Build tension for 3-6 sentences using physical specificity tied to the anchor. Still no name.
-STEP 4 — Reveal the name in its own standalone sentence using the exact channel formula.
-STEP 5 — Close with 1-2 sentences establishing scale: victims, years, reach of impact.`
-        : `\nINSTRUCTION FOR SCENE 1: Find the single most haunting, specific detail in this scene. Anchor the opening on that — not a generic formula.`)
+${openingFormula}`
+        : `\nINSTRUCTION FOR SCENE 1: Find the single most defining, specific detail in this scene. Anchor the opening on that — not a generic formula.`)
     : '';
 
   const voiceBlock = `================================================================
@@ -1326,7 +1340,7 @@ ${otherScenes.map(s => `Scene ${s.number}: ${s.title} — ${s.narration}`).join(
   const sst = analysis.channelInsights.scriptStructureTemplate;
 
   // Truncate helper — keeps the structural block concise to avoid oversized prompts
-  const tr = (s: string, max = 300) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
+  const tr = (s: string, max = 500) => s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
 
   const structuralBlueprintBlock = (() => {
     const parts: string[] = [];
@@ -1337,11 +1351,11 @@ ${otherScenes.map(s => `Scene ${s.number}: ${s.title} — ${s.narration}`).join(
         ns.hookAnchorType           ? `HOOK ANCHOR: ${tr(ns.hookAnchorType)}` : '',
         ns.hookNameRevealTiming     ? `NAME REVEAL: ${tr(ns.hookNameRevealTiming)}` : '',
         ns.hookCloseFormula         ? `HOOK CLOSE: ${tr(ns.hookCloseFormula)}` : '',
-        ns.backstoryBlueprint       ? `BACKSTORY FORMULA: ${tr(ns.backstoryBlueprint)}` : '',
+        ns.backstoryBlueprint       ? `BACKSTORY FORMULA: ${tr(ns.backstoryBlueprint, 800)}` : '',
         ns.settingFunctionBlueprint ? `SETTING PATTERN: ${tr(ns.settingFunctionBlueprint)}` : '',
         ns.subjectIntroBlueprint    ? `SUBJECT INTRO: ${tr(ns.subjectIntroBlueprint)}` : '',
         ns.institutionalBeat && ns.institutionalBeat !== 'null' ? `INSTITUTIONAL BEAT: ${tr(ns.institutionalBeat)}` : '',
-        ns.bodySceneTypeFormulas    ? `SCENE TYPE FORMULAS: ${tr(ns.bodySceneTypeFormulas)}` : '',
+        ns.bodySceneTypeFormulas    ? `SCENE TYPE FORMULAS:\n${tr(ns.bodySceneTypeFormulas, 2000)}` : '',
       ].filter(Boolean).join('\n');
       parts.push(nsLines);
     } else {
@@ -1359,20 +1373,14 @@ ${proseFingerprint ? `\nPROSE FINGERPRINT — enforce every rule at the sentence
 REWRITE RULES — STRUCTURAL first, then sentence-level:
 1. ARCHITECTURE MATCH (most important): Identify what TYPE of scene this is (hook, backstory, setting, subject-intro, escalation, resolution, etc.). Apply the structural blueprint for that scene type from the section above. Match what the scene DOES architecturally, not just how it sounds.
 2. Hook scenes (Scene 1): Anchor on the channel's hook anchor type. Apply the name-reveal timing. Close with the hook-close formula.
-3. Setting scenes: If this channel treats settings as mechanisms rather than atmosphere, rewrite to show HOW the place or context shaped events — not just what it looked like or felt like.
-4. Preserve all facts, story beats, and scene structure — do NOT add, remove, or reorder any plot points. Rhetorical devices and meta-commentary in the draft that align with the channel (e.g. "you think you know...", direct address, "the most disturbing part is not X but that he...") must be kept and amplified, not stripped.
-5. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
-6. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE. Vary sentence length the way the channel does: long, flowing, atmospheric sentences for setup and environment; short, punchy ones for reveals, horror beats, and key facts.
-7. Keep approximately the same word count as the draft (within ±15%). Adjust phrasing to serve the rhythm even if it means slight expansion or contraction.
-8. Do NOT change the scene number or title.
-9. CHANNEL SIGNATURE DEVICES (study the Voice Bible excerpts and apply): 
-   - Openings and beats often start with a concrete, visual, damning detail or routine (a specific photograph, "he kissed his wife goodbye every morning before...", "for 13 years women were vanishing...", a man at the bar waving at neighbors). 
-   - Then deliver the contrast: the horror/monster was happening in plain sight, "right there", "living in the dead center of the city", "the man responsible was right there".
-   - For origins/background: frame as "context, not excuse" ("that matters, not as an excuse, as a context"); describe absorbing "the specific grammar of that household", "something in the walls, in the silences between adults", "contempt dressed as religion, violence dressed as discipline".
-   - Use the "most disturbing part is not what was happening to her — it is the fact that he took the time to set up the shot, to frame it, to make sure the lighting was right. This was not impulsive. This was a man who planned it, who savored it."
-   - "You think you know the names that defined [era/violence]... You don't know this one."
-   - End sections with the "no one knew", "the FBI had no file on him while he was moving", "nobody had a system for connecting them".
-10. Make the narration feel like it was written by the same person who wrote the Voice Bible passages — same restraint, same way of letting specific details do the work, same building of dread through the ordinary turned monstrous.`;
+3. Setting scenes: Apply the SETTING PATTERN from the structural blueprints above — match exactly how this channel uses location and context.
+4. Preserve all facts and story beats — do NOT add, remove, invent, or reorder any narrative events, people, dates, or revelations from the draft. Rhetorical devices and meta-commentary that align with the channel's voice must be kept and amplified, not stripped. Scene-opening patterns are NOT protected by this rule — rewrite them to match the channel's structural blueprints.
+5. Full scene structure (Scenes 2+): Identify this scene's type using the SCENE TYPE FORMULAS above and rewrite its full structure — opening, information order, and closing — to match the formula for that type. The body scene opening pattern in WRITING STYLE above governs the first sentence. The scene title is a label only.
+6. Every sentence must pass this test: could it appear in the Voice Bible above without standing out?
+7. Match rhythm, vocabulary register, and restraint exactly. Not "inspired by" — INDISTINGUISHABLE. Vary sentence length according to the Micro-Rhythm Blueprint above.
+8. Keep approximately the same word count as the draft (within ±15%). Adjust phrasing to serve the rhythm even if it means slight expansion or contraction.
+9. Do NOT change the scene number or title.
+10. Make the narration feel like it was written by the same person who wrote the Voice Bible passages — same restraint, same way of letting specific details do the work.`;
 
   if (directorMode) {
     const di = analysis.channelInsights;
@@ -1393,9 +1401,9 @@ ${vg?.editingRhythm ? `- Editing rhythm: ${vg.editingRhythm}` : ''}
 ${di.narrativeLens ? `- Narrative lens: ${di.narrativeLens}` : ''}
 
 AVAILABLE ASSET TYPES:
-- "real-image"  → named real people, documented events, specific locations. searchQuery = "Edmund Kemper 1973 mugshot"
+- "real-image"  → named real people, documented events, specific locations. searchQuery = "Neil Armstrong moon landing 1969"
 - "stock-video" → moving B-roll — atmosphere, motion, passage of time. searchQuery = visual mood, NOT narration subject — "empty highway dusk"
-- "stock-photo" → a single still for place, object, or mood. searchQuery = "FBI evidence board 1970s"
+- "stock-photo" → a single still for place, object, or mood. searchQuery = "empty boardroom glass table"
 - "ai-video"    → cinematic pans, abstract/impossible visuals, dramatic reconstructions
 - "ai-image"    → illustrated or stylised stills
 
@@ -2189,16 +2197,17 @@ REQUIREMENTS:
     // Split on headers like [Clip 1/3 · CUT] or [Clip 1/3 · CONTINUOUS] or plain [Clip 1/3]
     const headerRe = /\[Clip \d+\/\d+(?:\s*[·•]\s*(CUT|CONTINUOUS))?\]/gi;
     const labels: ('CUT' | 'CONTINUOUS' | null)[] = [];
-    const splitPoints: number[] = [];
+    // Track both where each header starts (end of previous clip) and ends (start of current clip text)
+    const boundaries: { headerStart: number; textStart: number }[] = [];
     let m: RegExpExecArray | null;
     while ((m = headerRe.exec(raw)) !== null) {
-      splitPoints.push(m.index + m[0].length);
+      boundaries.push({ headerStart: m.index, textStart: m.index + m[0].length });
       const tag = m[1]?.toUpperCase();
       labels.push(tag === 'CUT' ? 'CUT' : tag === 'CONTINUOUS' ? 'CONTINUOUS' : null);
     }
-    if (splitPoints.length === clipCount) {
-      prompts = splitPoints.map((start, i) =>
-        raw.slice(start, splitPoints[i + 1]).trim()
+    if (boundaries.length === clipCount) {
+      prompts = boundaries.map((b, i) =>
+        raw.slice(b.textStart, boundaries[i + 1]?.headerStart ?? raw.length).trim()
       );
       clipLabels = labels;
     } else {

@@ -38,14 +38,22 @@ export async function POST(
       ? `For each topic, indicate whether it is fictional or based on real events. For real-world topics, use real documented names and cases you are confident about; describe the situation and note the writer must verify all facts. For fictional topics, invent freely. ${noPlaceholders}`
       : `For each topic, use a real documented case, person, or event you are confident about — this channel's format is built around real named subjects. Include the real name in the topic title when you know it. In the context field, describe the real situation in broad strokes (what happened, what makes it compelling) and note that the writer must verify all details independently. If you are not confident of a real name for a particular angle, phrase the title descriptively instead of using a placeholder. ${noPlaceholders}`;
 
+    const pillars = insights.contentPillars ?? [];
+    const formulas = insights.titleFormulas ?? [];
+    const analyzedTitles = analysis.videoAnalyses.map(v => v.videoTitle).filter(Boolean);
+    const analyzedSubjects = analysis.videoAnalyses.map(v => v.channelName ?? '').filter(Boolean);
+
     const channelContext = `Channel: ${analysis.channelName}
 Content nature: ${nature}${insights.contentNature?.reasoning ? ` (${insights.contentNature.reasoning})` : ''}
-Content pillars: ${insights.contentPillars?.join(', ') ?? 'N/A'}
-Title formulas: ${insights.titleFormulas?.slice(0, 3).join(' | ') ?? 'N/A'}
+Content pillars (${pillars.length} total — each topic suggestion must map to one of these):
+${pillars.map((p, i) => `  ${i + 1}. ${p}`).join('\n')}
+Title formulas (${formulas.length} total — vary which formula you use per topic):
+${formulas.map((f, i) => `  ${i + 1}. ${f}`).join('\n')}
 Unique value proposition: ${insights.uniqueValueProposition ?? 'N/A'}
 Audience: ${insights.audienceProfile?.demographics ?? 'N/A'}
 Audience pain points: ${insights.audienceProfile?.painPoints?.join(', ') ?? 'N/A'}
-Patterns to replicate: ${insights.thingsToSteal?.slice(0, 3).join(', ') ?? 'N/A'}`;
+Patterns to replicate: ${insights.thingsToSteal?.slice(0, 3).join(', ') ?? 'N/A'}
+${analyzedTitles.length > 0 ? `\nALREADY COVERED — do NOT suggest these or any disguised variation of them:\n${analyzedTitles.map(t => `  - ${t}`).join('\n')}` : ''}`;
 
     const prompt = body.seedTopic?.trim()
       ? `You are a YouTube video strategist. The user wants to make a video about: "${body.seedTopic}".
@@ -61,6 +69,14 @@ Respond with a raw JSON array only. No markdown, no code fences, no explanation.
       : `You are a YouTube video strategist. Based on the following channel analysis, suggest 10 compelling video topic ideas that would perform well on this channel.
 
 ${channelContext}
+
+DIVERSITY REQUIREMENT — strictly enforced:
+- The "ALREADY COVERED" list above contains the specific cases this channel has analyzed. Do NOT suggest those cases or any topic that is essentially the same case under a different title or angle. Draw entirely from your own knowledge of real documented cases NOT in that list.
+- Each topic must be a completely different underlying story with a different subject, crime type, geography, and time period. Not the same archetype reframed.
+- Distribute topics across ALL content pillars. If there are 3 pillars, spread the 10 topics roughly evenly across them.
+- Use a different title formula for each topic. Do not reuse the same structural pattern more than twice.
+- Vary every dimension independently: perpetrator type, victim context, time period (span at least 3 different decades), geography (span at least 3 different countries or regions), investigative angle (caught vs unsolved vs exonerated vs systemic failure).
+- Before finalising, scan all 10: if any two share the same perpetrator archetype AND crime type AND setting, replace one. If any topic is a thin variation of a case in the ALREADY COVERED list, replace it.
 
 ${contextInstruction}
 
