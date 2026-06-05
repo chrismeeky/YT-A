@@ -109,6 +109,8 @@ export default function NewScriptPage() {
   const [step, setStep] = useState(1);
   const [directorMode, setDirectorMode] = useState(false);
   const [assetMix, setAssetMix] = useState<AssetMix>({ ...EQUAL_MIX });
+  const [assetMixSaved, setAssetMixSaved] = useState(false);
+  const assetMixStorageKey = `assetMix:${id}`;
 
   const setMixValue = (type: DirectorAssetType, value: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(value)));
@@ -138,6 +140,14 @@ export default function NewScriptPage() {
     } else {
       setAssetMix({ ...EQUAL_MIX });
     }
+  };
+
+  const saveAssetMix = () => {
+    try {
+      localStorage.setItem(assetMixStorageKey, JSON.stringify(assetMix));
+      setAssetMixSaved(true);
+      setTimeout(() => setAssetMixSaved(false), 2000);
+    } catch { /* ignore */ }
   };
 
   const [loading, setLoading] = useState(false);
@@ -205,6 +215,14 @@ export default function NewScriptPage() {
     if (draft.suggestions?.length) { setSuggestions(draft.suggestions); setSuggestionSeed(draft.suggestionSeed); }
     if (draft.detailLevel) setDetailLevel(draft.detailLevel);
     if (draft.step) setStep(draft.step);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load saved asset mix from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(assetMixStorageKey);
+      if (saved) setAssetMix(JSON.parse(saved) as AssetMix);
+    } catch { /* ignore */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-set recommended detail level when analysis changes
@@ -1127,7 +1145,17 @@ export default function NewScriptPage() {
               <div className="rounded-lg border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
                 <button
                   type="button"
-                  onClick={() => { const next = !directorMode; setDirectorMode(next); if (next) resetMixToChannel(); }}
+                  onClick={() => {
+                    const next = !directorMode;
+                    setDirectorMode(next);
+                    if (next) {
+                      try {
+                        const saved = localStorage.getItem(assetMixStorageKey);
+                        if (saved) { setAssetMix(JSON.parse(saved) as AssetMix); return; }
+                      } catch { /* ignore */ }
+                      resetMixToChannel();
+                    }
+                  }}
                   className="w-full flex items-start gap-3 text-left"
                 >
                   <div className={`mt-0.5 w-9 h-5 rounded-full flex-shrink-0 transition-colors relative ${directorMode ? 'bg-indigo-500' : 'bg-[#333]'}`}>
@@ -1148,10 +1176,16 @@ export default function NewScriptPage() {
                   <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-xs font-medium text-[#71717a] uppercase tracking-wide">Asset Mix</p>
-                      <button type="button" onClick={resetMixToChannel}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
-                        Reset to channel
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button type="button" onClick={saveAssetMix}
+                          className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors">
+                          {assetMixSaved ? 'Saved!' : 'Save mix'}
+                        </button>
+                        <button type="button" onClick={resetMixToChannel}
+                          className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+                          Reset to channel
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="flex-1 space-y-2">

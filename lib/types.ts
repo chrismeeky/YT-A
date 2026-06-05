@@ -33,6 +33,7 @@ export interface VideoAnalysis {
   transcriptHook?: string;     // opening: first ~800 chars
   transcriptClimax?: string;   // peak tension: 60–75% of transcript
   transcriptOutro?: string;    // closing: last ~600 chars
+  fullTranscript?: string;     // 100% of transcript — used for synthesis voice extraction
 
   // 1. Topic & Positioning
   topicPositioning: {
@@ -221,7 +222,10 @@ export interface WritingStyle {
   bodySceneOpenings?: string;
   sceneTransitionLanguage?: string;
   signatureExpressions?: string[];
-  proseFingerprint?: string;    // prose quality: show vs tell, editorial restraint, vocabulary precision, forbidden moves
+  proseFingerprint?: string;
+  revelationFormula?: string;           // how the channel delivers its key contrast/turn — the signature reveal move
+  withinSceneTransitionPattern?: string; // how the channel moves between beats inside a single scene
+  evidencePresentationStyle?: string;   // how research/facts are presented — bare fact, citation style, attribution language
   // Quantitative voice fingerprint
   avgSentenceLengthWords?: number;
   sentenceLengthVariance?: string;
