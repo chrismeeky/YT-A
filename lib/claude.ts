@@ -2197,16 +2197,17 @@ REQUIREMENTS:
     // Split on headers like [Clip 1/3 · CUT] or [Clip 1/3 · CONTINUOUS] or plain [Clip 1/3]
     const headerRe = /\[Clip \d+\/\d+(?:\s*[·•]\s*(CUT|CONTINUOUS))?\]/gi;
     const labels: ('CUT' | 'CONTINUOUS' | null)[] = [];
-    const splitPoints: number[] = [];
+    // Track both where each header starts (end of previous clip) and ends (start of current clip text)
+    const boundaries: { headerStart: number; textStart: number }[] = [];
     let m: RegExpExecArray | null;
     while ((m = headerRe.exec(raw)) !== null) {
-      splitPoints.push(m.index + m[0].length);
+      boundaries.push({ headerStart: m.index, textStart: m.index + m[0].length });
       const tag = m[1]?.toUpperCase();
       labels.push(tag === 'CUT' ? 'CUT' : tag === 'CONTINUOUS' ? 'CONTINUOUS' : null);
     }
-    if (splitPoints.length === clipCount) {
-      prompts = splitPoints.map((start, i) =>
-        raw.slice(start, splitPoints[i + 1]).trim()
+    if (boundaries.length === clipCount) {
+      prompts = boundaries.map((b, i) =>
+        raw.slice(b.textStart, boundaries[i + 1]?.headerStart ?? raw.length).trim()
       );
       clipLabels = labels;
     } else {

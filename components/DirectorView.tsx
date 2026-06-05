@@ -124,7 +124,13 @@ function AssetCard({
   // Use the narration slice (if this is a multi-shot asset) or the full segment narration
   // to compute the actual TTS duration from word count × WPM rather than the pre-computed
   // segment.durationSeconds (which covers the entire segment, not just this slot).
-  const effectiveNarration = asset.narrationSlice ?? segment.narrationExcerpt;
+  // For manually-added assets (no narrationSlice), borrow the slice from another asset
+  // in the same slot so clip count and prompt scope don't bleed into adjacent slots.
+  const slotNarrationSlice = asset.narrationSlice
+    ?? (asset.slot !== undefined
+        ? segment.assets.find(a => a.id !== asset.id && a.slot === asset.slot && !!a.narrationSlice)?.narrationSlice
+        : undefined);
+  const effectiveNarration = slotNarrationSlice ?? segment.narrationExcerpt;
   const effectiveWords = effectiveNarration.trim().split(/\s+/).filter(Boolean).length;
   const effectiveDurationSeconds = Math.max(
     1,
@@ -139,7 +145,7 @@ function AssetCard({
 
   const buildRequestBody = (page = 1) => ({
     assetType: asset.type,
-    narrationExcerpt: asset.narrationSlice ?? segment.narrationExcerpt,
+    narrationExcerpt: slotNarrationSlice ?? segment.narrationExcerpt,
     durationSeconds: effectiveDurationSeconds,
     durationEach: asset.durationEach,
     wpm: script.settings.wpm,
@@ -182,6 +188,14 @@ function AssetCard({
       };
       if (!res.ok || data.error) { setError(data.error ?? 'Generation failed'); return; }
 
+      // Derive a concept label for manually-added assets (rationale === '') from the
+      // narration slice so the label slot isn't blank after generation.
+      const derivedRationale = asset.rationale === '' && slotNarrationSlice
+        ? slotNarrationSlice.length > 72
+          ? slotNarrationSlice.slice(0, 69).trimEnd() + '…'
+          : slotNarrationSlice
+        : undefined;
+
       onUpdate({
         ...asset,
         generated: true,
@@ -191,6 +205,7 @@ function AssetCard({
         stockVideos: data.videos ?? asset.stockVideos,
         realImages: data.images ?? asset.realImages,
         ...(data.autoSearchQuery && { searchQuery: data.autoSearchQuery }),
+        ...(derivedRationale && { rationale: derivedRationale }),
       });
       setExpanded(true);
     } catch {

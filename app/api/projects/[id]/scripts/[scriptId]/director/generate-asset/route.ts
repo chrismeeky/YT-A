@@ -140,11 +140,11 @@ export async function POST(
       channelEditingRhythm: visualGuide?.editingRhythm,
       contentNature: analysis.channelInsights.contentNature?.classification,
       narrativeLens: analysis.channelInsights.narrativeLens,
-      // For user-added assets (no directorNote), synthesise one from story context so
-      // the prompt has the same narrative grounding as AI-selected assets.
+      // For user-added assets (no directorNote), pass only story/character context —
+      // NOT the scene description, which is already in the static block and would
+      // override the narration excerpt if repeated as a mandatory directive.
       directorNote: directorNote || [
         scriptTitle && `Story: ${scriptTitle}.`,
-        sceneDescription && `Scene: ${sceneDescription}.`,
         characters?.length && `Key subjects: ${characters.map(c => c.name).join(', ')}.`,
       ].filter(Boolean).join(' ') || undefined,
     });

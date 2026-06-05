@@ -1,5 +1,22 @@
 import type { StockPhoto, RealImage, StockVideo } from './types';
 
+// Cache vqd tokens per query so "Load more" requests reuse the same DDG session.
+// Without this, each page request fetches a fresh vqd and the offset is applied to
+// a different session, returning duplicates from page 1.
+const vqdCache = new Map<string, { vqd: string; ts: number }>();
+const VQD_TTL_MS = 5 * 60 * 1000; // 5 minutes — DDG tokens expire quickly
+
+function getCachedVqd(query: string): string | null {
+  const entry = vqdCache.get(query);
+  if (entry && Date.now() - entry.ts < VQD_TTL_MS) return entry.vqd;
+  vqdCache.delete(query);
+  return null;
+}
+
+function setCachedVqd(query: string, vqd: string): void {
+  vqdCache.set(query, { vqd, ts: Date.now() });
+}
+
 export async function searchPexels(
   query: string,
   apiKey: string,
@@ -45,19 +62,24 @@ export async function searchDuckDuckGoImages(
     'Accept-Language': 'en-US,en;q=0.9',
   };
 
-  const vqdRes = await fetch(
-    `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
-    { headers: browserHeaders }
-  );
-  const html = await vqdRes.text();
-
-  // DDG embeds the token in multiple formats — try them all
-  const vqdMatch =
-    html.match(/vqd=["']?([^&"'\s]+)["']?/) ??
-    html.match(/data-vqd=["']([^"']+)["']/) ??
-    html.match(/"vqd"\s*:\s*"([^"]+)"/);
-  if (!vqdMatch) throw new Error('DuckDuckGo: could not extract vqd token');
-  const vqd = vqdMatch[1];
+  // Reuse a cached vqd for the same query so paginated "Load more" requests
+  // stay in the same DDG session and return non-overlapping results.
+  let vqd = getCachedVqd(query);
+  if (!vqd) {
+    const vqdRes = await fetch(
+      `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
+      { headers: browserHeaders }
+    );
+    const html = await vqdRes.text();
+    // DDG embeds the token in multiple formats — try them all
+    const vqdMatch =
+      html.match(/vqd=["']?([^&"'\s]+)["']?/) ??
+      html.match(/data-vqd=["']([^"']+)["']/) ??
+      html.match(/"vqd"\s*:\s*"([^"]+)"/);
+    if (!vqdMatch) throw new Error('DuckDuckGo: could not extract vqd token');
+    vqd = vqdMatch[1];
+    setCachedVqd(query, vqd);
+  }
 
   const res = await fetch(
     `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&o=json&p=1&s=${offset}&u=bing&f=,,,&l=en-us`,
