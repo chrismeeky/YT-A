@@ -171,7 +171,7 @@ export default function AnalyzePage() {
     return () => observer.disconnect();
   }, [loadMore, nextPageToken]);
 
-  const MAX_VIDEOS = 3;
+  const MAX_VIDEOS = 4;
 
   // Warn before leaving while analysis is in progress (reload / tab close)
   useEffect(() => {

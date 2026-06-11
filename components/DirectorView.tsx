@@ -101,8 +101,9 @@ function AssetCard({
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const currentPage = asset.searchPage ?? 1;
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState('');
   const [variationsOpen, setVariationsOpen] = useState(false);
   const [variationsLoading, setVariationsLoading] = useState(false);
   const [variationsError, setVariationsError] = useState('');
@@ -161,6 +162,8 @@ function AssetCard({
       .filter(a => a.id !== asset.id)
       .map(a => ({ rationale: a.rationale, searchQuery: a.searchQuery })),
     page,
+    ...(asset.ddgVqd && page > 1 && { ddgVqd: asset.ddgVqd }),
+    ...(asset.ddgNext && page > 1 && { ddgNext: asset.ddgNext }),
     anthropicApiKey,
     pexelsApiKey,
     braveApiKey,
@@ -171,7 +174,6 @@ function AssetCard({
     if (!analysis) return;
     setLoading(true);
     setError('');
-    setCurrentPage(1);
     try {
       const res = await fetch(
         `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-asset`,
@@ -184,16 +186,19 @@ function AssetCard({
         videos?: StockVideo[];
         images?: RealImage[];
         autoSearchQuery?: string;
+        ddgVqd?: string;
+        ddgNext?: string;
         error?: string;
       };
       if (!res.ok || data.error) { setError(data.error ?? 'Generation failed'); return; }
 
       // Derive a concept label for manually-added assets (rationale === '') from the
       // narration slice so the label slot isn't blank after generation.
-      const derivedRationale = asset.rationale === '' && slotNarrationSlice
-        ? slotNarrationSlice.length > 72
-          ? slotNarrationSlice.slice(0, 69).trimEnd() + '…'
-          : slotNarrationSlice
+      const labelSource = slotNarrationSlice ?? segment.narrationExcerpt;
+      const derivedRationale = asset.rationale === '' && labelSource
+        ? labelSource.length > 72
+          ? labelSource.slice(0, 69).trimEnd() + '…'
+          : labelSource
         : undefined;
 
       onUpdate({
@@ -205,7 +210,10 @@ function AssetCard({
         stockVideos: data.videos ?? asset.stockVideos,
         realImages: data.images ?? asset.realImages,
         ...(data.autoSearchQuery && { searchQuery: data.autoSearchQuery }),
+        ...(data.ddgVqd && { ddgVqd: data.ddgVqd }),
+        ...(data.ddgNext !== undefined && { ddgNext: data.ddgNext ?? undefined }),
         ...(derivedRationale && { rationale: derivedRationale }),
+        searchPage: 1,
       });
       setExpanded(true);
     } catch {
@@ -219,6 +227,7 @@ function AssetCard({
     if (!analysis || loadingMore) return;
     const nextPage = currentPage + 1;
     setLoadingMore(true);
+    setLoadMoreError('');
     try {
       const res = await fetch(
         `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-asset`,
@@ -228,19 +237,24 @@ function AssetCard({
         photos?: StockPhoto[];
         videos?: StockVideo[];
         images?: RealImage[];
+        ddgNext?: string;
         error?: string;
       };
-      if (!res.ok || data.error) return;
+      if (!res.ok || data.error) {
+        setLoadMoreError(data.error ?? 'Search blocked — try editing the search query and regenerating.');
+        return;
+      }
 
       onUpdate({
         ...asset,
         stockPhotos: data.photos ? [...(asset.stockPhotos ?? []), ...data.photos] : asset.stockPhotos,
         stockVideos: data.videos ? [...(asset.stockVideos ?? []), ...data.videos] : asset.stockVideos,
         realImages: data.images ? [...(asset.realImages ?? []), ...data.images] : asset.realImages,
+        ...(data.ddgNext !== undefined && { ddgNext: data.ddgNext ?? undefined }),
+        searchPage: nextPage,
       });
-      setCurrentPage(nextPage);
     } catch {
-      // silently ignore load-more failures
+      setLoadMoreError('Request failed — check your connection.');
     } finally {
       setLoadingMore(false);
     }
@@ -263,7 +277,7 @@ function AssetCard({
             assetType: asset.type,
             narrationExcerpt: segment.narrationExcerpt,
             narrationSlice: asset.narrationSlice,
-            currentRationale: asset.rationale || asset.searchQuery || '',
+            currentRationale: asset.rationale || asset.searchQuery || (slotNarrationSlice ?? segment.narrationExcerpt),
             sceneTitle: sceneData?.title ?? '',
             sceneDescription: sceneData?.sceneDescription ?? '',
             scriptTitle: script.title,
@@ -425,7 +439,7 @@ function AssetCard({
 
       {/* Rationale / search concept + search query */}
       <div className="px-3 pb-2">
-        {concept && (
+        {(concept || !asset.generated) && (
           <>
             <p
               ref={rationaleRef}
@@ -433,7 +447,7 @@ function AssetCard({
               className="text-[11px] text-[#52525b] leading-relaxed cursor-pointer hover:text-[#a1a1aa] transition-colors select-none"
               title="Click to see visual variations"
             >
-              {asset.rationale ? asset.rationale : `Search: ${concept}`}
+              {asset.rationale ? asset.rationale : concept ? `Search: ${concept}` : 'Click to get visual ideas…'}
             </p>
 
             {variationsOpen && variationsPos && typeof document !== 'undefined' && createPortal(
@@ -644,14 +658,19 @@ function AssetCard({
 
           {/* Load more */}
           {isSearch && hasResults && (
-            <button
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="w-full py-1.5 rounded text-[11px] transition-colors disabled:opacity-40"
-              style={{ background: 'var(--surface)', color: '#71717a', border: '1px solid #3f3f46' }}
-            >
-              {loadingMore ? 'Loading…' : '+ Load more'}
-            </button>
+            <>
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full py-1.5 rounded text-[11px] transition-colors disabled:opacity-40"
+                style={{ background: 'var(--surface)', color: '#71717a', border: '1px solid #3f3f46' }}
+              >
+                {loadingMore ? 'Loading…' : '+ Load more'}
+              </button>
+              {loadMoreError && (
+                <p className="text-xs text-red-400 mt-1 text-center">{loadMoreError}</p>
+              )}
+            </>
           )}
         </div>
       )}

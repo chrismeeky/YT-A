@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
-import { generateScript, refineScriptVoice, sanitizeDirectorSegment } from '@/lib/claude';
+import { generateScript } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import { getUserIdFromRequest } from '@/lib/supabase';
-import type { Script, Scene, ScriptSettings, Analysis, DirectorSegment, DirectorAsset } from '@/lib/types';
+import type { Script, Scene, ScriptSettings, Analysis, DirectorAsset } from '@/lib/types';
 
 export const maxDuration = 300;
 
@@ -23,8 +23,9 @@ export async function POST(
     wpm?: number;
     anthropicApiKey?: string;
     directorMode?: boolean;
-    skipPass2?: boolean;
     assetMixOverride?: Record<string, number>;
+    blueprintTranscriptIds?: string[];
+    useChannelStrategy?: boolean;
   };
   const userId = await getUserIdFromRequest(request);
 
@@ -38,7 +39,6 @@ export async function POST(
   }
 
   const directorMode = body.directorMode ?? false;
-  const skipPass2 = body.skipPass2 ?? false;
   const videoLength = body.videoLength ?? 5;
   const wpm        = body.wpm        ?? 150;
   const targetWordCount = Math.round(videoLength * wpm);
@@ -58,6 +58,11 @@ export async function POST(
           try { emit({ message: 'Still generating…' }); } catch { /* stream closed */ }
         }, 15_000);
 
+        // Resolve blueprint transcript text from the analysis's video analyses
+        const blueprintTranscripts = (body.blueprintTranscriptIds ?? [])
+          .map(id => body.analysis.videoAnalyses.find(v => v.videoId === id)?.fullTranscript)
+          .filter((t): t is string => !!t);
+
         let generated: Awaited<ReturnType<typeof generateScript>>['result'];
         let inputTokens: number;
         let outputTokens: number;
@@ -73,7 +78,10 @@ export async function POST(
             body.topic,
             body.targetAudience ?? '',
             instructionParts.join('\n\n'),
-            false, // Pass 1 always writes plain narration; director segmentation is done in Pass 2
+            directorMode,
+            body.assetMixOverride,
+            blueprintTranscripts.length ? blueprintTranscripts : undefined,
+            body.useChannelStrategy ?? true,
           ));
         } finally {
           clearInterval(keepalive);
@@ -81,12 +89,11 @@ export async function POST(
 
         emit({ message: `Parsing ${generated.scenes.length} scenes…` });
 
-        // Pass 1 always produces plain narration scenes; director segments are built in Pass 2
         const scenes: Scene[] = generated.scenes.map(s => ({
           id: uuid(),
           number: s.number,
           title: s.title,
-          narration: s.narration ?? '',
+          narration: directorMode && s.segments?.length ? s.segments.map(seg => seg.text).join(' ') : (s.narration ?? ''),
           sceneDescription: s.sceneDescription,
           estimatedDurationSeconds: s.estimatedDurationSeconds,
           wordCount: s.wordCount,
@@ -97,72 +104,26 @@ export async function POST(
           includeRealImages: false,
           includeStockVideos: false,
           mediaFiles: [],
+          ...(directorMode && s.segments?.length ? {
+            directorSegments: s.segments.map(seg => ({
+              id: uuid(),
+              narrationExcerpt: seg.text,
+              durationSeconds: seg.durationSeconds,
+              assets: (seg.assets ?? []).map((a): DirectorAsset => ({
+                id: uuid(),
+                rank: a.rank,
+                type: a.type as DirectorAsset['type'],
+                rationale: a.note,
+                searchQuery: a.searchQuery ?? undefined,
+                prompts: [],
+                totalDuration: seg.durationSeconds,
+                generated: false,
+                slot: a.slot ?? undefined,
+                narrationSlice: a.narrationSlice ?? undefined,
+              })),
+            })),
+          } : {}),
         }));
-
-        // ── Pass 2: voice refinement ─────────────────────────────────────────
-        let pass2InputTokens = 0;
-        let pass2OutputTokens = 0;
-        if (!skipPass2) try {
-          emit({ message: directorMode ? 'Script drafted. Refining voice and generating director segments…' : 'Script drafted. Refining voice to match channel…' });
-
-          const refineKeepalive = setInterval(() => {
-            try { emit({ message: 'Still refining voice…' }); } catch { /* stream closed */ }
-          }, 15_000);
-
-          let refined: Awaited<ReturnType<typeof refineScriptVoice>>;
-          try {
-            refined = await refineScriptVoice(
-              anthropicApiKey,
-              body.topic,
-              body.analysis,
-              scenes,
-              scriptSettings,
-              directorMode,
-              body.assetMixOverride,
-            );
-          } finally {
-            clearInterval(refineKeepalive);
-          }
-
-          if (refined) {
-            pass2InputTokens  = refined.inputTokens;
-            pass2OutputTokens = refined.outputTokens;
-
-            const refinedMap = new Map(refined.result.map(r => [r.number, r]));
-
-            for (const scene of scenes) {
-              const r = refinedMap.get(scene.number);
-              if (!r) continue;
-
-              if (directorMode && r.segments?.length) {
-                // Director mode: Pass 2 owns all segmentation — build DirectorSegments from scratch
-                scene.directorSegments = r.segments.map(seg => sanitizeDirectorSegment({
-                  id: uuid(),
-                  narrationExcerpt: seg.text,
-                  durationSeconds: seg.durationSeconds,
-                  assets: (seg.assets ?? []).map((a): DirectorAsset => ({
-                    id: uuid(),
-                    rank: a.rank,
-                    type: a.type as DirectorAsset['type'],
-                    rationale: a.note,
-                    searchQuery: a.searchQuery ?? undefined,
-                    prompts: [],
-                    totalDuration: seg.durationSeconds,
-                    generated: false,
-                    slot: a.slot ?? undefined,
-                    narrationSlice: a.narrationSlice ?? undefined,
-                  })),
-                }));
-                scene.narration = r.segments.map(s => s.text).join(' ');
-              } else if (!directorMode && r.narration) {
-                scene.narration = r.narration;
-              }
-            }
-          }
-        } catch (refineErr) {
-          throw refineErr;
-        }
-        // ── end Pass 2 ───────────────────────────────────────────────────────
 
         const script: Script = {
           id: uuid(),
@@ -179,6 +140,7 @@ export async function POST(
           scenes,
           savedToDisk: false,
           directorMode,
+          blueprintTranscriptIds: body.blueprintTranscriptIds,
         };
 
         void trackUsage({
@@ -186,9 +148,9 @@ export async function POST(
           api: 'anthropic',
           project_id: params.id,
           user_id: userId,
-          input_tokens: inputTokens + pass2InputTokens,
-          output_tokens: outputTokens + pass2OutputTokens,
-          estimated_cost_usd: calcAnthropicCost(inputTokens + pass2InputTokens, outputTokens + pass2OutputTokens),
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
         });
 
         emit({ done: true, result: script });
