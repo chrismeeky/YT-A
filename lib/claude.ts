@@ -2065,6 +2065,7 @@ REQUIREMENTS:
 - NARRATION FIDELITY (highest priority): depict EXACTLY what the narration says — the same subject, the same action, the same relationship. If the narration says a person presses their OWN face/temples, the subject must be doing it to themselves — not to another person. If the narration names a specific object, location, or action, it must appear in the prompt. Do NOT substitute, reinterpret, or invent actions or relationships not described.
 - Match the mood, pacing, and visual energy of the narration
 - Include lighting, composition, action/motion${isVideo ? ', and camera movement' : ''}
+${!isVideo ? '- STILL IMAGE ONLY: do NOT include any camera movement, zoom, pan, duration, timing, or animation language (e.g. no "Ken Burns", no "slow zoom", no "8 second hold") — those are video-only directives' : ''}
 - Production-ready — no meta-commentary, no caveats, just the prompt`;
 
   const response = await ai.messages.create({
