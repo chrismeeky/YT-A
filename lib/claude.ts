@@ -223,7 +223,7 @@ RULES:
 
   if (!cleaned.startsWith('{')) {
     throw new Error(
-      `"${video.title}" could not be analysed — the content was declined by the AI. Try a different video.`
+      `"${video.title}" could not be analysed — the AI declined to process this content. This can happen with sensitive topics; retrying usually works.`
     );
   }
 
@@ -558,6 +558,49 @@ function buildVoiceBible(videoAnalyses: Analysis['videoAnalyses']): string {
   return sections.join('\n\n');
 }
 
+export async function extractVoicePrinciples(
+  apiKey: string,
+  transcripts: string[],
+): Promise<string> {
+  const ai = client(apiKey);
+  const combined = transcripts
+    .map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 20000)}`)
+    .join('\n\n');
+
+  const response = await ai.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 3000,
+    system: 'You are a master prose analyst. Your job is to identify the generative craft principles behind a writer\'s voice — not surface patterns, but the underlying mechanisms that produce the effect. Be precise, specific, and practical. Every statement you make must be actionable by a writer.',
+    messages: [{
+      role: 'user',
+      content: `Study these transcripts and extract the author's core craft principles. For each principle, identify:
+1. The MECHANISM — what the author does at the sentence/paragraph level
+2. The PSYCHOLOGICAL EFFECT — why it works on the audience
+3. One SHORT verbatim example from the transcript (15 words max) showing it in action
+4. A PROHIBITION — one specific thing a writer must NOT do when applying this, to prevent mechanical copying or template-filling
+
+Identify exactly these 9 principles:
+
+1. SENTENCE RHYTHM — how sentence length variation is used as a narrative instrument; when and why compression happens
+2. HOOK ARCHITECTURE — the exact emotional entry point technique; what kind of injustice, surprise, or consequence opens the piece and why it produces immediate engagement
+3. DETAIL SELECTION — the precise criteria for which specifics get included; how many jobs each detail must do simultaneously; what single-function details get cut
+4. CHARACTER INTERIORITY — how the inner life of subjects is rendered without psychological adjectives; what physical or behavioural specifics stand in for stated emotions
+5. WITHHOLDING — how information is sequenced to manufacture dread or anticipation; when exactly a revelation is delayed and what the reader feels in the gap
+6. DIRECT ADDRESS — how and when this author speaks directly to the listener as "you"; the exact emotional contexts where it appears (revelation, moral weight, discomfort, challenge — whatever this author uses it for); what it achieves that third-person narration cannot; count how many times per piece it occurs and note the pattern
+7. SUBJECT OR CONCEPT DEPTH — the specific technique for introducing a person, organisation, idea, or system with depth; how physical, environmental, biographical, or structural specifics accumulate to produce understanding in the reader before they have consciously processed it; applicable to any subject — a person's formation, a company's culture, a concept's origin
+8. NARRATIVE VOICE — the author's register, tone, and positioning relative to the listener; how conspiratorial, intimate, or authoritative; how opinion is occasionally inserted and what effect that has
+9. EMOTIONAL ARCHITECTURE — how the emotional journey is paced across the full piece; where intensity peaks, where it deliberately releases, and what the final emotional note leaves the listener with
+
+Return ONLY a plain text block — no JSON, no headers, no markdown. Write each principle as a paragraph starting with its name in caps. Be ruthlessly specific to THIS author's actual techniques. Describe generative mechanisms, not templates.
+
+TRANSCRIPTS:
+${combined}`,
+    }],
+  });
+
+  return response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+}
+
 export async function generateScript(
   apiKey: string,
   analysis: Analysis,
@@ -569,6 +612,7 @@ export async function generateScript(
   assetMixOverride?: Record<string, number>,
   blueprintTranscripts?: string[],
   useChannelStrategy = true,
+  voicePrinciples?: string,
 ): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
   const ai = client(apiKey);
 
@@ -714,17 +758,34 @@ Return ONLY valid JSON:
       {
         role: 'user',
         content: `Create a complete YouTube video script for the topic below, written in the style of the channel shown by the blueprint transcripts.
-${blueprintTranscripts?.length ? `
+${voicePrinciples ? `================================================================
+AUTHOR VOICE PRINCIPLES — these are hard constraints, not suggestions.
 ================================================================
-STUDY THESE TRANSCRIPTS DEEPLY.
-================================================================
-These are real scripts from the author you must write like. Read them carefully. Understand every nuance — the sentence rhythm, the pacing, how tension is built and released, how facts are introduced, how the audience is kept hooked, what makes this voice unmistakable.
+These 9 principles define this author's voice at the craft level. Each one describes a generative mechanism extracted from their real work. Your job is to find a completely fresh expression of each mechanism using this story's material. The examples show the technique in action — do NOT echo their content, structure, or subject matter in any way.
 
-Your goal is to write a script so deeply in this author's style that a fan of this channel would not be able to tell it apart from their real work — but applied entirely to the new topic. Every sentence you write must be original. Do not reproduce phrases from these transcripts. Absorb the voice, then write freshly from it.
+${voicePrinciples}
 
-${blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 15000)}`).join('\n\n')}
 ================================================================
-END OF TRANSCRIPTS. Now write the script for the topic below in this author's voice.
+MANDATORY CONSTRAINTS — these are derived from the 9 principles above. Violation makes the script wrong.
+
+SENTENCE RHYTHM: Apply the compression mechanism described in SENTENCE RHYTHM above. Every scene must contain it. The short sentence must deliver the payload, not introduce a new idea. If a scene has no compression moment, it is not finished.
+
+HOOK: Apply the entry point technique described in HOOK ARCHITECTURE above — not a generic opening, but that specific mechanism applied freshly to this topic's most charged moment. The hook must plant at least one unresolved question before the first scene ends.
+
+DETAIL SELECTION: Apply the dual-function test from DETAIL SELECTION above to every named specific before including it. If a detail does only one job, replace it. No exceptions for convenience.
+
+DIRECT ADDRESS: Apply DIRECT ADDRESS exactly as described above — the same frequency, the same emotional contexts, the same function. Do not approximate. Count your instances before finishing.
+
+SUBJECT/CONCEPT DEPTH: Apply SUBJECT PSYCHOLOGY above wherever a person, system, or idea is being introduced. The mechanism works for any subject — a person's formation, a company's culture, an idea's origin. The reader must arrive at the understanding themselves. No adjectives that do the work for them.
+
+SCENE ENTRIES: No two scenes may open with the same grammatical structure. No scene may open by restating what just happened. Every scene finds its own entry.
+
+WITHHOLDING: Before writing each scene, decide what the listener must not know yet. Apply the sequencing mechanism from WITHHOLDING above. The gap between what the listener suspects and what they are told is where tension lives — protect it.
+================================================================
+` : blueprintTranscripts?.length ? `================================================================
+VOICE REFERENCE TRANSCRIPTS — study the rhythm, detail selection, and sentence architecture.
+================================================================
+${blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 12000)}`).join('\n\n')}
 ================================================================
 ` : ''}
 ${useChannelStrategy ? `CHANNEL STRATEGY (structure, hooks, and narrative architecture — not writing style):

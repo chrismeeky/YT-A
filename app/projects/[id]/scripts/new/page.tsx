@@ -672,7 +672,9 @@ export default function NewScriptPage() {
               {/* Style Sources */}
               {(() => {
                 const analysis = getAnalysis();
-                const videos = analysis?.videoAnalyses?.filter(v => v.fullTranscript) ?? [];
+                const videos = analysis?.videoAnalyses?.filter(v =>
+                  v.fullTranscript || v.transcriptHook || v.transcriptExcerpt
+                ) ?? [];
                 const neitherSelected = !useChannelStrategy && selectedTranscriptIds.length === 0;
                 return (
                   <div className="space-y-3">

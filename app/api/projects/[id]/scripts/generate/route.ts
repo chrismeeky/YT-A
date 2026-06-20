@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
-import { generateScript } from '@/lib/claude';
+import { generateScript, extractVoicePrinciples } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
@@ -58,10 +58,26 @@ export async function POST(
           try { emit({ message: 'Still generating…' }); } catch { /* stream closed */ }
         }, 15_000);
 
-        // Resolve blueprint transcript text from the analysis's video analyses
+        // Resolve blueprint transcript text from the analysis's video analyses.
+        // Fall back to stitched partial excerpts if fullTranscript is missing (older analyses).
         const blueprintTranscripts = (body.blueprintTranscriptIds ?? [])
-          .map(id => body.analysis.videoAnalyses.find(v => v.videoId === id)?.fullTranscript)
+          .map(id => {
+            const v = body.analysis.videoAnalyses.find(v => v.videoId === id);
+            if (!v) return null;
+            return v.fullTranscript
+              || [v.transcriptHook, v.transcriptExcerpt, v.transcriptClimax, v.transcriptOutro]
+                   .filter(Boolean).join('\n\n') || null;
+          })
           .filter((t): t is string => !!t);
+
+        // Extract generative voice principles from transcripts before generation.
+        // This converts raw transcripts into craft mechanisms Claude applies freshly,
+        // rather than patterns it copies literally.
+        let voicePrinciples: string | undefined;
+        if (blueprintTranscripts.length) {
+          emit({ message: 'Extracting author voice principles…' });
+          voicePrinciples = await extractVoicePrinciples(anthropicApiKey, blueprintTranscripts);
+        }
 
         let generated: Awaited<ReturnType<typeof generateScript>>['result'];
         let inputTokens: number;
@@ -82,6 +98,7 @@ export async function POST(
             body.assetMixOverride,
             blueprintTranscripts.length ? blueprintTranscripts : undefined,
             body.useChannelStrategy ?? true,
+            voicePrinciples,
           ));
         } finally {
           clearInterval(keepalive);

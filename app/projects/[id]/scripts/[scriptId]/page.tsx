@@ -304,6 +304,25 @@ export default function ScriptEditorPage() {
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button
+            onClick={() => {
+              const text = script.scenes
+                .map(s => `== Scene ${s.number}: ${s.title} ==\n\n${s.narration}`)
+                .join('\n\n\n');
+              const blob = new Blob([text], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${script.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.txt`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
+            style={{ borderColor: 'var(--border)' }}
+            title="Download full script as plain text"
+          >
+            ⬇ Download
+          </button>
+          <button
             onClick={() => setCharacterModalOpen(true)}
             className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] flex items-center gap-1.5"
             style={{ borderColor: 'var(--border)' }}

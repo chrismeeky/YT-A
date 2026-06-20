@@ -53,6 +53,18 @@ export async function POST(
 
           emit({ message: `Analysing video ${i + 1} of ${videos.length} with Claude…` });
           const { result: analysis, inputTokens, outputTokens } = await analyzeVideo(anthropicApiKey, video, transcript, thumbnail.data);
+
+          if (transcript) {
+            const len = transcript.length;
+            analysis.fullTranscript    = transcript.trim();
+            analysis.transcriptHook    = transcript.slice(0, Math.min(len, 800)).trim();
+            const bodyStart            = Math.floor(len * 0.15);
+            analysis.transcriptExcerpt = transcript.slice(bodyStart, Math.min(len, bodyStart + 1500)).trim();
+            const climaxStart          = Math.floor(len * 0.60);
+            analysis.transcriptClimax  = transcript.slice(climaxStart, Math.min(len, climaxStart + 1200)).trim();
+            analysis.transcriptOutro   = transcript.slice(Math.max(0, len - 600)).trim();
+          }
+
           videoAnalyses.push(analysis);
           totalInputTokens += inputTokens;
           totalOutputTokens += outputTokens;

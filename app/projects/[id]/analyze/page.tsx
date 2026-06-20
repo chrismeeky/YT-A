@@ -273,6 +273,7 @@ export default function AnalyzePage() {
 
     try {
       const videoAnalyses: VideoAnalysis[] = [];
+      let lastVideoError = '';
 
       for (let i = 0; i < selectedVideos.length; i++) {
         if (cancelledRef.current) return;
@@ -306,6 +307,7 @@ export default function AnalyzePage() {
 
         if (!res.ok || data.error) {
           updateStep(stepId, 'error');
+          lastVideoError = data.error ?? `HTTP ${res.status}`;
           continue;
         }
 
@@ -316,7 +318,9 @@ export default function AnalyzePage() {
       if (cancelledRef.current) return;
 
       if (videoAnalyses.length === 0) {
-        setAnalyzeError('All selected videos were declined or failed. Please choose different videos.');
+        setAnalyzeError(lastVideoError
+          ? `Analysis failed: ${lastVideoError}`
+          : 'All selected videos failed to analyse. Please try again or select different videos.');
         setStep('select');
         return;
       }
