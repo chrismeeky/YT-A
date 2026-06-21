@@ -197,10 +197,10 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
             <span className="text-xs text-[#71717a]">Rhetorical Devices</span>
             <Tags items={v.scriptAndLanguage?.rhetoricalDevices} />
           </div>
-          {v.scriptAndLanguage?.standoutPhrases?.length > 0 && (
+          {(v.scriptAndLanguage?.standoutPhrases?.length ?? 0) > 0 && (
             <div>
               <p className="text-xs text-[#71717a] mb-1">Standout Phrases</p>
-              {v.scriptAndLanguage.standoutPhrases.map((p, i) => (
+              {v.scriptAndLanguage?.standoutPhrases?.map((p, i) => (
                 <p key={i} className="text-xs italic text-[#a1a1aa] border-l-2 border-indigo-400 pl-2 mb-1">&ldquo;{p}&rdquo;</p>
               ))}
             </div>

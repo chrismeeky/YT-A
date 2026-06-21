@@ -90,8 +90,8 @@ export interface VideoAnalysis {
     retentionStrengths: string[];
   };
 
-  // 7. Script & Language
-  scriptAndLanguage: {
+  // 7. Script & Language (optional — new analyses omit this; raw transcripts replace it)
+  scriptAndLanguage?: {
     sentenceStyle: string;
     technicalDepth: string;
     directnessLevel: string;
@@ -134,8 +134,8 @@ export interface VideoAnalysis {
     pacingScore: number;
   };
 
-  // 12. Call-to-Action
-  callToAction: {
+  // 12. Call-to-Action (optional — new analyses omit this)
+  callToAction?: {
     ctaPlacements: string[];
     ctaTypes: string[];
     frictionLevel: string;
@@ -150,8 +150,8 @@ export interface VideoAnalysis {
     communityIdentityMarkers: string[];
   };
 
-  // 14. Engagement Signals
-  engagementSignals: {
+  // 14. Engagement Signals (optional — new analyses omit this)
+  engagementSignals?: {
     predictedCommentTypes: string[];
     shareabilityFactors: string[];
     communityBuildingElements: string[];
@@ -166,15 +166,15 @@ export interface VideoAnalysis {
     algorithmScore: number;
   };
 
-  // 16. Monetization Strategy
-  monetizationStrategy: {
+  // 16. Monetization Strategy (optional — new analyses omit this)
+  monetizationStrategy?: {
     directMonetization: string[];
     indirectMonetization: string[];
     revenueModelAssessment: string;
   };
 
-  // 17. Consistency & Channel Strategy
-  channelConsistency: {
+  // 17. Consistency & Channel Strategy (optional — new analyses omit this)
+  channelConsistency?: {
     formatRepeatability: string;
     seriesOrEpisodicNature: string;
     uploadFrequencyImplication: string;
@@ -489,6 +489,9 @@ export interface DirectorAsset {
   stockPhotos?: StockPhoto[];
   stockVideos?: StockVideo[];
   realImages?: RealImage[];
+  ddgVqd?: string;          // DDG session token — reused for "Load more" pagination
+  ddgNext?: string;         // DDG next-page token from previous response
+  searchPage?: number;      // current pagination page for stock/real image search
   // Visual concept variations for this asset (alternative director briefs)
   variations?: string[];
 }
@@ -525,6 +528,7 @@ export interface Script {
   savedToDisk: boolean;
   directorMode?: boolean;
   directorPlan?: DirectorScene[];
+  blueprintTranscriptIds?: string[];
 }
 
 // ─── Research ──────────────────────────────────────────────────────────────

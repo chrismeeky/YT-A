@@ -108,7 +108,7 @@ export async function POST(
           assets.realImageQueries.map(async ({ query, excerpt }) => ({
             query,
             narrationExcerpt: excerpt,
-            images: await searchDuckDuckGoImages(query, 6),
+            images: (await searchDuckDuckGoImages(query, 6)).images,
           })),
         );
       }

@@ -28,6 +28,8 @@ export async function POST(
     characters?: Array<{ name: string; fullDescription: string }>;
     siblingAssets?: Array<{ rationale: string; searchQuery?: string }>;
     page?: number;
+    ddgVqd?: string;
+    ddgNext?: string;
     anthropicApiKey?: string;
     pexelsApiKey?: string;
     braveApiKey?: string;
@@ -103,8 +105,14 @@ export async function POST(
       return NextResponse.json({ images, autoSearchQuery: query });
     }
     if (provider === 'duckduckgo') {
-      const images = await searchDuckDuckGoImages(query, 6, undefined, offset);
-      return NextResponse.json({ images, autoSearchQuery: query });
+      try {
+        const { images, vqd, next } = await searchDuckDuckGoImages(query, 6, undefined, offset, body.ddgVqd, body.ddgNext);
+        console.log('[DDG route] page:', page, 'offset:', offset, 'vqd:', vqd?.slice(0, 20), 'next:', next?.slice(0, 60) ?? 'null', 'images:', images.length);
+        return NextResponse.json({ images, autoSearchQuery: query, ddgVqd: vqd, ddgNext: next });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'DuckDuckGo search failed';
+        return NextResponse.json({ error: msg }, { status: 502 });
+      }
     }
     return NextResponse.json({ images: [], autoSearchQuery: query });
   }

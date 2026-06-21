@@ -45,14 +45,20 @@ export async function searchDuckDuckGoImages(
   count = 6,
   proxyUrl?: string,
   offset = 0,
-): Promise<RealImage[]> {
+  vqdHint?: string,
+  nextToken?: string,
+): Promise<{ images: RealImage[]; vqd: string | null; next: string | null }> {
   const proxy = proxyUrl ?? process.env.NEXT_PUBLIC_DDG_PROXY_URL ?? '';
   if (proxy) {
     const url = `${proxy.replace(/\/$/, '')}?q=${encodeURIComponent(query)}&count=${count}&offset=${offset}`;
+    console.log('[DDG proxy] GET', url);
     const r = await fetch(url);
-    const d = await r.json() as { images?: RealImage[]; error?: string };
-    if (!r.ok) throw new Error(d.error ?? 'DDG proxy search failed');
-    return d.images ?? [];
+    const text = await r.text();
+    console.log('[DDG proxy] status:', r.status, 'body:', text.slice(0, 200));
+    let d: { images?: RealImage[]; error?: string };
+    try { d = JSON.parse(text); } catch { throw new Error(text.slice(0, 200)); }
+    if (!r.ok || d.error) throw new Error(d.error ?? text.slice(0, 200));
+    return { images: d.images ?? [], vqd: null, next: null };
   }
 
   const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -62,16 +68,14 @@ export async function searchDuckDuckGoImages(
     'Accept-Language': 'en-US,en;q=0.9',
   };
 
-  // Reuse a cached vqd for the same query so paginated "Load more" requests
-  // stay in the same DDG session and return non-overlapping results.
-  let vqd = getCachedVqd(query);
+  // Use caller-supplied vqd (from a previous page response) or fall back to cache, then fetch fresh.
+  let vqd = vqdHint ?? getCachedVqd(query);
   if (!vqd) {
     const vqdRes = await fetch(
       `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
       { headers: browserHeaders }
     );
     const html = await vqdRes.text();
-    // DDG embeds the token in multiple formats — try them all
     const vqdMatch =
       html.match(/vqd=["']?([^&"'\s]+)["']?/) ??
       html.match(/data-vqd=["']([^"']+)["']/) ??
@@ -81,27 +85,31 @@ export async function searchDuckDuckGoImages(
     setCachedVqd(query, vqd);
   }
 
-  const res = await fetch(
-    `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&o=json&p=1&s=${offset}&u=bing&f=,,,&l=en-us`,
-    {
-      headers: {
-        'User-Agent': UA,
-        'Referer': 'https://duckduckgo.com/',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'X-Requested-With': 'XMLHttpRequest',
-      },
-    }
-  );
+  // Use the DDG-supplied next token for pagination, otherwise build the initial URL
+  const url = nextToken
+    ? `https://duckduckgo.com/i.js?${nextToken}`
+    : `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${encodeURIComponent(vqd)}&o=json&p=1&s=${offset}&u=bing&f=,,,&l=en-us`;
+
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': UA,
+      'Referer': 'https://duckduckgo.com/',
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
   if (!res.ok) throw new Error(`DuckDuckGo Images error ${res.status}: ${res.statusText}`);
-  const data = await res.json();
+  const data = await res.json() as { results?: unknown[]; next?: string };
+  console.log('[DDG] offset:', offset, 'nextToken:', nextToken ?? 'none', 'response.next:', data.next ?? 'none', 'results:', (data.results ?? []).length);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data.results ?? []).slice(0, count).map((r: any) => ({
+  const images = (data.results ?? []).slice(0, count).map((r: any) => ({
     title: r.title || query,
     thumb: r.thumbnail || r.image || '',
     full: r.image || r.thumbnail || '',
     sourceUrl: r.url || '',
   }));
+  return { images, vqd, next: data.next ?? null };
 }
 
 export async function searchBraveImages(
