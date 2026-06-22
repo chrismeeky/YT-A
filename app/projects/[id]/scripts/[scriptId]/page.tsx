@@ -326,23 +326,28 @@ export default function ScriptEditorPage() {
           />
         </div>
         <div className="flex items-center gap-3 text-xs text-[#52525b] flex-shrink-0">
+          <span
+            className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+            style={isDirector
+              ? { background: 'rgba(99,102,241,0.18)', color: '#818cf8' }
+              : { background: 'rgba(113,113,122,0.18)', color: '#a1a1aa' }}
+          >
+            {isDirector ? 'Director' : 'Regular'}
+          </span>
           <span>{totalWords.toLocaleString()} words</span>
           <span>·</span>
           <span>~{totalMinutes} min</span>
-          {!isDirector && <><span>·</span><span>{script.scenes.length} scenes</span></>}
           {isDirector && <><span>·</span><span>{script.scriptSlices?.length} slices</span></>}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {isDirector && (
-            <button
-              onClick={() => setAudioModalOpen(true)}
-              disabled={generatingAudio}
-              className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
-              style={{ borderColor: 'var(--border)' }}
-            >
-              {generatingAudio ? <><span className="animate-pulse">🎵</span> Generating…</> : <>🎵 Generate Audio</>}
-            </button>
-          )}
+          <button
+            onClick={() => setAudioModalOpen(true)}
+            disabled={generatingAudio}
+            className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            {generatingAudio ? <><span className="animate-pulse">🎵</span> Generating…</> : <>🎵 Generate Audio</>}
+          </button>
           {audioObjectUrl && (
             <div className="flex items-center gap-1.5">
               <audio controls src={audioObjectUrl} className="h-7" style={{ colorScheme: 'dark' }} />
@@ -596,53 +601,6 @@ export default function ScriptEditorPage() {
 
       {/* Main content: scene list + editor */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Scene sidebar — regular mode only; DirectorView has its own */}
-        {!(viewMode === 'director' && script.directorMode) && <div
-          className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-        >
-          <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
-            <span className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Scenes</span>
-          </div>
-          <div className="flex-1 overflow-y-auto py-1">
-            {script.scenes.map(scene => (
-              <button
-                key={scene.id}
-                onClick={() => setActiveSceneId(scene.id)}
-                className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors ${
-                  activeSceneId === scene.id
-                    ? 'bg-indigo-500/15 border-l-2 border-indigo-400'
-                    : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
-                }`}
-              >
-                <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{scene.number}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{scene.title || 'Untitled'}</p>
-                  <p className="text-[10px] text-[#52525b] mt-0.5">
-                    ~{scene.estimatedDurationSeconds}s · {scene.wordCount}w
-                    {scene.audioFile && <span className="ml-1 text-green-500">🎵</span>}
-                    {scene.mediaFiles?.length > 0 && <span className="ml-1 text-blue-400">📁</span>}
-                  </p>
-                </div>
-                <button
-                  onClick={e => { e.stopPropagation(); deleteScene(scene.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-[#333] hover:text-red-400 transition-all text-xs flex-shrink-0 pt-0.5"
-                >
-                  ×
-                </button>
-              </button>
-            ))}
-          </div>
-          <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
-            <button
-              onClick={addScene}
-              className="w-full py-2 rounded-md text-xs border transition-colors text-[#71717a] hover:text-white hover:border-[#444]"
-              style={{ borderColor: 'var(--border)' }}
-            >
-              + Add Scene
-            </button>
-          </div>
-        </div>}
 
         {/* Right panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -658,40 +616,16 @@ export default function ScriptEditorPage() {
               onScriptChange={handleScriptChange}
             />
           ) : (
-            // Regular mode: collapsible full script + scene editor below
-            <>
-              <div className="flex-shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
-                <button
-                  onClick={() => setProductionPanelOpen(v => !v)}
-                  className="w-full flex items-center justify-between px-4 py-2 text-xs text-[#71717a] hover:text-[#a1a1aa] transition-colors"
-                >
-                  <span className="font-medium uppercase tracking-wider">Full Script</span>
-                  <span>{productionPanelOpen ? '▲' : '▼'}</span>
-                </button>
-                {productionPanelOpen && (
-                  <textarea
-                    className="w-full bg-transparent text-sm leading-relaxed resize-none focus:outline-none px-4 pb-4"
-                    style={{ color: 'var(--text)', minHeight: '180px', maxHeight: '40vh', fontFamily: 'inherit' }}
-                    value={script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n')}
-                    onChange={e => handleScriptChange({ ...script, fullScript: e.target.value })}
-                    placeholder="Script will appear here…"
-                    spellCheck
-                  />
-                )}
-              </div>
-              <div className="flex-1 flex overflow-hidden">
-                <SceneEditor
-                  projectId={id}
-                  script={script}
-                  analysis={analysis}
-                  activeSceneId={activeSceneId}
-                  onScriptChange={handleScriptChange}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                  onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
-                />
-              </div>
-            </>
+            // Regular mode: plain continuous script (no slices)
+            <InlineScriptView
+              script={script}
+              analysis={analysis}
+              anthropicApiKey={anthropicApiKey}
+              pexelsApiKey={pexelsApiKey || undefined}
+              braveApiKey={braveApiKey || undefined}
+              realImageProvider={realImageProvider}
+              onScriptChange={handleScriptChange}
+            />
           )}
         </div>
       </div>
