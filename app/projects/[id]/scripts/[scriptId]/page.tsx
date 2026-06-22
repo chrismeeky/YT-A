@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { v4 as uuid } from 'uuid';
 import type { Script, Scene, Analysis, CharacterSheet } from '@/lib/types';
 import SceneEditor from '@/components/SceneEditor';
-import DirectorView from '@/components/DirectorView';
+import InlineScriptView from '@/components/InlineScriptView';
+import AudioConfirmModal from '@/components/AudioConfirmModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import CharacterConsistencyModal from '@/components/CharacterConsistencyModal';
 import { useStorage } from '@/components/StorageProvider';
@@ -35,6 +36,11 @@ export default function ScriptEditorPage() {
   const [characterModalInitialName, setCharacterModalInitialName] = useState<string | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'regular' | 'director'>('regular');
+  const [productionPanelOpen, setProductionPanelOpen] = useState(false);
+  const [audioModalOpen, setAudioModalOpen] = useState(false);
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [audioError, setAudioError] = useState('');
+  const [audioObjectUrl, setAudioObjectUrl] = useState<string | null>(null);
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const [pexelsApiKey, setPexelsApiKey] = useState('');
   const [braveApiKey, setBraveApiKey] = useState('');
@@ -64,6 +70,11 @@ export default function ScriptEditorPage() {
           setScript(prefilled);
           storage.saveScript(id, prefilled);
         }
+      }
+      if (data.audioFile) {
+        storage.getAudioObjectUrl(id, scriptId, scriptId, data.audioFile).then(url => {
+          if (url) setAudioObjectUrl(url);
+        });
       }
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -140,7 +151,7 @@ export default function ScriptEditorPage() {
     setDescOpen(true);
     try {
       const settings = await storage.getSettings();
-      const fullScript = script.scenes.map(s => s.narration).join('\n\n');
+      const fullScript = script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n');
       const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/generate-description`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -159,6 +170,47 @@ export default function ScriptEditorPage() {
       setGeneratingDesc(false);
     }
   };
+
+  const generateFullAudio = async (provider: 'elevenlabs' | 'cartesia') => {
+    if (!script) return;
+    const narration = script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n');
+    if (!narration.trim()) return;
+    setGeneratingAudio(true);
+    setAudioError('');
+    try {
+      const settings = await storage.getSettings();
+      const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          narration,
+          elevenLabsApiKey:     settings.elevenLabsApiKey,
+          elevenLabsVoiceId:    settings.elevenLabsVoiceId,
+          elevenLabsSpeed:      settings.elevenLabsSpeed,
+          elevenLabsStability:  settings.elevenLabsStability,
+          elevenLabsSimilarity: settings.elevenLabsSimilarity,
+          elevenLabsStyle:      settings.elevenLabsStyle,
+          cartesiaApiKey:       settings.cartesiaApiKey,
+          cartesiaVoiceId:      settings.cartesiaVoiceId,
+          cartesiaSpeed:        settings.cartesiaSpeed,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); setAudioError(d.error); return; }
+      const filename = res.headers.get('X-Filename') ?? `audio_script_${scriptId.slice(0, 8)}.mp3`;
+      const buffer = await res.arrayBuffer();
+      // Reuse scene audio storage keyed on a pseudo scene ID = scriptId
+      await storage.saveAudioFile(id, scriptId, scriptId, filename, buffer);
+      handleScriptChange({ ...script, audioFile: filename });
+      const blob = new Blob([buffer], { type: 'audio/mpeg' });
+      setAudioObjectUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
+    } catch {
+      setAudioError('Audio generation failed');
+    } finally {
+      setGeneratingAudio(false);
+    }
+  };
+
 
   const saveNow = async () => {
     if (!script) return;
@@ -247,8 +299,13 @@ export default function ScriptEditorPage() {
     );
   }
 
-  const totalWords = script.scenes.reduce((sum, s) => sum + (s.wordCount || 0), 0);
-  const totalSeconds = script.scenes.reduce((sum, s) => sum + (s.estimatedDurationSeconds || 0), 0);
+  const isDirector = script.directorMode && (script.scriptSlices?.length ?? 0) > 0;
+  const totalWords = isDirector
+    ? (script.scriptSlices ?? []).reduce((sum, s) => sum + s.narrationExcerpt.trim().split(/\s+/).filter(Boolean).length, 0)
+    : script.scenes.reduce((sum, s) => sum + (s.wordCount || 0), 0);
+  const totalSeconds = isDirector
+    ? (script.scriptSlices ?? []).reduce((sum, s) => sum + s.durationSeconds, 0)
+    : script.scenes.reduce((sum, s) => sum + (s.estimatedDurationSeconds || 0), 0);
   const totalMinutes = Math.round(totalSeconds / 60 * 10) / 10;
 
   return (
@@ -272,26 +329,33 @@ export default function ScriptEditorPage() {
           <span>{totalWords.toLocaleString()} words</span>
           <span>·</span>
           <span>~{totalMinutes} min</span>
-          <span>·</span>
-          <span>{script.scenes.length} scenes</span>
+          {!isDirector && <><span>·</span><span>{script.scenes.length} scenes</span></>}
+          {isDirector && <><span>·</span><span>{script.scriptSlices?.length} slices</span></>}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {script.directorMode && (
-            <div className="flex items-center rounded-md border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
-              <button
-                onClick={() => setViewMode('regular')}
-                className={`px-2.5 py-1.5 transition-colors ${viewMode === 'regular' ? 'bg-[#27272a] text-white' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
-              >
-                Regular
-              </button>
-              <button
-                onClick={() => setViewMode('director')}
-                className={`px-2.5 py-1.5 transition-colors flex items-center gap-1 ${viewMode === 'director' ? 'bg-indigo-500/20 text-indigo-300' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
-              >
-                🎬 Director
-              </button>
+          {isDirector && (
+            <button
+              onClick={() => setAudioModalOpen(true)}
+              disabled={generatingAudio}
+              className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              {generatingAudio ? <><span className="animate-pulse">🎵</span> Generating…</> : <>🎵 Generate Audio</>}
+            </button>
+          )}
+          {audioObjectUrl && (
+            <div className="flex items-center gap-1.5">
+              <audio controls src={audioObjectUrl} className="h-7" style={{ colorScheme: 'dark' }} />
+              <a
+                href={audioObjectUrl}
+                download={script.audioFile ?? 'audio.mp3'}
+                className="px-2 py-1 rounded text-xs border text-[#a1a1aa] hover:text-white hover:border-[#444] transition-colors"
+                style={{ borderColor: 'var(--border)' }}
+                title="Download audio"
+              >↓</a>
             </div>
           )}
+          {audioError && <span className="text-xs text-red-400">{audioError}</span>}
           {saveMsg && (
             <span className="text-xs text-green-400">{saveMsg}</span>
           )}
@@ -305,9 +369,8 @@ export default function ScriptEditorPage() {
           </button>
           <button
             onClick={() => {
-              const text = script.scenes
-                .map(s => `== Scene ${s.number}: ${s.title} ==\n\n${s.narration}`)
-                .join('\n\n\n');
+              const text = script.fullScript
+                ?? script.scenes.map(s => `== Scene ${s.number}: ${s.title} ==\n\n${s.narration}`).join('\n\n\n');
               const blob = new Blob([text], { type: 'text/plain' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
@@ -533,82 +596,115 @@ export default function ScriptEditorPage() {
 
       {/* Main content: scene list + editor */}
       <div className="flex flex-1 overflow-hidden">
-        {viewMode === 'director' && script.directorMode ? (
-          <DirectorView
-            script={script}
-            analysis={analysis}
-            onScriptChange={handleScriptChange}
-            anthropicApiKey={anthropicApiKey}
-            pexelsApiKey={pexelsApiKey || undefined}
-            braveApiKey={braveApiKey || undefined}
-            realImageProvider={realImageProvider}
-            activeSceneId={activeSceneId}
-            onActiveSceneChange={setActiveSceneId}
-          />
-        ) : (
-          <>
-            {/* Scene sidebar */}
-            <div
-              className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
-              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-            >
-              <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
-                <span className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Scenes</span>
-              </div>
-              <div className="flex-1 overflow-y-auto py-1">
-                {script.scenes.map(scene => (
-                  <button
-                    key={scene.id}
-                    onClick={() => setActiveSceneId(scene.id)}
-                    className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors ${
-                      activeSceneId === scene.id
-                        ? 'bg-indigo-500/15 border-l-2 border-indigo-400'
-                        : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
-                    }`}
-                  >
-                    <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{scene.number}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">{scene.title || 'Untitled'}</p>
-                      <p className="text-[10px] text-[#52525b] mt-0.5">
-                        ~{scene.estimatedDurationSeconds}s · {scene.wordCount}w
-                        {scene.audioFile && <span className="ml-1 text-green-500">🎵</span>}
-                        {scene.mediaFiles?.length > 0 && <span className="ml-1 text-blue-400">📁</span>}
-                      </p>
-                    </div>
-                    <button
-                      onClick={e => { e.stopPropagation(); deleteScene(scene.id); }}
-                      className="opacity-0 group-hover:opacity-100 text-[#333] hover:text-red-400 transition-all text-xs flex-shrink-0 pt-0.5"
-                    >
-                      ×
-                    </button>
-                  </button>
-                ))}
-              </div>
-              <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
+        {/* Scene sidebar — regular mode only; DirectorView has its own */}
+        {!(viewMode === 'director' && script.directorMode) && <div
+          className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
+          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+        >
+          <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+            <span className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Scenes</span>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {script.scenes.map(scene => (
+              <button
+                key={scene.id}
+                onClick={() => setActiveSceneId(scene.id)}
+                className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors ${
+                  activeSceneId === scene.id
+                    ? 'bg-indigo-500/15 border-l-2 border-indigo-400'
+                    : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
+                }`}
+              >
+                <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{scene.number}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{scene.title || 'Untitled'}</p>
+                  <p className="text-[10px] text-[#52525b] mt-0.5">
+                    ~{scene.estimatedDurationSeconds}s · {scene.wordCount}w
+                    {scene.audioFile && <span className="ml-1 text-green-500">🎵</span>}
+                    {scene.mediaFiles?.length > 0 && <span className="ml-1 text-blue-400">📁</span>}
+                  </p>
+                </div>
                 <button
-                  onClick={addScene}
-                  className="w-full py-2 rounded-md text-xs border transition-colors text-[#71717a] hover:text-white hover:border-[#444]"
-                  style={{ borderColor: 'var(--border)' }}
+                  onClick={e => { e.stopPropagation(); deleteScene(scene.id); }}
+                  className="opacity-0 group-hover:opacity-100 text-[#333] hover:text-red-400 transition-all text-xs flex-shrink-0 pt-0.5"
                 >
-                  + Add Scene
+                  ×
                 </button>
-              </div>
-            </div>
+              </button>
+            ))}
+          </div>
+          <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
+            <button
+              onClick={addScene}
+              className="w-full py-2 rounded-md text-xs border transition-colors text-[#71717a] hover:text-white hover:border-[#444]"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              + Add Scene
+            </button>
+          </div>
+        </div>}
 
-            {/* Scene editor */}
-            <SceneEditor
-              projectId={id}
+        {/* Right panel */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {isDirector ? (
+            // Director mode: inline script with highlighted slices
+            <InlineScriptView
               script={script}
               analysis={analysis}
-              activeSceneId={activeSceneId}
+              anthropicApiKey={anthropicApiKey}
+              pexelsApiKey={pexelsApiKey || undefined}
+              braveApiKey={braveApiKey || undefined}
+              realImageProvider={realImageProvider}
               onScriptChange={handleScriptChange}
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-              onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
             />
-          </>
-        )}
+          ) : (
+            // Regular mode: collapsible full script + scene editor below
+            <>
+              <div className="flex-shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
+                <button
+                  onClick={() => setProductionPanelOpen(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-2 text-xs text-[#71717a] hover:text-[#a1a1aa] transition-colors"
+                >
+                  <span className="font-medium uppercase tracking-wider">Full Script</span>
+                  <span>{productionPanelOpen ? '▲' : '▼'}</span>
+                </button>
+                {productionPanelOpen && (
+                  <textarea
+                    className="w-full bg-transparent text-sm leading-relaxed resize-none focus:outline-none px-4 pb-4"
+                    style={{ color: 'var(--text)', minHeight: '180px', maxHeight: '40vh', fontFamily: 'inherit' }}
+                    value={script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n')}
+                    onChange={e => handleScriptChange({ ...script, fullScript: e.target.value })}
+                    placeholder="Script will appear here…"
+                    spellCheck
+                  />
+                )}
+              </div>
+              <div className="flex-1 flex overflow-hidden">
+                <SceneEditor
+                  projectId={id}
+                  script={script}
+                  analysis={analysis}
+                  activeSceneId={activeSceneId}
+                  onScriptChange={handleScriptChange}
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {audioModalOpen && (
+        <AudioConfirmModal
+          fullScript={script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n')}
+          totalWords={totalWords}
+          totalSeconds={totalSeconds}
+          onConfirm={generateFullAudio}
+          onClose={() => setAudioModalOpen(false)}
+        />
+      )}
 
       {confirmDeleteSceneId && (
         <ConfirmModal

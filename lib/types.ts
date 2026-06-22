@@ -501,6 +501,7 @@ export interface DirectorSegment {
   narrationExcerpt: string;
   durationSeconds: number;
   assets: DirectorAsset[];
+  mediaFiles?: MediaFile[];
 }
 
 export interface DirectorScene {
@@ -517,6 +518,9 @@ export interface Script {
   targetAudience: string;
   additionalInstructions: string;
   thumbnailConcept: string;
+  fullScript?: string;
+  scriptSlices?: DirectorSegment[];
+  audioFile?: string;
   youtubeDescription?: string;
   createdAt: string;
   updatedAt: string;

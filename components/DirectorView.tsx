@@ -74,6 +74,7 @@ function AssetCard({
   realImageProvider,
   visible,
   savingUrl,
+  sliceMediaFiles,
   onUpdate,
   onDelete,
   onSaveToScene,
@@ -91,6 +92,7 @@ function AssetCard({
   realImageProvider?: 'brave' | 'duckduckgo';
   visible: boolean;
   savingUrl: string | null;
+  sliceMediaFiles?: import('@/lib/types').MediaFile[];
   onUpdate: (updated: DirectorAsset) => void;
   onDelete: () => void;
   onSaveToScene: (url: string, name: string, sceneId: string) => Promise<void>;
@@ -114,7 +116,11 @@ function AssetCard({
   const variationsRef = useRef<HTMLDivElement>(null);
 
   const targetScene = script.scenes.find(s => s.id === scene.sceneId);
-  const savedNames = new Set(targetScene?.directorMediaFiles?.map(f => f.originalName) ?? []);
+  const savedNames = new Set(
+    sliceMediaFiles
+      ? sliceMediaFiles.map(f => f.originalName)
+      : (targetScene?.directorMediaFiles?.map(f => f.originalName) ?? [])
+  );
 
   const isAI = asset.type === 'ai-video' || asset.type === 'ai-image';
   const isSearch = asset.type === 'stock-photo' || asset.type === 'stock-video' || asset.type === 'real-image';
@@ -747,7 +753,9 @@ function HighlightedNarration({
 
 // ─── Segment card ─────────────────────────────────────────────────────────────
 
-function SegmentCard({
+export { ASSET_LABELS, ASSET_ICONS, ASSET_COLORS, ALL_TYPES, fmtDuration };
+
+export function SegmentCard({
   segment,
   scene,
   script,
@@ -757,6 +765,7 @@ function SegmentCard({
   braveApiKey,
   realImageProvider,
   savingUrl,
+  initialOpen,
   onSegmentUpdate,
   onSaveToScene,
   onLightbox,
@@ -771,12 +780,13 @@ function SegmentCard({
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
   savingUrl: string | null;
+  initialOpen?: boolean;
   onSegmentUpdate: (updated: DirectorSegment) => void;
   onSaveToScene: (url: string, name: string, sceneId: string) => Promise<void>;
   onLightbox: (src: string, alt: string) => void;
   onVideoPlayer: (src: string, title: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen ?? false);
   // null = closed; 'single' = open for single-slot segment; number = open for that slot index
   const [addPickerSlot, setAddPickerSlot] = useState<number | 'single' | null>(null);
   const [highlightedSlot, setHighlightedSlot] = useState<number | null>(null);
@@ -844,7 +854,7 @@ function SegmentCard({
   const commonCardProps = {
     segment, scene, script, analysis,
     anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider,
-    savingUrl, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
+    savingUrl, sliceMediaFiles: segment.mediaFiles, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
   };
 
   return (

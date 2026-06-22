@@ -509,8 +509,8 @@ interface RawDirectorChunkAsset {
   narrationSlice?: string;
 }
 
-interface RawDirectorChunk {
-  text: string;
+interface RawScriptSlice {
+  narrationExcerpt: string;
   durationSeconds: number;
   assets: RawDirectorChunkAsset[];
 }
@@ -518,15 +518,18 @@ interface RawDirectorChunk {
 interface GeneratedScriptPayload {
   title: string;
   thumbnailConcept: string;
-  scenes: Array<{
+  fullScript: string;
+  // regular mode
+  scenes?: Array<{
     number: number;
     title: string;
-    narration?: string;           // present in regular mode
-    segments?: RawDirectorChunk[]; // present in director mode
+    narration?: string;
     sceneDescription: string;
     estimatedDurationSeconds: number;
     wordCount: number;
   }>;
+  // director mode — flat slices referencing fullScript text directly
+  scriptSlices?: RawScriptSlice[];
   totalEstimatedDuration: number;
   totalWordCount: number;
 }
@@ -644,98 +647,67 @@ export async function generateScript(
     const vg = di.visualSceneGuide;
     const cn = di.contentNature?.classification ?? 'unknown';
     const ps = di.visualBrand?.productionStyle ?? 'not specified';
-    const cutRate = vg?.cutRateShotsPerMinute;
-    const secsPerShot = cutRate ? Math.round(60 / cutRate) : 12;
-    const triggerSecs = Math.round(secsPerShot * 1.8);
     return `
-DIRECTOR MODE — write the narration in self-contained visual segments instead of a single narration block.
+DIRECTOR MODE — after writing fullScript, partition it into visual slices and assign assets.
 
-CHANNEL VISUAL DNA — this is the channel you are directing. Match it exactly:
+CHANNEL VISUAL DNA — match exactly:
 - Production style: ${ps}
 - Content nature: ${cn}${di.contentNature?.reasoning ? ` — ${di.contentNature.reasoning}` : ''}
 - Energy / tone: ${di.contentStyle?.energy ?? ''}${di.contentStyle?.tone ? ` · ${di.contentStyle.tone}` : ''}
-${vg?.brollPattern ? `- How this channel cuts visually during narration: ${vg.brollPattern}` : ''}
+${vg?.brollPattern ? `- How this channel cuts visually: ${vg.brollPattern}` : ''}
 ${vg?.editingRhythm ? `- Editing rhythm: ${vg.editingRhythm}` : ''}
-${vg?.graphicsAndTextUsage ? `- Graphics/text usage: ${vg.graphicsAndTextUsage}` : ''}
 
-AVAILABLE ASSET TYPES — use each type for the right situation:
-- "real-image"  → named real people, documented events, specific locations. searchQuery = "Steve Jobs 2007 iPhone keynote" / "Neil Armstrong moon landing 1969"
-- "stock-video" → moving B-roll that evokes motion, atmosphere, or passage of time. searchQuery = visual mood, NOT the narration subject — "crowded city street night", "empty highway dusk", "factory floor workers"
-- "stock-photo" → a single still that establishes place, object, or mood — use when motion is unnecessary. searchQuery = "empty boardroom glass table", "vintage newspaper front page", "abandoned warehouse dusk"
-- "ai-video"    → slow cinematic pans, abstract or impossible visuals, dramatic reconstructions, stylised sequences that stock libraries cannot provide
-- "ai-image"    → illustrated or stylised stills; use when the visual concept is too specific, abstract, or stylised for stock libraries and does not need motion
+AVAILABLE ASSET TYPES:
+- "real-image"  → named real people, documented events, specific locations. searchQuery = "Steve Jobs 2007 iPhone keynote"
+- "stock-video" → moving B-roll evoking motion, atmosphere, passage of time. searchQuery = visual mood NOT narration subject — "crowded city street night"
+- "stock-photo" → a single still establishing place, object, or mood. searchQuery = "empty boardroom glass table"
+- "ai-video"    → cinematic pans, abstract/impossible visuals, dramatic reconstructions
+- "ai-image"    → illustrated or stylised stills for concepts too specific/abstract for stock
 
-STOCK SEARCH QUERIES: never write the narration subject literally. Think: what footage or photo would a documentary editor cut to here? Use evocative, searchable terms — mood, place, object, action.
+STOCK SEARCH QUERIES: never write the narration subject literally. Think: what would a documentary editor cut to here?
 ${(assetMixOverride ?? di.visualAssetMix) ? (() => {
-    const estimatedSegments = Math.max(10, Math.round(settings.targetWordCount / 55));
+    const estimatedSlices = Math.max(10, Math.round(settings.targetWordCount / 55));
     const rawMix = assetMixOverride ?? di.visualAssetMix!;
     const reasoning = !assetMixOverride && di.visualAssetMix ? di.visualAssetMix.reasoning : 'Custom mix set by the user.';
     const types = (['ai-video', 'ai-image', 'stock-video', 'stock-photo', 'real-image'] as const).filter(t => (rawMix[t] ?? 0) > 0);
     return `
-TARGET ASSET MIX${assetMixOverride ? ' (user-specified — override channel default)' : ' — measured distribution for this channel'}. APPLY IT:
-Estimated segments in this script: ~${estimatedSegments}. Your rank-1 choices must hit approximately:
-${types.map(t => `  • ${t}: ${rawMix[t]}%  →  ~${Math.round(estimatedSegments * (rawMix[t] as number) / 100)} segments`).join('\n')}
+TARGET ASSET MIX — your rank-1 choices must hit approximately:
+Estimated slices: ~${estimatedSlices}
+${types.map(t => `  • ${t}: ${rawMix[t]}%  →  ~${Math.round(estimatedSlices * (rawMix[t] as number) / 100)} slices`).join('\n')}
 Reasoning: ${reasoning}
-
-RULES:
-1. Tally your rank-1 choices as you write. After every scene, check that cumulative counts are tracking the targets above.
-2. If stock-video is running over its target, switch the next eligible atmospheric segment to stock-photo or ai-video instead.
-3. If real-image is running over its target, use stock-photo or stock-video for the next place/mood segment.
-4. ai-video must appear. Use it for slow cinematic pans, stylised transitions, or scenes that are impossible to film.
-5. stock-photo must appear. Use it when a single still is more powerful than moving footage.
-6. ai-image must not crowd out the other types — only use it when no stock or real visual fits.`;
+Tally rank-1 choices as you write. Adjust if running over target for any type.`;
   })() : ''}
 
-ASSET SELECTION — per segment:
-Ask: what would a director for THIS channel choose, given the channel DNA and the running tally above? Rank-1 = best creative call. Rank-2 = strongest alternative. Never default to ai-image because a searchQuery is hard to write — write the searchQuery first, then decide the type.
-
-SEGMENT RULES:
-- Each segment is 1–4 complete sentences forming one coherent visual idea.
-- Segment boundaries MUST fall at sentence ends — never break mid-sentence.
-- Segments concatenated in order form the full continuous narration without gaps or added words.
-- EVERY segment MUST have exactly 2 assets (rank 1, rank 2). No exceptions — even abstract, transitional, or difficult-to-visualise segments must have 2 assets. If a segment is hard to visualise, use ai-image or stock-photo with a descriptive searchQuery derived from the mood or subject.
+SLICE RULES:
+- Write fullScript first as a complete independent piece of prose (paragraph breaks your decision).
+- Then partition fullScript into scriptSlices. Each slice's "narrationExcerpt" MUST be an EXACT verbatim consecutive substring of fullScript — copy the text character-for-character.
+- Slices are ordered, non-overlapping, and together cover the ENTIRE fullScript text with NO gaps.
+- Each slice = 1–4 complete sentences forming one coherent visual idea. Boundaries fall at sentence ends only.
+- EVERY slice MUST have exactly 2 assets (rank 1, rank 2). No exceptions.
 - Asset "note": ≤5 words — the director's brief for this shot.
 - "searchQuery": required for stock-video, stock-photo, real-image; omit for ai-video and ai-image.
-- durationSeconds per segment = round((segmentWordCount / ${settings.wpm}) × 60)
-
-MULTI-SHOT SLOTS — this channel cuts every ~${secsPerShot}s:
-  IF durationSeconds < ${triggerSecs}  →  single-shot. 2 assets, no "slot" or "narrationSlice".
-  IF durationSeconds ≥ ${triggerSecs}  →  multi-shot. REQUIRED.
-    - slots = floor(durationSeconds ÷ ${secsPerShot}), minimum 2.
-    - Divide the segment's text into that many groups of consecutive sentences at natural thought breaks.
-    - Every asset gets "slot" (0-indexed) and "narrationSlice" (exact verbatim sentences from that slot).
-    - 2 assets per slot. Every sentence covered exactly once.
+- durationSeconds = round((sliceWordCount / ${settings.wpm}) × 60)
 
 Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
-  "scenes": [
+  "fullScript": "The complete narration as a single continuous piece of prose. Paragraph breaks are your editorial decision. Use \\n\\n between paragraphs.",
+  "scriptSlices": [
     {
-      "number": 1,
-      "title": "Scene label (Hook | Setup | Main Point 1 | CTA etc.)",
-      "sceneDescription": "One sentence: what the viewer sees during this scene",
-      "estimatedDurationSeconds": 120,
-      "wordCount": 300,
-      "segments": [
-        {
-          "text": "Short segment — under trigger threshold.",
-          "durationSeconds": 10,
-          "assets": [
-            { "rank": 1, "type": "real-image", "note": "archival photo named subject 1961", "searchQuery": "specific real subject name 1961" },
-            { "rank": 2, "type": "stock-photo", "note": "mountain winter atmospheric", "searchQuery": "ural mountains snow winter" }
-          ]
-        },
-        {
-          "text": "Longer segment spanning multiple slots. First sentences here. Second group of sentences here.",
-          "durationSeconds": 30,
-          "assets": [
-            { "rank": 1, "type": "stock-video", "note": "city street at night", "searchQuery": "crowded city street night", "slot": 0, "narrationSlice": "First sentences here." },
-            { "rank": 2, "type": "ai-image", "note": "atmospheric mood dark", "slot": 0, "narrationSlice": "First sentences here." },
-            { "rank": 1, "type": "real-image", "note": "subject archival 1972", "searchQuery": "subject name 1972", "slot": 1, "narrationSlice": "Second group of sentences here." },
-            { "rank": 2, "type": "stock-photo", "note": "evidence forensic still", "searchQuery": "forensic evidence table", "slot": 1, "narrationSlice": "Second group of sentences here." }
-          ]
-        }
+      "narrationExcerpt": "Exact verbatim text from fullScript — copied character for character.",
+      "durationSeconds": 10,
+      "assets": [
+        { "rank": 1, "type": "real-image", "note": "archival photo subject 1961", "searchQuery": "subject name 1961" },
+        { "rank": 2, "type": "stock-photo", "note": "mountain winter atmospheric", "searchQuery": "ural mountains snow winter" }
+      ]
+    },
+    {
+      "narrationExcerpt": "Next consecutive sentences from fullScript.",
+      "durationSeconds": 8,
+      "assets": [
+        { "rank": 1, "type": "stock-video", "note": "city street night", "searchQuery": "crowded city street night" },
+        { "rank": 2, "type": "ai-image", "note": "atmospheric mood dark" }
       ]
     }
   ],
@@ -746,12 +718,11 @@ Return ONLY valid JSON:
 
   const response = await ai.messages.create({
     model: 'claude-sonnet-4-6',
-    // Director mode is JSON-heavy: each segment adds ~150–200 tokens of structure on top of narration.
-    // At ~15 words/segment, that's ~12–15 tokens per target word. Use 20× for comfortable headroom,
-    // especially now that multi-shot segments are mandatory and increase asset count further.
+    // Director mode: fullScript (~1× words) + scriptSlices JSON (~8× words in structure overhead).
+    // Regular mode: fullScript + scenes JSON (~5× words).
     max_tokens: directorMode
-      ? Math.min(64000, Math.max(18000, Math.round(settings.targetWordCount * 20)))
-      : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 6))),
+      ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 14)))
+      : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 10))),
     system:
       'You are an expert YouTube scriptwriter. Respond ONLY with valid JSON, no markdown code blocks, no prose.',
     messages: [
@@ -862,6 +833,7 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
+  "fullScript": "The complete narration as a single continuous piece of prose. Write this INDEPENDENTLY — do not assemble it from the scenes array. Paragraph breaks are your editorial decision based on narrative rhythm, topic shifts, and pacing. Use \\n\\n between paragraphs. This is the reader-facing script; it must read as a cohesive piece of writing, not a stitched list.",
   "scenes": [
     {
       "number": 1,

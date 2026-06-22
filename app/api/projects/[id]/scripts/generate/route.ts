@@ -5,7 +5,7 @@ import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcAnthropicCost } from '@/lib/usage';
 import { getUserIdFromRequest } from '@/lib/supabase';
-import type { Script, Scene, ScriptSettings, Analysis, DirectorAsset } from '@/lib/types';
+import type { Script, Scene, ScriptSettings, Analysis, DirectorAsset, DirectorSegment } from '@/lib/types';
 
 export const maxDuration = 300;
 
@@ -104,43 +104,46 @@ export async function POST(
           clearInterval(keepalive);
         }
 
-        emit({ message: `Parsing ${generated.scenes.length} scenes…` });
+        // Director mode: parse flat scriptSlices; regular mode: parse scenes array
+        let scenes: Scene[] = [];
+        let scriptSlices: DirectorSegment[] | undefined;
 
-        const scenes: Scene[] = generated.scenes.map(s => ({
-          id: uuid(),
-          number: s.number,
-          title: s.title,
-          narration: directorMode && s.segments?.length ? s.segments.map(seg => seg.text).join(' ') : (s.narration ?? ''),
-          sceneDescription: s.sceneDescription,
-          estimatedDurationSeconds: s.estimatedDurationSeconds,
-          wordCount: s.wordCount,
-          includeImagePrompt: true,
-          includeVideoPrompt: true,
-          includeStockUrl: false,
-          includeStockPhotos: false,
-          includeRealImages: false,
-          includeStockVideos: false,
-          mediaFiles: [],
-          ...(directorMode && s.segments?.length ? {
-            directorSegments: s.segments.map(seg => ({
+        if (directorMode && generated.scriptSlices?.length) {
+          emit({ message: `Parsing ${generated.scriptSlices.length} visual slices…` });
+          scriptSlices = generated.scriptSlices.map(s => ({
+            id: uuid(),
+            narrationExcerpt: s.narrationExcerpt,
+            durationSeconds: s.durationSeconds,
+            assets: (s.assets ?? []).map((a): DirectorAsset => ({
               id: uuid(),
-              narrationExcerpt: seg.text,
-              durationSeconds: seg.durationSeconds,
-              assets: (seg.assets ?? []).map((a): DirectorAsset => ({
-                id: uuid(),
-                rank: a.rank,
-                type: a.type as DirectorAsset['type'],
-                rationale: a.note,
-                searchQuery: a.searchQuery ?? undefined,
-                prompts: [],
-                totalDuration: seg.durationSeconds,
-                generated: false,
-                slot: a.slot ?? undefined,
-                narrationSlice: a.narrationSlice ?? undefined,
-              })),
+              rank: a.rank,
+              type: a.type as DirectorAsset['type'],
+              rationale: a.note,
+              searchQuery: a.searchQuery ?? undefined,
+              prompts: [],
+              totalDuration: s.durationSeconds,
+              generated: false,
             })),
-          } : {}),
-        }));
+          }));
+        } else if (generated.scenes?.length) {
+          emit({ message: `Parsing ${generated.scenes.length} scenes…` });
+          scenes = generated.scenes.map(s => ({
+            id: uuid(),
+            number: s.number,
+            title: s.title,
+            narration: s.narration ?? '',
+            sceneDescription: s.sceneDescription,
+            estimatedDurationSeconds: s.estimatedDurationSeconds,
+            wordCount: s.wordCount,
+            includeImagePrompt: true,
+            includeVideoPrompt: true,
+            includeStockUrl: false,
+            includeStockPhotos: false,
+            includeRealImages: false,
+            includeStockVideos: false,
+            mediaFiles: [],
+          }));
+        }
 
         const script: Script = {
           id: uuid(),
@@ -151,6 +154,8 @@ export async function POST(
           targetAudience:         body.targetAudience         ?? '',
           additionalInstructions: body.additionalInstructions ?? '',
           thumbnailConcept: generated.thumbnailConcept,
+          fullScript: generated.fullScript,
+          scriptSlices,
           createdAt:  new Date().toISOString(),
           updatedAt:  new Date().toISOString(),
           settings:   scriptSettings,
