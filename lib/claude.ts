@@ -628,9 +628,18 @@ export async function generateScript(
     ...(!directorMode && { contentNature: analysis.channelInsights.contentNature }),
   };
 
+  // For Grok in director mode, we always use two passes:
+  //   Pass 1 — write fullScript only (no slices). This avoids the model self-regulating
+  //             to a short script because it needs to fit both the prose AND 80+ slices
+  //             within grok-4.3's ~16k output token ceiling.
+  //   Pass 2 — send the fullScript back and ask Grok to slice it.
+  // Claude handles director mode in a single pass as before.
+  const grokDirectorMode = directorMode && llm.provider === 'grok';
+
   // Pre-compute director mode section outside the template literal to avoid IIFE complexity
   const directorSection = (() => {
-    if (!directorMode) return '';
+    // Grok Pass 1 writes prose only — no slicing instruction needed here
+    if (!directorMode || grokDirectorMode) return '';
     const di = analysis.channelInsights;
     const vg = di.visualSceneGuide;
     const cn = di.contentNature?.classification ?? 'unknown';
@@ -706,16 +715,56 @@ Return ONLY valid JSON:
 }`;
   })();
 
+  // Pre-compute the Grok Pass 1 JSON schema block (avoids IIFE inside template literal)
+  const grokPass1Schema = (() => {
+    const wc = settings.targetWordCount;
+    const sections = [
+      { name: 'HOOK', pct: 0.08 },
+      { name: 'BACKGROUND', pct: 0.12 },
+      { name: 'ACT 1 — Early events', pct: 0.20 },
+      { name: 'ACT 2 — Escalation', pct: 0.20 },
+      { name: 'ACT 3 — Peak / turning point', pct: 0.20 },
+      { name: 'AFTERMATH / INVESTIGATION', pct: 0.12 },
+      { name: 'OUTRO / REFLECTION', pct: 0.08 },
+    ];
+    const sectionList = sections.map(s => `  ${s.name}: ~${Math.round(wc * s.pct)} words`).join('\n');
+    return `SECTION TARGETS — write EACH section to its word count before moving on:
+${sectionList}
+Total: AT LEAST ${wc} words. Do not combine or skip sections. Do not stop writing until all sections are complete.
+
+Return ONLY valid JSON (no scriptSlices — slicing is a separate step):
+{
+  "title": "Video title following the channel's exact title formula",
+  "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
+  "fullScript": "The complete narration across all 7 sections — AT LEAST ${wc} words. Begin with the hook. Use \\n\\n between paragraphs. Do NOT label sections in the script.",
+  "totalEstimatedDuration": ${settings.videoLength * 60},
+  "totalWordCount": 0
+}
+(Replace totalWordCount with the actual integer word count of fullScript before returning.)`;
+  })();
+
   const result = await llmComplete(llm, {
     claudeModel: 'claude-sonnet-4-6',
     // Director mode: fullScript (~1× words) + scriptSlices JSON (~8× words in structure overhead).
     // Regular mode: fullScript + scenes JSON (~5× words).
-    maxTokens: directorMode
+    maxTokens: grokDirectorMode
+      // Grok Pass 1: prose only, reasoning: 'none' → multiplier is 1×, so maxOutputTokens = maxTokens.
+      // Set to 29,000 (the safe ceiling under the 30k hard cap) so the model never gets truncated
+      // regardless of how rich the context is (voice principles, transcripts, strategy JSON).
+      ? 29000
+      : directorMode
       ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 14)))
       : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 10))),
+    // 'none' reasoning: no reasoning tokens consumed, all 14,500 tokens go to prose output.
+    // We compensate by giving the model explicit per-section word count targets in the prompt.
     grokReasoningEffort: 'none',
-    system:
-      'You are an expert YouTube scriptwriter. Respond ONLY with valid JSON, no markdown code blocks, no prose.',
+    system: `You are an expert YouTube scriptwriter. Respond ONLY with valid JSON — no markdown fences, no prose outside the JSON.
+
+CRITICAL WORD COUNT RULE: The fullScript field MUST contain AT LEAST ${settings.targetWordCount} words. This is non-negotiable.
+- Target: ${settings.targetWordCount} words (${settings.videoLength} min × ${settings.wpm} WPM)
+- Minimum acceptable: ${Math.round(settings.targetWordCount * 0.95)} words
+- A short script is a broken script. Do NOT stop early. Do NOT summarise. Write every section in full.
+- The JSON must include a "totalWordCount" integer field with the actual word count of fullScript.`,
     messages: [
       {
         role: 'user',
@@ -820,7 +869,7 @@ ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to 
 - VISUAL SUBJECT: sceneDescriptions and thumbnailConcept should default to the narrative lens subject${strategy.narrativeLens ? ` — ${strategy.narrativeLens.split('.')[0]}` : ''}. When the narration explicitly focuses on another person or place, the visual follows the narration. Only default to the primary subject when the narration is ambiguous.
 ${!directorMode ? '- Do NOT include image prompts or video prompts — those are generated separately on demand' : ''}
 
-${directorSection}${!directorMode ? `Return ONLY valid JSON:
+${directorSection}${grokDirectorMode ? grokPass1Schema : !directorMode ? `Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
@@ -844,14 +893,110 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
 
   if (result.stopReason === 'max_tokens') {
     throw new Error(
-      'Script generation was truncated — try a shorter video length or fewer scenes. Alternatively, try again.'
+      `Script generation was truncated (output_tokens: ${result.outputTokens}) — try a shorter video length or try again.`
     );
   }
 
   const parsed = parseScriptJSON(result.text);
 
+  // Grok director mode: Pass 1 produced prose only — now run Pass 2 to slice it.
+  if (grokDirectorMode) {
+    const sliceResult = await grokSliceScript(llm, parsed, settings, analysis, assetMixOverride);
+    return {
+      result: { ...parsed, scriptSlices: sliceResult.scriptSlices },
+      inputTokens: result.inputTokens + sliceResult.inputTokens,
+      outputTokens: result.outputTokens + sliceResult.outputTokens,
+    };
+  }
+
   return {
     result: parsed,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  };
+}
+
+async function grokSliceScript(
+  llm: LLMConfig,
+  parsed: GeneratedScriptPayload,
+  settings: ScriptSettings,
+  analysis: Analysis,
+  assetMixOverride?: Record<string, number>,
+): Promise<{ scriptSlices: RawScriptSlice[]; inputTokens: number; outputTokens: number }> {
+  const di = analysis.channelInsights;
+  // Base slice count on actual script length, not the target — they can differ if Pass 1
+  // generated a shorter script, and telling Grok to make 54 slices on a 700-word script
+  // causes it to stop early and leave the rest unsliced.
+  const actualWordCount = parsed.fullScript?.split(/\s+/).filter(Boolean).length ?? settings.targetWordCount;
+  const estimatedSlices = Math.max(5, Math.round(actualWordCount / 55));
+  const rawMix = assetMixOverride ?? di.visualAssetMix;
+  const types = rawMix
+    ? (['ai-video', 'ai-image', 'stock-video', 'stock-photo', 'real-image'] as const).filter(t => (rawMix[t] ?? 0) > 0)
+    : (['stock-video', 'ai-image', 'real-image'] as const);
+  const mixInstruction = rawMix
+    ? `TARGET ASSET MIX — rank-1 choices must hit approximately:\n${types.map(t => `  • ${t}: ${rawMix[t]}%  → ~${Math.round(estimatedSlices * (rawMix[t] as number) / 100)} slices`).join('\n')}`
+    : '';
+
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    // Use 'none' reasoning: all 29k tokens go to JSON output (no reasoning overhead).
+    // Slicing a given text needs no multi-step reasoning — the model just reads and partitions.
+    maxTokens: 29000,
+    grokReasoningEffort: 'none',
+    system: 'You are a visual director. Respond ONLY with valid JSON, no markdown, no prose.',
+    messages: [{
+      role: 'user',
+      content: `Partition the following YouTube script into visual director slices.
+
+FULL SCRIPT:
+${parsed.fullScript}
+
+RULES:
+- narrationExcerpt MUST be EXACT verbatim consecutive text copied character-for-character from the script above.
+- Slices are ordered, non-overlapping, and together cover the ENTIRE script with NO gaps.
+- Each slice = 1–4 complete sentences forming one coherent visual idea. Boundaries at sentence ends only.
+- Every slice MUST have exactly 2 assets (rank 1, rank 2). No exceptions.
+- durationSeconds = round((sliceWordCount / ${settings.wpm}) × 60)
+- Target ~${estimatedSlices} slices total.
+
+${mixInstruction}
+
+ASSET TYPES:
+- "real-image"  → named real people, documented events, specific locations. searchQuery = specific name/event/year.
+- "stock-video" → moving B-roll evoking motion or atmosphere. searchQuery = visual mood NOT the narration subject.
+- "stock-photo" → a single still establishing place, object, or mood.
+- "ai-video"    → cinematic pans, abstract visuals, dramatic reconstructions.
+- "ai-image"    → illustrated or stylised stills for specific concepts.
+- "searchQuery" required for: stock-video, stock-photo, real-image. Omit for: ai-video, ai-image.
+- "note" ≤5 words — the director's brief for this shot.
+
+CHANNEL VISUAL DNA:
+- Production style: ${di.visualBrand?.productionStyle ?? 'not specified'}
+- Content nature: ${di.contentNature?.classification ?? 'unknown'}
+
+Return ONLY valid JSON:
+{
+  "scriptSlices": [
+    {
+      "narrationExcerpt": "Exact verbatim text from the script.",
+      "durationSeconds": 10,
+      "assets": [
+        { "rank": 1, "type": "real-image", "note": "subject photo 1981", "searchQuery": "Wayne Williams Atlanta 1981" },
+        { "rank": 2, "type": "stock-video", "note": "river at dawn", "searchQuery": "river mist early morning" }
+      ]
+    }
+  ]
+}`,
+    }],
+  });
+
+  if (result.stopReason === 'max_tokens') {
+    throw new Error('Slice generation was truncated — try again.');
+  }
+
+  const sliceParsed = parseScriptJSON(result.text) as unknown as { scriptSlices: RawScriptSlice[] };
+  return {
+    scriptSlices: sliceParsed.scriptSlices ?? [],
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
   };

@@ -103,7 +103,6 @@ async function claudeComplete(apiKey: string, params: LLMCompleteParams): Promis
   const ai = new Anthropic({ apiKey });
   const model = params.claudeModel ?? 'claude-sonnet-4-6';
 
-  // Cast: LLMContentBlock[] is structurally compatible with Anthropic.ContentBlockParam[]
   const messages = params.messages as Anthropic.MessageParam[];
 
   const opts: Parameters<typeof ai.messages.create>[1] = params.timeout
@@ -114,7 +113,8 @@ async function claudeComplete(apiKey: string, params: LLMCompleteParams): Promis
     ? { headers: { 'anthropic-beta': params.anthropicBeta } }
     : {};
 
-  const response = await ai.messages.create(
+  // Retry up to 3 times on 529 overload errors (Anthropic servers temporarily at capacity).
+  const createMsg = () => ai.messages.create(
     {
       model,
       max_tokens: params.maxTokens,
@@ -123,6 +123,20 @@ async function claudeComplete(apiKey: string, params: LLMCompleteParams): Promis
     },
     { ...opts, ...extra },
   );
+
+  let response = await (async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 5000));
+      try {
+        return await createMsg();
+      } catch (err: unknown) {
+        const status = (err as { status?: number })?.status;
+        if (status !== 529 || attempt === 2) throw err;
+      }
+    }
+    // unreachable — loop always returns or throws
+    return createMsg();
+  })();
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
   return {
@@ -189,7 +203,8 @@ async function grokComplete(apiKey: string, params: LLMCompleteParams): Promise<
   // Reasoning tokens consume the same max_output_tokens budget.
   // Add headroom: low=2×, high=3× so actual text output isn't starved.
   const reasoningMultiplier = reasoningEffort === 'high' ? 3 : reasoningEffort === 'low' ? 2 : 1;
-  const maxOutputTokens = Math.round(params.maxTokens * reasoningMultiplier);
+  // Cap at 29,000 — grok-4.3 hard limit is 30,000 (reasoning + text combined).
+  const maxOutputTokens = Math.min(29000, Math.round(params.maxTokens * reasoningMultiplier));
 
   const body: Record<string, unknown> = {
     model: 'grok-4.3',
@@ -234,8 +249,13 @@ async function grokComplete(apiKey: string, params: LLMCompleteParams): Promise<
   const messageOutput = data.output?.find(o => o.type === 'message');
   const text = messageOutput?.content?.find(c => c.type === 'output_text')?.text ?? '';
 
-  const isIncomplete = data.status === 'incomplete' || data.incomplete_details?.reason === 'max_tokens';
-  const stopReason = isIncomplete ? 'max_tokens' : 'end_turn';
+  // Only treat as truncated when the API explicitly says max_tokens was the reason.
+  // data.status === 'incomplete' alone can fire for content filters, context limits, etc.
+  const stopReason = data.incomplete_details?.reason === 'max_tokens' ? 'max_tokens' : 'end_turn';
+
+  if (data.status === 'incomplete' && stopReason !== 'max_tokens') {
+    throw new Error(`Grok generation stopped unexpectedly: ${data.incomplete_details?.reason ?? data.status}`);
+  }
 
   return {
     text,
