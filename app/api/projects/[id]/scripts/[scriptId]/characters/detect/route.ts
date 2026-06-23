@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 
 export async function POST(
   request: NextRequest,
@@ -10,12 +10,16 @@ export async function POST(
   const body = (await request.json()) as {
     scenes: Array<{ narration: string; title: string }>;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
   };
 
-  const apiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!apiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   if (!body.scenes?.length) {
     return NextResponse.json({ characters: [] });
@@ -23,10 +27,9 @@ export async function POST(
 
   const fullText = body.scenes.map(s => s.narration).join('\n\n');
 
-  const ai = new Anthropic({ apiKey });
-  const response = await ai.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 512,
+  const response = await llmComplete(llm, {
+    claudeModel: 'claude-haiku-4-5-20251001',
+    maxTokens: 512,
     system: 'You are a script analyst. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
@@ -53,16 +56,17 @@ Return an empty array if no characters are found.`,
     ],
   });
 
+  const { cost: detectCost, api: detectApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
   void trackUsage({
     operation: 'detect-characters',
-    api: 'anthropic',
+    api: detectApi,
     project_id: params.id,
-    input_tokens: response.usage.input_tokens,
-    output_tokens: response.usage.output_tokens,
-    estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens, 'claude-haiku-4-5-20251001'),
+    input_tokens: response.inputTokens,
+    output_tokens: response.outputTokens,
+    estimated_cost_usd: detectCost,
   });
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '{}';
+  const raw = response.text || '{}';
   let cleaned = raw.trim();
   if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
 

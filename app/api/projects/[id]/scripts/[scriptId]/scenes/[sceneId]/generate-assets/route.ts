@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateSceneAssets } from '@/lib/claude';
 import { searchPexels, searchBraveImages, searchDuckDuckGoImages, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import type { Scene, Analysis, CharacterSheet, PromptDetail, StockPhotoSegment, RealImageSegment, StockVideoSegment } from '@/lib/types';
 
 export async function POST(
@@ -20,6 +21,8 @@ export async function POST(
     realImages?: boolean;
     stockVideos?: boolean;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
@@ -30,10 +33,12 @@ export async function POST(
     usedFingerprints?: string[];
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   if (!body.scene?.id || !body.analysis?.id) {
     return NextResponse.json({ error: 'Scene and analysis objects required.' }, { status: 400 });
@@ -44,7 +49,7 @@ export async function POST(
 
   try {
     const { result: assets, inputTokens, outputTokens } = await generateSceneAssets(
-      anthropicApiKey,
+      llm,
       scene,
       analysis.channelInsights,
       {
@@ -64,13 +69,14 @@ export async function POST(
       body.usedFingerprints,
     );
 
+    const { cost: assetsCost, api: assetsApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({
       operation: 'generate-assets',
-      api: 'anthropic',
+      api: assetsApi,
       project_id: params.id,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+      estimated_cost_usd: assetsCost,
     });
 
     let stockPhotoSegments: StockPhotoSegment[] | undefined;

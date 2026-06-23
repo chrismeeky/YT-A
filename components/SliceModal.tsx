@@ -12,6 +12,8 @@ interface Props {
   script: Script;
   analysis: Analysis | null;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
@@ -29,6 +31,8 @@ export default function SliceModal({
   script,
   analysis,
   anthropicApiKey,
+  xaiApiKey,
+  llmProvider,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
@@ -190,6 +194,8 @@ export default function SliceModal({
                 script={script}
                 analysis={analysis}
                 anthropicApiKey={anthropicApiKey}
+                xaiApiKey={xaiApiKey}
+                llmProvider={llmProvider}
                 pexelsApiKey={pexelsApiKey}
                 braveApiKey={braveApiKey}
                 realImageProvider={realImageProvider}

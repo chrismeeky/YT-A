@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 
 export const maxDuration = 60;
 
@@ -91,12 +91,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     urls: string[];
     topic?: string;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
   if (!body.urls?.length) {
     return NextResponse.json({ error: 'At least one URL is required.' }, { status: 400 });
   }
@@ -121,10 +125,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     .map((p, i) => `--- SOURCE ${i + 1}: ${p.url} ---\n${p.text}`)
     .join('\n\n');
 
-  const ai = new Anthropic({ apiKey: anthropicApiKey });
-  const response = await ai.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
+  const response = await llmComplete(llm, {
+    claudeModel: 'claude-haiku-4-5-20251001',
+    maxTokens: 1024,
     messages: [{
       role: 'user',
       content: `You are helping prepare context for a YouTube scriptwriter.
@@ -137,17 +140,17 @@ Return ONLY the extracted context, nothing else.`,
     }],
   });
 
-  const model = 'claude-haiku-4-5-20251001';
+  const { cost: ctxCost, api: ctxApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
   void trackUsage({
     operation: 'extract-context',
-    api: 'anthropic',
+    api: ctxApi,
     project_id: params.id,
-    input_tokens: response.usage.input_tokens,
-    output_tokens: response.usage.output_tokens,
-    estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens, model),
+    input_tokens: response.inputTokens,
+    output_tokens: response.outputTokens,
+    estimated_cost_usd: ctxCost,
   });
 
-  const context = (response.content[0] as { type: string; text: string }).text.trim();
+  const context = response.text.trim();
   const warnings = failed.length
     ? failed.map(p => `${p.url}: ${p.error}`)
     : undefined;

@@ -11,6 +11,8 @@ interface Props {
   onSave: (characters: CharacterSheet[]) => void;
   onDetected: (detected: DetectedCharacter[]) => void;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
   visualStyle?: string;
   initialSelectedName?: string | null;
 }
@@ -55,7 +57,7 @@ function appearanceAdvisory(count: number): { label: string; color: string; advi
   };
 }
 
-export default function CharacterConsistencyModal({ script, projectId, onClose, onSave, onDetected, anthropicApiKey, visualStyle, initialSelectedName }: Props) {
+export default function CharacterConsistencyModal({ script, projectId, onClose, onSave, onDetected, anthropicApiKey, xaiApiKey, llmProvider, visualStyle, initialSelectedName }: Props) {
   const cached = script.detectedCharacters ?? [];
   const [detectedChars, setDetectedChars] = useState<DetectedCharacter[]>(cached);
   const [detecting, setDetecting] = useState(cached.length === 0);
@@ -105,6 +107,8 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
         body: JSON.stringify({
           scenes: script.scenes.map(s => ({ narration: s.narration, title: s.title })),
           anthropicApiKey,
+          xaiApiKey,
+          llmProvider,
         }),
         signal,
       });
@@ -160,6 +164,8 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
           scriptTopic: script.topic,
           visualStyle,
           anthropicApiKey,
+          xaiApiKey,
+          llmProvider,
         }),
       });
       const data = await res.json();
@@ -198,6 +204,8 @@ export default function CharacterConsistencyModal({ script, projectId, onClose, 
           mediaType: uploadedImage.mediaType,
           visualStyle,
           anthropicApiKey,
+          xaiApiKey,
+          llmProvider,
         }),
       });
       const data = await res.json();

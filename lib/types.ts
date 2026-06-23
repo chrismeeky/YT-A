@@ -330,6 +330,7 @@ export interface Analysis {
   channelName: string;
   videoAnalyses: VideoAnalysis[];
   channelInsights: ChannelInsights;
+  llmProvider?: 'claude' | 'grok';
 }
 
 // ─── Scripts ───────────────────────────────────────────────────────────────
@@ -530,6 +531,7 @@ export interface Script {
   detectedCharacters?: DetectedCharacter[];
   visualStyle?: string; // preset tag or custom text — injected into every prompt
   savedToDisk: boolean;
+  llmProvider?: 'claude' | 'grok';
   directorMode?: boolean;
   directorPlan?: DirectorScene[];
   blueprintTranscriptIds?: string[];
@@ -575,7 +577,9 @@ export interface ChannelBookmark {
 // ─── App Settings ──────────────────────────────────────────────────────────
 
 export interface AppSettings {
+  llmProvider: 'claude' | 'grok';
   anthropicApiKey: string;
+  xaiApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   elevenLabsSpeed: number;
@@ -595,7 +599,9 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  llmProvider: 'claude',
   anthropicApiKey: '',
+  xaiApiKey: '',
   elevenLabsApiKey: '',
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
   elevenLabsSpeed: 1.0,

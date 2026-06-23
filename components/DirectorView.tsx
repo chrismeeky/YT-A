@@ -53,6 +53,8 @@ interface Props {
   analysis: Analysis | null;
   onScriptChange: (s: Script) => void;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
@@ -69,6 +71,8 @@ function AssetCard({
   script,
   analysis,
   anthropicApiKey,
+  xaiApiKey,
+  llmProvider,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
@@ -87,6 +91,8 @@ function AssetCard({
   script: Script;
   analysis: Analysis | null;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
@@ -171,6 +177,8 @@ function AssetCard({
     ...(asset.ddgVqd && page > 1 && { ddgVqd: asset.ddgVqd }),
     ...(asset.ddgNext && page > 1 && { ddgNext: asset.ddgNext }),
     anthropicApiKey,
+    xaiApiKey,
+    llmProvider,
     pexelsApiKey,
     braveApiKey,
     realImageProvider,
@@ -290,6 +298,8 @@ function AssetCard({
             analysis,
             characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
             anthropicApiKey,
+            xaiApiKey,
+            llmProvider,
           }),
         }
       );
@@ -761,6 +771,8 @@ export function SegmentCard({
   script,
   analysis,
   anthropicApiKey,
+  xaiApiKey,
+  llmProvider,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
@@ -776,6 +788,8 @@ export function SegmentCard({
   script: Script;
   analysis: Analysis | null;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
@@ -853,7 +867,7 @@ export function SegmentCard({
 
   const commonCardProps = {
     segment, scene, script, analysis,
-    anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider,
+    anthropicApiKey, xaiApiKey, llmProvider, pexelsApiKey, braveApiKey, realImageProvider,
     savingUrl, sliceMediaFiles: segment.mediaFiles, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
   };
 
@@ -1016,7 +1030,7 @@ export function SegmentCard({
 
 // ─── Main DirectorView ────────────────────────────────────────────────────────
 
-export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
+export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, xaiApiKey, llmProvider, pexelsApiKey, braveApiKey, realImageProvider, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
   const storage = useStorage();
   const scriptRef = useRef(script);
   scriptRef.current = script;
@@ -1484,6 +1498,8 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
                   script={script}
                   analysis={analysis}
                   anthropicApiKey={anthropicApiKey}
+                  xaiApiKey={xaiApiKey}
+                  llmProvider={llmProvider}
                   pexelsApiKey={pexelsApiKey}
                   braveApiKey={braveApiKey}
                   realImageProvider={realImageProvider}

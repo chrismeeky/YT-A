@@ -150,8 +150,12 @@ export default function SettingsPage() {
     return <div className="flex items-center justify-center py-20 text-[#52525b]">Loading…</div>;
   }
 
+  const llmProvider = form.llmProvider ?? 'claude';
+  const llmLabel = llmProvider === 'grok' ? 'xAI (Grok)' : 'Anthropic (Claude)';
+  const llmKeyOk = llmProvider === 'grok' ? !!form.xaiApiKey : (BETA_MODE || !!form.anthropicApiKey);
+
   const checks = [
-    { label: 'Anthropic',      ok: BETA_MODE || !!form.anthropicApiKey,  betaProvided: true,  description: 'Channel analysis and script generation', critical: true  },
+    { label: llmLabel,         ok: llmKeyOk,                              betaProvided: llmProvider === 'claude', description: 'Channel analysis and script generation', critical: true  },
     { label: 'YouTube Data',   ok: !!form.youtubeApiKey,                  betaProvided: false, description: 'Fetching channel videos for analysis',   critical: true  },
     { label: 'ElevenLabs',     ok: BETA_MODE || !!form.elevenLabsApiKey,  betaProvided: true,  description: 'Scene audio generation',                 critical: false },
     { label: 'Cartesia',       ok: !!form.cartesiaApiKey,                 betaProvided: false, description: 'Alternative TTS — cheaper than ElevenLabs', critical: false },
@@ -269,11 +273,33 @@ export default function SettingsPage() {
                   </div>
                 )}
 
+                {field(
+                    'AI Provider',
+                    <div className="flex gap-2">
+                      {(['claude', 'grok'] as const).map(p => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => set('llmProvider', p)}
+                          className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                            (form.llmProvider ?? 'claude') === p
+                              ? 'bg-indigo-500 border-indigo-500 text-white'
+                              : 'border-[#333] text-[#a1a1aa] hover:border-[#555] hover:text-white'
+                          }`}
+                          style={(form.llmProvider ?? 'claude') !== p ? { background: 'var(--surface-2)' } : {}}
+                        >
+                          {p === 'claude' ? 'Claude' : 'Grok'}
+                        </button>
+                      ))}
+                    </div>,
+                    'Choose which LLM powers script generation and channel analysis.'
+                  )}
+
                 <div
                   className="rounded-xl border p-6 space-y-5"
                   style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                 >
-                  {field(
+                  {(form.llmProvider ?? 'claude') !== 'grok' && field(
                     'Anthropic API Key',
                     <SecretInput
                       value={BETA_MODE ? '••••••••••••••••••••' : (form.anthropicApiKey ?? '')}
@@ -283,7 +309,18 @@ export default function SettingsPage() {
                       placeholder="sk-ant-…"
                       disabled={BETA_MODE}
                     />,
-                    BETA_MODE ? undefined : 'Required for channel analysis and script generation.'
+                    BETA_MODE ? undefined : 'Required when using Claude for channel analysis and script generation. Switch to Grok above to use xAI instead.'
+                  )}
+                  {(form.llmProvider ?? 'claude') === 'grok' && field(
+                    'xAI API Key',
+                    <SecretInput
+                      value={form.xaiApiKey ?? ''}
+                      onChange={v => set('xaiApiKey', v)}
+                      className={inputClass}
+                      style={inputStyle}
+                      placeholder="xai-…"
+                    />,
+                    'Required when using Grok. Get a key at console.x.ai.'
                   )}
                   {field(
                     'YouTube Data API Key',

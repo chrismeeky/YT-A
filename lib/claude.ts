@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuid } from 'uuid';
 import type {
   ChannelVideo,
@@ -12,10 +11,7 @@ import type {
   DirectorSegment,
 } from './types';
 import { resolvePromptLock } from './visual-styles';
-
-function client(apiKey: string): Anthropic {
-  return new Anthropic({ apiKey });
-}
+import { llmComplete, type LLMConfig, type LLMContentBlock } from './llm';
 
 // Honorifics and abbreviations that end with "." but are NOT sentence terminators.
 const ABBREV = new Set([
@@ -48,18 +44,16 @@ function splitSentences(text: string): string[] {
 // ─── Video Analysis ─────────────────────────────────────────────────────────
 
 export async function analyzeVideo(
-  apiKey: string,
+  llm: LLMConfig,
   video: ChannelVideo,
   transcript: string,
   thumbnailBase64: string
 ): Promise<{ result: VideoAnalysis; inputTokens: number; outputTokens: number }> {
-  const ai = client(apiKey);
-
   const transcriptExcerpt = transcript
     ? `${transcript.slice(0, 60000)}${transcript.length > 60000 ? '\n...[transcript truncated]' : ''}`
     : 'No transcript available — infer from title, description, and thumbnail.';
 
-  const contentBlocks: Anthropic.ContentBlockParam[] = [];
+  const contentBlocks: LLMContentBlock[] = [];
 
   if (thumbnailBase64) {
     contentBlocks.push({
@@ -200,21 +194,21 @@ RULES:
 
   contentBlocks.push({ type: 'text', text: prompt });
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 8000,
     system:
       'You are an elite YouTube content strategy expert. Respond ONLY with valid JSON — no markdown fences, no prose. Be specific and concrete in every field. Keep each field value to 1–2 sentences max.',
     messages: [{ role: 'user', content: contentBlocks }],
   });
 
-  if (response.stop_reason === 'max_tokens') {
+  if (result.stopReason === 'max_tokens') {
     throw new Error(
       'Analysis response was truncated (too long). This is rare — please try again, or reduce the number of videos being analysed simultaneously.'
     );
   }
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+  const text = result.text || '{}';
 
   let cleaned = text.trim();
   if (cleaned.startsWith('```')) {
@@ -245,18 +239,17 @@ RULES:
       channelName: video.channelName,
       ...parsed,
     },
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
   };
 }
 
 // ─── Channel Synthesis ──────────────────────────────────────────────────────
 
 export async function synthesizeChannelInsights(
-  apiKey: string,
+  llm: LLMConfig,
   videoAnalyses: VideoAnalysis[]
 ): Promise<{ result: ChannelInsights; inputTokens: number; outputTokens: number }> {
-  const ai = client(apiKey);
 
   // Slim summary — only the fields needed to identify cross-video patterns
   const summaries = videoAnalyses.map(v => ({
@@ -306,9 +299,9 @@ export async function synthesizeChannelInsights(
     topRecommendation: v.overallScores?.topRecommendation,
   }));
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 16000,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 16000,
     system:
       'You are a YouTube content strategy expert. Respond ONLY with valid JSON, no markdown fences, no prose.',
     messages: [
@@ -410,10 +403,10 @@ Return ONLY valid JSON:
     ],
   });
 
-  if (response.stop_reason === 'max_tokens') {
+  if (result.stopReason === 'max_tokens') {
     throw new Error('Channel synthesis response was truncated. Please try again.');
   }
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '{}';
+  const raw = result.text || '{}';
   let cleaned = raw.trim();
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
@@ -421,8 +414,8 @@ Return ONLY valid JSON:
   try {
     return {
       result: JSON.parse(cleaned) as ChannelInsights,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
     };
   } catch {
     throw new Error('Failed to parse channel insights. Please try again.');
@@ -432,7 +425,7 @@ Return ONLY valid JSON:
 // ─── Search Query Generation ─────────────────────────────────────────────────
 
 export async function generateSearchQuery(
-  apiKey: string,
+  llm: LLMConfig,
   narration: string,
   assetType: 'stock-photo' | 'stock-video' | 'real-image',
   ctx?: {
@@ -447,8 +440,6 @@ export async function generateSearchQuery(
     directorNote?: string;    // selected variation concept — overrides narration as the visual anchor
   },
 ): Promise<string> {
-  const ai = client(apiKey);
-
   const characterBlock = ctx?.characters?.length
     ? `CHARACTERS: ${ctx.characters.map(c => `${c.name} — ${c.fullDescription}`).join('; ')}`
     : null;
@@ -488,13 +479,13 @@ export async function generateSearchQuery(
     ctx?.channelBrollPattern && `BROLL PATTERN: ${ctx.channelBrollPattern}`,
   ].filter(Boolean);
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 30,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 30,
     system: 'You are a stock footage researcher. Output ONLY a concise search query (3–6 words) that would find footage matching what the narration describes. No explanation, no punctuation at the end, no quotes.',
     messages: [{ role: 'user', content: `${lines.join('\n')}\n\n${instruction}` }],
   });
-  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+  const raw = result.text.trim();
   return raw.replace(/^["']|["']$/g, '').replace(/[.]+$/, '') || narration.slice(0, 40);
 }
 
@@ -562,17 +553,16 @@ function buildVoiceBible(videoAnalyses: Analysis['videoAnalyses']): string {
 }
 
 export async function extractVoicePrinciples(
-  apiKey: string,
+  llm: LLMConfig,
   transcripts: string[],
 ): Promise<string> {
-  const ai = client(apiKey);
   const combined = transcripts
     .map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 20000)}`)
     .join('\n\n');
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 3000,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 3000,
     system: 'You are a master prose analyst. Your job is to identify the generative craft principles behind a writer\'s voice — not surface patterns, but the underlying mechanisms that produce the effect. Be precise, specific, and practical. Every statement you make must be actionable by a writer.',
     messages: [{
       role: 'user',
@@ -601,11 +591,11 @@ ${combined}`,
     }],
   });
 
-  return response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+  return result.text.trim();
 }
 
 export async function generateScript(
-  apiKey: string,
+  llm: LLMConfig,
   analysis: Analysis,
   settings: ScriptSettings,
   topic: string,
@@ -617,8 +607,6 @@ export async function generateScript(
   useChannelStrategy = true,
   voicePrinciples?: string,
 ): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
-  const ai = client(apiKey);
-
   // Send only the strategy fields needed for scripting — not the full insights object.
   // In director mode, contentStyle/visualSceneGuide/contentNature/productionStyle are omitted
   // here because directorSection already injects them explicitly, avoiding duplication.
@@ -688,11 +676,13 @@ SLICE RULES:
 - "searchQuery": required for stock-video, stock-photo, real-image; omit for ai-video and ai-image.
 - durationSeconds = round((sliceWordCount / ${settings.wpm}) × 60)
 
+WORD COUNT REQUIREMENT (director mode): fullScript MUST contain exactly ${settings.targetWordCount} words (±5%). That is ${settings.videoLength} minutes × ${settings.wpm} WPM. Do not stop writing until you hit this count.
+
 Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
-  "fullScript": "The complete narration as a single continuous piece of prose. Paragraph breaks are your editorial decision. Use \\n\\n between paragraphs.",
+  "fullScript": "The complete narration as a single continuous piece of prose — MUST be ${settings.targetWordCount} words total (±5%). Begin with the hook. Do NOT stop early. Paragraph breaks are your editorial decision. Use \\n\\n between paragraphs.",
   "scriptSlices": [
     {
       "narrationExcerpt": "Exact verbatim text from fullScript — copied character for character.",
@@ -716,13 +706,14 @@ Return ONLY valid JSON:
 }`;
   })();
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
     // Director mode: fullScript (~1× words) + scriptSlices JSON (~8× words in structure overhead).
     // Regular mode: fullScript + scenes JSON (~5× words).
-    max_tokens: directorMode
+    maxTokens: directorMode
       ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 14)))
       : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 10))),
+    grokReasoningEffort: 'none',
     system:
       'You are an expert YouTube scriptwriter. Respond ONLY with valid JSON, no markdown code blocks, no prose.',
     messages: [
@@ -822,7 +813,7 @@ ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to 
 - Scene titles are labels only — do NOT open a scene by echoing or restating its title.
 - Every scene must find its own unique entry point into the material. Do NOT open multiple scenes with the same grammatical structure.
 - The hook must be built from what is specifically surprising, counterintuitive, or emotionally charged about THIS topic — not a generic formula applied to any topic.
-- Total narration word count across ALL scenes must total approximately ${settings.targetWordCount} words
+- WORD COUNT IS MANDATORY: total narration MUST reach ${settings.targetWordCount} words (±5%) — this applies to fullScript in all modes, and to the combined narration across all scenes/slices. Count as you write. Do NOT stop early. A ${settings.videoLength}-minute video at ${settings.wpm} wpm requires exactly this length — a short script is a broken script.
 - For each scene: estimatedDurationSeconds = (wordCount / ${settings.wpm}) × 60, rounded to nearest second
 - sceneDescription is a brief visual note (1 sentence) — NOT the narration${strategy.visualSceneGuide ? `; write it following this channel's visual style: ${strategy.visualSceneGuide.sceneDescriptionStyle}` : ''}
 - Keep sceneDescription short (1 sentence max)
@@ -833,7 +824,7 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
-  "fullScript": "The complete narration as a single continuous piece of prose. Write this INDEPENDENTLY — do not assemble it from the scenes array. Paragraph breaks are your editorial decision based on narrative rhythm, topic shifts, and pacing. Use \\n\\n between paragraphs. This is the reader-facing script; it must read as a cohesive piece of writing, not a stitched list.",
+  "fullScript": "The complete narration as a single continuous piece of prose, ${settings.targetWordCount} words total. MUST begin with the hook — do not skip straight to background or setup. Write this INDEPENDENTLY — do not assemble it from the scenes array. Paragraph breaks are your editorial decision based on narrative rhythm, topic shifts, and pacing. Use \\n\\n between paragraphs. This is the reader-facing script; it must read as a cohesive piece of writing, not a stitched list.",
   "scenes": [
     {
       "number": 1,
@@ -851,13 +842,22 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
     ],
   });
 
-  if (response.stop_reason === 'max_tokens') {
+  if (result.stopReason === 'max_tokens') {
     throw new Error(
       'Script generation was truncated — try a shorter video length or fewer scenes. Alternatively, try again.'
     );
   }
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '';
+  const parsed = parseScriptJSON(result.text);
+
+  return {
+    result: parsed,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  };
+}
+
+function parseScriptJSON(raw: string): GeneratedScriptPayload {
   let cleaned = raw.trim();
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
@@ -865,28 +865,17 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
 
   // First attempt — raw parse
   try {
-    return {
-      result: JSON.parse(cleaned) as GeneratedScriptPayload,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-    };
+    return JSON.parse(cleaned) as GeneratedScriptPayload;
   } catch { /* fall through to repair */ }
 
-  // Second attempt — repair common model JSON errors:
-  // Replace literal control characters (newlines, tabs, carriage returns) inside JSON string values
-  // with their escaped equivalents. This handles the case where the model writes multi-line narration
-  // without escaping the newlines.
+  // Second attempt — repair literal control characters inside JSON string values
   try {
     const repaired = cleaned.replace(
       /"((?:[^"\\]|\\.)*)"/gs,
-      (_match, inner: string) =>
+      (_match: string, inner: string) =>
         `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`,
     );
-    return {
-      result: JSON.parse(repaired) as GeneratedScriptPayload,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-    };
+    return JSON.parse(repaired) as GeneratedScriptPayload;
   } catch { /* fall through to error */ }
 
   throw new Error(
@@ -917,7 +906,7 @@ export interface RefinedSceneNarration {
 }
 
 export async function refineScriptVoice(
-  apiKey: string,
+  llm: LLMConfig,
   topic: string,
   analysis: Analysis,
   scenes: Scene[],
@@ -943,7 +932,6 @@ export async function refineScriptVoice(
   }
   if (!voiceMaterial) return null;
 
-  const ai = client(apiKey);
   const ws = analysis.channelInsights.writingStyle;
   const proseFingerprint = ws?.proseFingerprint ?? '';
   const openingFormula = ws?.openingFormula ?? '';
@@ -1049,9 +1037,10 @@ RULES:
 2. ai-video must appear. stock-photo must appear. ai-image must not crowd out other types.`;
     })();
 
-    const response = await ai.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 64000,
+    const result = await llmComplete(llm, {
+      claudeModel: 'claude-sonnet-4-6',
+      maxTokens: 64000,
+      grokReasoningEffort: 'none',
       system: 'You are an expert YouTube scriptwriter and visual director. Respond ONLY with valid JSON, no markdown fences, no prose.',
       messages: [{
         role: 'user',
@@ -1129,26 +1118,27 @@ Return ONLY valid JSON:
       }],
     });
 
-    if (response.stop_reason === 'max_tokens') {
+    if (result.stopReason === 'max_tokens') {
       throw new Error('Script refinement (director) was truncated — using Pass 1 draft.');
     }
 
-    const raw = response.content[0].type === 'text' ? response.content[0].text : '';
+    const raw = result.text;
     let cleaned = raw.trim();
     if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
 
     const parsed = JSON.parse(cleaned) as { scenes: Array<{ number: number; segments: DirectorScriptSegment[] }> };
     return {
       result: parsed.scenes.map(s => ({ number: s.number, narration: '', segments: s.segments })),
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
     };
   }
 
   // ── Regular mode: scene-level narration rewrite ───────────────────────────
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 64000,
+  const result2 = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 64000,
+    grokReasoningEffort: 'none',
     system: 'You are a voice editor. Respond ONLY with valid JSON, no markdown fences, no prose.',
     messages: [{
       role: 'user',
@@ -1171,26 +1161,26 @@ Return ONLY valid JSON:
     }],
   });
 
-  if (response.stop_reason === 'max_tokens') {
+  if (result2.stopReason === 'max_tokens') {
     throw new Error('Voice refinement was truncated — using Pass 1 draft.');
   }
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '';
-  let cleaned = raw.trim();
-  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+  const raw2 = result2.text;
+  let cleaned2 = raw2.trim();
+  if (cleaned2.startsWith('```')) cleaned2 = cleaned2.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
 
-  const parsed = JSON.parse(cleaned) as { scenes: RefinedSceneNarration[] };
+  const parsed2 = JSON.parse(cleaned2) as { scenes: RefinedSceneNarration[] };
   return {
-    result: parsed.scenes,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    result: parsed2.scenes,
+    inputTokens: result2.inputTokens,
+    outputTokens: result2.outputTokens,
   };
 }
 
 // ─── Voice Refinement — single scene (Pass 2, per-scene) ────────────────────
 
 export async function refineSceneVoice(
-  apiKey: string,
+  llm: LLMConfig,
   topic: string,
   analysis: Analysis,
   targetScene: Scene,
@@ -1219,7 +1209,6 @@ export async function refineSceneVoice(
   }
   if (!voiceMaterial) return null;
 
-  const ai = client(apiKey);
   const ws = analysis.channelInsights.writingStyle;
   const proseFingerprint = ws?.proseFingerprint ?? '';
   const openingFormula = ws?.openingFormula ?? '';
@@ -1367,21 +1356,20 @@ Reasoning: ${reasoning}
 RULES: ai-video must appear. stock-photo must appear. ai-image must not crowd out other types.`;
     })() : '';
 
-    const response = await ai.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 16000,
+    const dirResult = await llmComplete(llm, {
+      claudeModel: 'claude-sonnet-4-6',
+      maxTokens: 16000,
       system: 'You are an expert YouTube scriptwriter and visual director. Respond ONLY with valid JSON, no markdown fences, no prose.',
+      timeout: 100_000,
       messages: [{
         role: 'user',
         content: [
           {
-            // Stable across all scenes for this script — will be cache-hit after scene 1
             type: 'text' as const,
             text: `Rewrite a scene to match the channel's voice exactly, and break it into director-mode visual segments with asset assignments.\n\n${voiceBlock}\n\n${baseRules}\n\n${staticDirectorBlock}`,
             cache_control: { type: 'ephemeral' as const },
           },
           {
-            // Per-scene content — changes every call
             type: 'text' as const,
             text: `${hookInstruction ? hookInstruction + '\n\n' : ''}${assetMixBlock ? assetMixBlock + '\n\n' : ''}${narrativeContext ? narrativeContext + '\n\n' : ''}TARGET SCENE TO REWRITE:
 SCENE ${targetScene.number}: ${targetScene.title}
@@ -1404,39 +1392,38 @@ Return ONLY valid JSON:
           },
         ],
       }],
-    }, { timeout: 100_000 });
+    });
 
-    if (response.stop_reason === 'max_tokens') {
+    if (dirResult.stopReason === 'max_tokens') {
       throw new Error(`Scene ${targetScene.number} refinement was truncated.`);
     }
 
-    const raw = response.content[0].type === 'text' ? response.content[0].text : '';
-    let cleaned = raw.trim();
-    if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
-    const parsed = JSON.parse(cleaned) as { number: number; segments: DirectorScriptSegment[] };
+    const dirRaw = dirResult.text;
+    let dirCleaned = dirRaw.trim();
+    if (dirCleaned.startsWith('```')) dirCleaned = dirCleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+    const dirParsed = JSON.parse(dirCleaned) as { number: number; segments: DirectorScriptSegment[] };
     return {
-      result: { number: parsed.number, narration: '', segments: parsed.segments },
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      result: { number: dirParsed.number, narration: '', segments: dirParsed.segments },
+      inputTokens: dirResult.inputTokens,
+      outputTokens: dirResult.outputTokens,
     };
   }
 
   // ── Regular mode: narration rewrite only ──────────────────────────────────
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+  const regResult = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 8000,
     system: 'You are a voice editor. Respond ONLY with valid JSON, no markdown fences, no prose.',
+    timeout: 100_000,
     messages: [{
       role: 'user',
       content: [
         {
-          // Stable across all scenes for this script — will be cache-hit after scene 1
           type: 'text' as const,
           text: `Rewrite a scene so it is INDISTINGUISHABLE from the channel's voice.\n\n${voiceBlock}\n\n${baseRules}`,
           cache_control: { type: 'ephemeral' as const },
         },
         {
-          // Per-scene content — changes every call
           type: 'text' as const,
           text: `${hookInstruction ? hookInstruction + '\n\n' : ''}${narrativeContext ? narrativeContext + '\n\n' : ''}TARGET SCENE TO REWRITE:
 SCENE ${targetScene.number}: ${targetScene.title}
@@ -1447,27 +1434,27 @@ Return ONLY valid JSON:
         },
       ],
     }],
-  }, { timeout: 100_000 });
+  });
 
-  if (response.stop_reason === 'max_tokens') {
+  if (regResult.stopReason === 'max_tokens') {
     throw new Error(`Scene ${targetScene.number} refinement was truncated.`);
   }
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '';
-  let cleaned = raw.trim();
-  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
-  const parsed = JSON.parse(cleaned) as { number: number; narration: string };
+  const regRaw = regResult.text;
+  let regCleaned = regRaw.trim();
+  if (regCleaned.startsWith('```')) regCleaned = regCleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
+  const regParsed = JSON.parse(regCleaned) as { number: number; narration: string };
   return {
-    result: { number: parsed.number, narration: parsed.narration },
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    result: { number: regParsed.number, narration: regParsed.narration },
+    inputTokens: regResult.inputTokens,
+    outputTokens: regResult.outputTokens,
   };
 }
 
 // ─── Generate Scene Assets ──────────────────────────────────────────────────
 
 export async function generateSceneAssets(
-  apiKey: string,
+  llm: LLMConfig,
   scene: Scene,
   channelInsights: ChannelInsights,
   options: { image: boolean; video: boolean; stock: boolean; stockPhotos: boolean; realImages: boolean; stockVideos: boolean },
@@ -1494,8 +1481,6 @@ export async function generateSceneAssets(
   inputTokens: number;
   outputTokens: number;
 }> {
-  const ai = client(apiKey);
-
   const estimatedSeconds = scene.estimatedDurationSeconds || Math.round((scene.wordCount || 0) / 2.5);
   // Seconds per segment per granularity level: 1=Minimal, 2=Balanced, 3=Detailed, 4=Cinematic
   const secsPerChunk = [20, 10, 5, 3][Math.max(0, Math.min(3, granularity - 1))];
@@ -1547,9 +1532,9 @@ export async function generateSceneAssets(
     .filter(Boolean)
     .join(',\n  ');
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 8192,
     system: 'You are a film director building a visual sequence for a YouTube production. Your mandate is compelling variety — each shot must show the audience something they have not yet seen in this script. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
@@ -1656,10 +1641,10 @@ Return ONLY valid JSON:
     ],
   });
 
-  if (response.stop_reason === 'max_tokens') {
+  if (result.stopReason === 'max_tokens') {
     throw new Error('Asset generation response was too long and got cut off. Try selecting fewer asset types at once.');
   }
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '{}';
+  const raw = result.text || '{}';
   let cleaned = raw.trim();
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
@@ -1722,24 +1707,22 @@ Return ONLY valid JSON:
       realImageQueries: parsed.realImageQueries,
       stockVideoQueries: parsed.stockVideoQueries,
     },
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
   };
 }
 
 // ─── YouTube Description ─────────────────────────────────────────────────────
 
 export async function generateYoutubeDescription(
-  apiKey: string,
+  llm: LLMConfig,
   title: string,
   fullScript: string,
   channelStyle?: string,
 ): Promise<{ description: string; inputTokens: number; outputTokens: number }> {
-  const ai = client(apiKey);
-
-  const response = await ai.messages.create({
-    model: 'claude-opus-4-7',
-    max_tokens: 1024,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-opus-4-7',
+    maxTokens: 1024,
     messages: [{
       role: 'user',
       content: `You are an expert YouTube content strategist. Write a compelling YouTube description for this video.
@@ -1763,11 +1746,10 @@ Return ONLY the description text, nothing else.`,
     }],
   });
 
-  const description = (response.content[0] as { type: string; text: string }).text.trim();
   return {
-    description,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    description: result.text.trim(),
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
   };
 }
 
@@ -1970,12 +1952,11 @@ function mapDirectorScene(rawScene: RawDirectorScene, narration: string): Direct
 // Yields one DirectorScene at a time so callers can stream progress to the client.
 // Internally batches 2 scenes per API call and uses prompt caching on the static context.
 export async function* generateDirectorPlanStream(
-  apiKey: string,
+  llm: LLMConfig,
   scenes: DirectorSceneInput[],
   analysis: Analysis,
   visualStyle?: string,
 ): AsyncGenerator<{ scene: DirectorScene; index: number; total: number; inputTokens: number; outputTokens: number }> {
-  const ai = client(apiKey);
   const staticPrompt = buildDirectorStaticPrompt(analysis, visualStyle);
   const system = 'You are an expert YouTube video director. Respond ONLY with a JSON array — no markdown, no commentary.';
   const BATCH_SIZE = 2;
@@ -1986,38 +1967,34 @@ export async function* generateDirectorPlanStream(
       `Scene ${batchStart + j + 1} [id: ${s.id}]\nTitle: ${s.title}\nDuration: ~${s.estimatedDurationSeconds}s\nNarration:\n${s.narration}`
     ).join('\n\n---\n\n');
 
-    const response = await ai.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
+    const batchResult = await llmComplete(llm, {
+      claudeModel: 'claude-sonnet-4-6',
+      maxTokens: 8192,
       system,
+      anthropicBeta: 'prompt-caching-2024-07-31',
       messages: [{
         role: 'user',
         content: [
-          // Static block: cached after the first call — subsequent calls pay ~10% of input cost for this portion
-          { type: 'text', text: staticPrompt, cache_control: { type: 'ephemeral' } } as { type: 'text'; text: string; cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: staticPrompt, cache_control: { type: 'ephemeral' } },
           { type: 'text', text: `\n\nSCENES TO DIRECT:\n${sceneBlocks}` },
         ],
       }],
-    }, {
-      headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' },
     });
 
-    if (response.stop_reason === 'max_tokens') {
+    if (batchResult.stopReason === 'max_tokens') {
       const titles = batch.map(s => `"${s.title}"`).join(', ');
       throw new Error(`Director plan hit the output limit on scenes ${titles}. Try reducing video length or breaking long scenes into shorter ones.`);
     }
 
-    const raw = response.content[0].type === 'text' ? response.content[0].text : '[]';
-    const rawScenes = parseDirectorResponse(raw, batchStart);
+    const rawScenes = parseDirectorResponse(batchResult.text || '[]', batchStart);
 
     for (let j = 0; j < rawScenes.length; j++) {
       yield {
         scene: mapDirectorScene(rawScenes[j], batch[j]?.narration ?? ''),
         index: batchStart + j,
         total: scenes.length,
-        // Attribute all tokens to the first yield in the batch; rest are 0 to avoid double-counting
-        inputTokens: j === 0 ? response.usage.input_tokens : 0,
-        outputTokens: j === 0 ? response.usage.output_tokens : 0,
+        inputTokens: j === 0 ? batchResult.inputTokens : 0,
+        outputTokens: j === 0 ? batchResult.outputTokens : 0,
       };
     }
   }
@@ -2025,7 +2002,7 @@ export async function* generateDirectorPlanStream(
 
 // Non-streaming wrapper used by callers that don't need per-scene progress.
 export async function generateDirectorPlan(
-  apiKey: string,
+  llm: LLMConfig,
   scenes: DirectorSceneInput[],
   analysis: Analysis,
   visualStyle?: string,
@@ -2033,7 +2010,7 @@ export async function generateDirectorPlan(
   const result: DirectorScene[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
-  for await (const item of generateDirectorPlanStream(apiKey, scenes, analysis, visualStyle)) {
+  for await (const item of generateDirectorPlanStream(llm, scenes, analysis, visualStyle)) {
     result.push(item.scene);
     inputTokens += item.inputTokens;
     outputTokens += item.outputTokens;
@@ -2044,7 +2021,7 @@ export async function generateDirectorPlan(
 // ─── Director Prompt Generation (lazy, per asset) ────────────────────────────
 
 export async function generateDirectorPrompts(
-  apiKey: string,
+  llm: LLMConfig,
   opts: {
     assetType: 'ai-video' | 'ai-image';
     narrationExcerpt: string;
@@ -2063,7 +2040,6 @@ export async function generateDirectorPrompts(
     narrativeLens?: string;
   }
 ): Promise<{ prompts: string[]; clipLabels: ('CUT' | 'CONTINUOUS' | null)[]; inputTokens: number; outputTokens: number }> {
-  const ai = client(apiKey);
   const { assetType, narrationExcerpt, durationEach, clipCount, sceneTitle, sceneDescription, scriptTitle, productionStyle, visualStyle, characters, channelBrollPattern, channelEditingRhythm, contentNature, directorNote, narrativeLens } = opts;
 
   const effectiveStyle = resolvePromptLock(visualStyle ?? productionStyle) ?? (visualStyle ?? productionStyle);
@@ -2101,22 +2077,21 @@ REQUIREMENTS:
 ${!isVideo ? '- STILL IMAGE ONLY: do NOT include any camera movement, zoom, pan, duration, timing, or animation language (e.g. no "Ken Burns", no "slow zoom", no "8 second hold") — those are video-only directives' : ''}
 - Production-ready — no meta-commentary, no caveats, just the prompt`;
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1200,
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-sonnet-4-6',
+    maxTokens: 1200,
+    anthropicBeta: 'prompt-caching-2024-07-31',
     system: `You are a visual prompt engineer for AI ${isVideo ? 'video' : 'image'} generation. Write vivid, production-ready prompts that match the channel's visual style exactly. The single most important rule: every prompt must depict exactly what the narration describes — same subject, same action, same relationships. Never substitute, invent, or reinterpret. Return ONLY the prompt text(s), no explanation.`,
     messages: [{
       role: 'user',
       content: [
-        { type: 'text', text: staticBlock, cache_control: { type: 'ephemeral' } } as { type: 'text'; text: string; cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: staticBlock, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: `\nNARRATION FOR THIS SEGMENT:\n"${narrationExcerpt}"\n${directorNote ? `\nDIRECTOR'S NOTE (mandatory — this is the primary visual intent, override any conflicting inference):\n"${directorNote}"\n` : ''}\n${clipInstruction}` },
       ],
     }],
-  }, {
-    headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' },
   });
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+  const raw = result.text.trim();
 
   let prompts: string[];
   let clipLabels: ('CUT' | 'CONTINUOUS' | null)[];
@@ -2150,7 +2125,7 @@ ${!isVideo ? '- STILL IMAGE ONLY: do NOT include any camera movement, zoom, pan,
   return {
     prompts,
     clipLabels,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
   };
 }

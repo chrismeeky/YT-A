@@ -3,7 +3,8 @@ import { v4 as uuid } from 'uuid';
 import { generateScript, extractVoicePrinciples } from '@/lib/claude';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import { getUserIdFromRequest } from '@/lib/supabase';
 import type { Script, Scene, ScriptSettings, Analysis, DirectorAsset, DirectorSegment } from '@/lib/types';
 
@@ -22,6 +23,8 @@ export async function POST(
     videoLength?: number;
     wpm?: number;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
     directorMode?: boolean;
     assetMixOverride?: Record<string, number>;
     blueprintTranscriptIds?: string[];
@@ -29,10 +32,12 @@ export async function POST(
   };
   const userId = await getUserIdFromRequest(request);
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   if (!body.analysis?.id) {
     return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
@@ -52,7 +57,8 @@ export async function POST(
         emit({ message: `Building prompt from channel analysis…` });
 
         const modeLabel = directorMode ? ' with director segments' : '';
-        emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script${modeLabel} with Claude… (this may take up to 90 seconds)` });
+        const providerLabel = llm.provider === 'grok' ? 'Grok' : 'Claude';
+        emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script${modeLabel} with ${providerLabel}… (this may take up to 90 seconds)` });
 
         const keepalive = setInterval(() => {
           try { emit({ message: 'Still generating…' }); } catch { /* stream closed */ }
@@ -76,7 +82,7 @@ export async function POST(
         let voicePrinciples: string | undefined;
         if (blueprintTranscripts.length) {
           emit({ message: 'Extracting author voice principles…' });
-          voicePrinciples = await extractVoicePrinciples(anthropicApiKey, blueprintTranscripts);
+          voicePrinciples = await extractVoicePrinciples(llm, blueprintTranscripts);
         }
 
         let generated: Awaited<ReturnType<typeof generateScript>>['result'];
@@ -88,7 +94,7 @@ export async function POST(
             body.detailLevel ? `Story detail level — ${body.detailLevel}` : null,
           ].filter(Boolean);
           ({ result: generated, inputTokens, outputTokens } = await generateScript(
-            anthropicApiKey,
+            llm,
             body.analysis,
             scriptSettings,
             body.topic,
@@ -161,18 +167,20 @@ export async function POST(
           settings:   scriptSettings,
           scenes,
           savedToDisk: false,
+          llmProvider: llm.provider,
           directorMode,
           blueprintTranscriptIds: body.blueprintTranscriptIds,
         };
 
+        const { cost: scriptCost, api: scriptApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
         void trackUsage({
           operation: 'generate-script',
-          api: 'anthropic',
+          api: scriptApi,
           project_id: params.id,
           user_id: userId,
           input_tokens: inputTokens,
           output_tokens: outputTokens,
-          estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+          estimated_cost_usd: scriptCost,
         });
 
         emit({ done: true, result: script });

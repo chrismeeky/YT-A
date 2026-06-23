@@ -42,6 +42,8 @@ export default function ScriptEditorPage() {
   const [audioError, setAudioError] = useState('');
   const [audioObjectUrl, setAudioObjectUrl] = useState<string | null>(null);
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [xaiApiKey, setXaiApiKey] = useState('');
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
   const [pexelsApiKey, setPexelsApiKey] = useState('');
   const [braveApiKey, setBraveApiKey] = useState('');
   const [realImageProvider, setRealImageProvider] = useState<'brave' | 'duckduckgo'>('brave');
@@ -81,6 +83,8 @@ export default function ScriptEditorPage() {
 
     storage.getSettings().then(s => {
       setAnthropicApiKey(s.anthropicApiKey ?? '');
+      setXaiApiKey(s.xaiApiKey ?? '');
+      setLlmProvider((s.llmProvider as 'claude' | 'grok') ?? 'claude');
       setPexelsApiKey(s.pexelsApiKey ?? '');
       setBraveApiKey(s.braveApiKey ?? '');
       setRealImageProvider((s.realImageProvider as 'brave' | 'duckduckgo') ?? 'brave');
@@ -100,6 +104,8 @@ export default function ScriptEditorPage() {
           body: JSON.stringify({
             scenes: script.scenes.map((s: Scene) => ({ narration: s.narration, title: s.title })),
             anthropicApiKey: apiKey,
+            xaiApiKey: settings.xaiApiKey,
+            llmProvider: settings.llmProvider,
           }),
         });
         const data = await res.json();
@@ -159,6 +165,8 @@ export default function ScriptEditorPage() {
           title: script.title,
           fullScript,
           anthropicApiKey: settings.anthropicApiKey,
+          xaiApiKey: settings.xaiApiKey,
+          llmProvider: settings.llmProvider,
         }),
       });
       const data = await res.json();
@@ -408,7 +416,7 @@ export default function ScriptEditorPage() {
             disabled={generatingDesc}
             className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
             style={{ borderColor: 'var(--border)' }}
-            title="Generate YouTube description with Claude"
+            title={`Generate YouTube description with ${llmProvider === 'grok' ? 'Grok' : 'Claude'}`}
           >
             {generatingDesc ? <><span className="animate-pulse">✍️</span> Writing…</> : <>✍️ Description</>}
           </button>
@@ -610,6 +618,8 @@ export default function ScriptEditorPage() {
               script={script}
               analysis={analysis}
               anthropicApiKey={anthropicApiKey}
+              xaiApiKey={xaiApiKey || undefined}
+              llmProvider={llmProvider}
               pexelsApiKey={pexelsApiKey || undefined}
               braveApiKey={braveApiKey || undefined}
               realImageProvider={realImageProvider}
@@ -621,6 +631,8 @@ export default function ScriptEditorPage() {
               script={script}
               analysis={analysis}
               anthropicApiKey={anthropicApiKey}
+              xaiApiKey={xaiApiKey || undefined}
+              llmProvider={llmProvider}
               pexelsApiKey={pexelsApiKey || undefined}
               braveApiKey={braveApiKey || undefined}
               realImageProvider={realImageProvider}
@@ -653,6 +665,8 @@ export default function ScriptEditorPage() {
           script={script}
           projectId={id}
           anthropicApiKey={anthropicApiKey}
+          xaiApiKey={xaiApiKey}
+          llmProvider={llmProvider}
           visualStyle={script.visualStyle}
           initialSelectedName={characterModalInitialName}
           onClose={() => { setCharacterModalOpen(false); setCharacterModalInitialName(null); }}

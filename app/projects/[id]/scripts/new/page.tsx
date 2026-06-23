@@ -254,7 +254,7 @@ export default function NewScriptPage() {
       const res = await fetch(`/api/projects/${id}/scripts/suggest-topics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysis, anthropicApiKey: settings.anthropicApiKey, ...(trimmedSeed ? { seedTopic: trimmedSeed } : {}) }),
+        body: JSON.stringify({ analysis, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider, ...(trimmedSeed ? { seedTopic: trimmedSeed } : {}) }),
       });
       const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
       if (!res.ok) { setTopicsError(data.error ?? 'Unknown server error'); return; }
@@ -281,7 +281,7 @@ export default function NewScriptPage() {
       const res = await fetch(`/api/projects/${id}/scripts/extract-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: validUrls, topic: form.topic || undefined, anthropicApiKey: settings.anthropicApiKey }),
+        body: JSON.stringify({ urls: validUrls, topic: form.topic || undefined, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider }),
       });
       const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings or try again.' }));
       if (!res.ok) { setExtractError(data.error ?? 'Unknown server error'); return; }
@@ -321,7 +321,7 @@ export default function NewScriptPage() {
         const res = await fetch(`/api/projects/${id}/scripts/generate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, anthropicApiKey: settings.anthropicApiKey }),
+          body: JSON.stringify({ ...payload, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: 'Server error — check your API key in Settings.' }));

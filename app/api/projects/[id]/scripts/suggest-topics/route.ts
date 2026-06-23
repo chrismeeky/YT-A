@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 import type { Analysis } from '@/lib/types';
 
 export async function POST(
@@ -11,13 +11,17 @@ export async function POST(
   const body = (await request.json()) as {
     analysis: Analysis;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
     seedTopic?: string;
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   if (!body.analysis?.id) {
     return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
@@ -25,7 +29,6 @@ export async function POST(
 
   try {
     const analysis = body.analysis;
-    const ai = new Anthropic({ apiKey: anthropicApiKey });
 
     const insights = analysis.channelInsights;
     const nature = insights.contentNature?.classification ?? 'non-fictional';
@@ -85,27 +88,28 @@ ${contextInstruction}
 Respond with a raw JSON array only. No markdown, no code fences, no explanation.
 [{"topic": "...", "context": "...", "isFactual": ${nature !== 'fictional'}}, ...]`;
 
-    const response = await ai.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+    const response = await llmComplete(llm, {
+      claudeModel: 'claude-sonnet-4-6',
+      maxTokens: 4096,
       system: 'You are a JSON API. Always respond with valid raw JSON only. Never use markdown or code fences.',
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    const text = response.text.trim();
     const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const arrayMatch = stripped.match(/\[[\s\S]*\]/);
     const raw = arrayMatch ? arrayMatch[0] : stripped;
 
     const suggestions = JSON.parse(raw) as { topic: string; context: string; isFactual: boolean }[];
 
+    const { cost: topicsCost, api: topicsApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
     void trackUsage({
       operation: 'suggest-topics',
-      api: 'anthropic',
+      api: topicsApi,
       project_id: params.id,
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens,
-      estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
+      input_tokens: response.inputTokens,
+      output_tokens: response.outputTokens,
+      estimated_cost_usd: topicsCost,
     });
 
     return NextResponse.json({ suggestions });

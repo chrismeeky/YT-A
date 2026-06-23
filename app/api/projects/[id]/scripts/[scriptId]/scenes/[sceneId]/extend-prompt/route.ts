@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 
 export async function POST(
   request: NextRequest,
@@ -14,19 +14,21 @@ export async function POST(
     anthropicApiKey?: string;
     previousPrompt?: string;
     replaceInPlace?: boolean;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
   };
 
-  const apiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!apiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
   if (!body.originalPrompt?.trim()) {
     return NextResponse.json({ error: 'originalPrompt is required.' }, { status: 400 });
   }
 
   const duration = Math.min(10, Math.max(2, body.durationSeconds ?? 6));
-
-  const ai = new Anthropic({ apiKey });
 
   let userContent: string;
   if (body.replaceInPlace && body.previousPrompt) {
@@ -76,11 +78,11 @@ Return ONLY valid JSON:
 }`;
   }
 
-  let response: Awaited<ReturnType<typeof ai.messages.create>>;
+  let response: Awaited<ReturnType<typeof llmComplete>>;
   try {
-    response = await ai.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+    response = await llmComplete(llm, {
+      claudeModel: 'claude-sonnet-4-6',
+      maxTokens: 1024,
       system: 'You are an expert video director specialising in AI video generation prompts for tools like Sora, Runway, and Kling. Respond ONLY with valid JSON, no markdown.',
       messages: [{ role: 'user', content: userContent }],
     });
@@ -89,29 +91,30 @@ Return ONLY valid JSON:
     const status = (err as { status?: number }).status ?? 0;
     if (status === 529 || msg.includes('overloaded') || msg.includes('Overloaded')) {
       return NextResponse.json(
-        { error: 'Anthropic API is temporarily overloaded. Wait a few seconds and try again.' },
+        { error: 'AI API is temporarily overloaded. Wait a few seconds and try again.' },
         { status: 503 }
       );
     }
     if (status === 429 || msg.includes('rate limit') || msg.includes('rate_limit')) {
       return NextResponse.json(
-        { error: 'Anthropic rate limit reached. Wait a moment and try again.' },
+        { error: 'AI API rate limit reached. Wait a moment and try again.' },
         { status: 429 }
       );
     }
     return NextResponse.json({ error: `API error: ${msg}` }, { status: 502 });
   }
 
+  const { cost: extendCost, api: extendApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
   void trackUsage({
     operation: 'extend-prompt',
-    api: 'anthropic',
+    api: extendApi,
     project_id: params.id,
-    input_tokens: response.usage.input_tokens,
-    output_tokens: response.usage.output_tokens,
-    estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
+    input_tokens: response.inputTokens,
+    output_tokens: response.outputTokens,
+    estimated_cost_usd: extendCost,
   });
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+  const raw = response.text.trim() || '{}';
   let cleaned = raw;
   if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
   if (!cleaned.startsWith('{')) {

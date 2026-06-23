@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
 import { refineSceneVoice, sanitizeDirectorSegment } from '@/lib/claude';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import { getUserIdFromRequest } from '@/lib/supabase';
 import type { Analysis, Scene, ScriptSettings, DirectorSegment, DirectorAsset } from '@/lib/types';
 import type { DirectorScriptSegment } from '@/lib/claude';
@@ -22,18 +23,22 @@ export async function POST(
     directorMode?: boolean;
     assetMixOverride?: Record<string, number>;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   const userId = await getUserIdFromRequest(request);
 
   try {
     const refined = await refineSceneVoice(
-      anthropicApiKey,
+      llm,
       body.topic,
       body.analysis,
       body.targetScene,
@@ -47,14 +52,15 @@ export async function POST(
       return NextResponse.json({ error: 'No voice material available for refinement.' }, { status: 400 });
     }
 
+    const { cost: refineCost, api: refineApi } = calcLLMCost(llm.provider, refined.inputTokens, refined.outputTokens);
     void trackUsage({
       operation: 'refine-scene',
-      api: 'anthropic',
+      api: refineApi,
       project_id: params.id,
       user_id: userId,
       input_tokens: refined.inputTokens,
       output_tokens: refined.outputTokens,
-      estimated_cost_usd: calcAnthropicCost(refined.inputTokens, refined.outputTokens),
+      estimated_cost_usd: refineCost,
     });
 
     const r = refined.result;

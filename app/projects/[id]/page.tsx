@@ -184,7 +184,14 @@ export default function ProjectPage() {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-sm">{analysis.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-sm">{analysis.name}</h3>
+                        {analysis.llmProvider === 'grok' ? (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30">Grok</span>
+                        ) : (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Claude</span>
+                        )}
+                      </div>
                       <p className="text-xs text-[#52525b] mt-0.5">
                         {analysis.channelName || analysis.channelUrl} · {analysis.videoAnalyses.length} videos analysed ·{' '}
                         {formatDistanceToNow(new Date(analysis.createdAt), { addSuffix: true })}
@@ -249,12 +256,19 @@ export default function ProjectPage() {
                         style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                       >
                         <div className="flex-1 min-w-0">
-                          <Link
-                            href={`/projects/${id}/scripts/${script.id}`}
-                            className="text-sm font-medium hover:text-indigo-300 transition-colors truncate block"
-                          >
-                            {script.title}
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/projects/${id}/scripts/${script.id}`}
+                              className="text-sm font-medium hover:text-indigo-300 transition-colors truncate"
+                            >
+                              {script.title}
+                            </Link>
+                            {script.llmProvider === 'grok' ? (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30 shrink-0">Grok</span>
+                            ) : (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">Claude</span>
+                            )}
+                          </div>
                           <p className="text-xs text-[#52525b] mt-0.5">
                             {script.scenes.length} scenes · {script.settings.videoLength}min ·{' '}
                             {formatDistanceToNow(new Date(script.updatedAt), { addSuffix: true })}
@@ -317,12 +331,19 @@ export default function ProjectPage() {
                         style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                       >
                         <div className="flex-1 min-w-0">
-                          <Link
-                            href={`/projects/${id}/scripts/${script.id}`}
-                            className="text-sm font-medium hover:text-indigo-300 transition-colors truncate block"
-                          >
-                            {script.title}
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/projects/${id}/scripts/${script.id}`}
+                              className="text-sm font-medium hover:text-indigo-300 transition-colors truncate"
+                            >
+                              {script.title}
+                            </Link>
+                            {script.llmProvider === 'grok' ? (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30 shrink-0">Grok</span>
+                            ) : (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">Claude</span>
+                            )}
+                          </div>
                           <p className="text-xs text-[#52525b] mt-0.5">
                             {script.scenes.length} scenes · {script.settings.videoLength}min ·{' '}
                             {formatDistanceToNow(new Date(script.updatedAt), { addSuffix: true })}

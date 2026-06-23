@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateDirectorPrompts, generateSearchQuery } from '@/lib/claude';
 import { searchPexels, searchBraveImages, searchDuckDuckGoImages, searchPexelsVideos } from '@/lib/image-search';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import { getUserIdFromRequest } from '@/lib/supabase';
 import type { Analysis, DirectorAssetType } from '@/lib/types';
 
@@ -31,6 +32,8 @@ export async function POST(
     ddgVqd?: string;
     ddgNext?: string;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
@@ -56,13 +59,17 @@ export async function POST(
 
   const resolveQuery = async (type: 'stock-photo' | 'stock-video' | 'real-image'): Promise<string> => {
     if (searchQuery) return searchQuery;
-    const anthropicKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-    if (!anthropicKey) {
+    const queryLlm = makeLLMConfig(
+      body.llmProvider,
+      resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+      resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+    );
+    if (!queryLlm) {
       return characters?.length
         ? `${characters[0].name} ${sceneTitle}`.trim()
         : sceneTitle || narrationExcerpt.slice(0, 40);
     }
-    return generateSearchQuery(anthropicKey, narrationExcerpt, type, {
+    return generateSearchQuery(queryLlm, narrationExcerpt, type, {
       scriptTitle,
       sceneTitle,
       sceneDescription,
@@ -118,8 +125,12 @@ export async function POST(
   }
 
   // ── AI prompt generation ──────────────────────────────────────────────────
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   // Derive the effective duration from narration text × WPM (accurate to the actual TTS read time).
   // Falls back to the pre-computed durationSeconds if WPM is not provided.
@@ -133,7 +144,7 @@ export async function POST(
   const visualGuide = analysis.channelInsights.visualSceneGuide;
 
   try {
-    const { prompts, clipLabels, inputTokens, outputTokens } = await generateDirectorPrompts(anthropicApiKey, {
+    const { prompts, clipLabels, inputTokens, outputTokens } = await generateDirectorPrompts(llm, {
       assetType,
       narrationExcerpt,
       durationEach: clipDuration,
@@ -157,14 +168,15 @@ export async function POST(
       ].filter(Boolean).join(' ') || undefined,
     });
 
+    const { cost: directorCost, api: directorApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({
       operation: 'director-prompts',
-      api: 'anthropic',
+      api: directorApi,
       project_id: params.id,
       user_id: userId,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+      estimated_cost_usd: directorCost,
     });
 
     return NextResponse.json({ prompts, clipLabels });
