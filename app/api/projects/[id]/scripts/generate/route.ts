@@ -77,10 +77,10 @@ export async function POST(
           .filter((t): t is string => !!t);
 
         // Extract generative voice principles from transcripts before generation.
-        // This converts raw transcripts into craft mechanisms Claude applies freshly,
-        // rather than patterns it copies literally.
+        // Claude: extract voice principles as an intermediate step so it can apply them as craft mechanisms.
+        // Grok: skip extraction — send raw transcripts directly with a style-immersion instruction.
         let voicePrinciples: string | undefined;
-        if (blueprintTranscripts.length) {
+        if (blueprintTranscripts.length && llm.provider === 'claude') {
           emit({ message: 'Extracting author voice principles…' });
           voicePrinciples = await extractVoicePrinciples(llm, blueprintTranscripts);
         }

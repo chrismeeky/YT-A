@@ -748,15 +748,13 @@ Return ONLY valid JSON (no scriptSlices — slicing is a separate step):
     // Director mode: fullScript (~1× words) + scriptSlices JSON (~8× words in structure overhead).
     // Regular mode: fullScript + scenes JSON (~5× words).
     maxTokens: grokDirectorMode
-      // Grok Pass 1: prose only, reasoning: 'none' → multiplier is 1×, so maxOutputTokens = maxTokens.
-      // Set to 29,000 (the safe ceiling under the 30k hard cap) so the model never gets truncated
-      // regardless of how rich the context is (voice principles, transcripts, strategy JSON).
+      // Grok Pass 1: prose only, reasoning: 'none' → multiplier 1×, so maxOutputTokens = maxTokens.
+      // All 29,000 tokens go to prose — reasoning: 'high' consumes ~25k on thinking, leaving too little for text.
       ? 29000
       : directorMode
       ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 14)))
       : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 10))),
-    // 'none' reasoning: no reasoning tokens consumed, all 14,500 tokens go to prose output.
-    // We compensate by giving the model explicit per-section word count targets in the prompt.
+    // 'none' reasoning: no tokens consumed on thinking, all 29k go to prose output.
     grokReasoningEffort: 'none',
     system: `You are an expert YouTube scriptwriter. Respond ONLY with valid JSON — no markdown fences, no prose outside the JSON.
 
@@ -769,7 +767,14 @@ CRITICAL WORD COUNT RULE: The fullScript field MUST contain AT LEAST ${settings.
       {
         role: 'user',
         content: `Create a complete YouTube video script for the topic below, written in the style of the channel shown by the blueprint transcripts.
-${voicePrinciples ? `================================================================
+${grokDirectorMode && blueprintTranscripts?.length ? `================================================================
+STYLE IMMERSION — read these transcripts before writing anything.
+================================================================
+Study the attached transcripts so deeply that you can write in the author's voice without a reader being able to distinguish your script from the original author's work. Not by copying — the same way James Hardley Chase does not begin or write every novel the same way, yet readers immediately recognise his technique. One story began a certain way; that does not mean you begin yours the same way verbatim. Absorb the sentence rhythm, the graphic weight of detail, the way information is withheld and released, the tone, the pacing, the compression. Then write this new story as if you are that author, fresh.
+
+${blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 15000)}`).join('\n\n')}
+================================================================
+` : voicePrinciples ? `================================================================
 AUTHOR VOICE PRINCIPLES — these are hard constraints, not suggestions.
 ================================================================
 These 9 principles define this author's voice at the craft level. Each one describes a generative mechanism extracted from their real work. Your job is to find a completely fresh expression of each mechanism using this story's material. The examples show the technique in action — do NOT echo their content, structure, or subject matter in any way.
@@ -937,6 +942,10 @@ async function grokSliceScript(
     ? `TARGET ASSET MIX — rank-1 choices must hit approximately:\n${types.map(t => `  • ${t}: ${rawMix[t]}%  → ~${Math.round(estimatedSlices * (rawMix[t] as number) / 100)} slices`).join('\n')}`
     : '';
 
+  // Extract the last sentence to use as a completion anchor
+  const sentences = parsed.fullScript?.match(/[^.!?]+[.!?]+/g) ?? [];
+  const lastSentence = sentences.at(-1)?.trim() ?? parsed.fullScript?.slice(-100).trim() ?? '';
+
   const result = await llmComplete(llm, {
     claudeModel: 'claude-sonnet-4-6',
     // Use 'none' reasoning: all 29k tokens go to JSON output (no reasoning overhead).
@@ -953,11 +962,12 @@ ${parsed.fullScript}
 
 RULES:
 - narrationExcerpt MUST be EXACT verbatim consecutive text copied character-for-character from the script above.
-- Slices are ordered, non-overlapping, and together cover the ENTIRE script with NO gaps.
+- Slices MUST cover the ENTIRE script from the first word to the last. No gaps, no skipped sections.
+- The FINAL slice MUST end with this exact sentence: "${lastSentence}"
 - Each slice = 1–4 complete sentences forming one coherent visual idea. Boundaries at sentence ends only.
 - Every slice MUST have exactly 2 assets (rank 1, rank 2). No exceptions.
 - durationSeconds = round((sliceWordCount / ${settings.wpm}) × 60)
-- Target ~${estimatedSlices} slices total.
+- Target ~${estimatedSlices} slices total. Do not stop until you reach the final sentence above.
 
 ${mixInstruction}
 

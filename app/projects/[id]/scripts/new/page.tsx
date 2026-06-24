@@ -109,6 +109,7 @@ export default function NewScriptPage() {
   const [error, setError] = useState('');
   const [selectedTranscriptIds, setSelectedTranscriptIds] = useState<string[]>([]);
   const [useChannelStrategy, setUseChannelStrategy] = useState(true);
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
 
   const [suggestions, setSuggestions] = useState<{ topic: string; context: string }[]>([]);
   const [suggestionSeed, setSuggestionSeed] = useState<string | null>(null);
@@ -177,6 +178,15 @@ export default function NewScriptPage() {
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, []);
+
+  // Load provider from settings; auto-disable channel strategy for Grok
+  useEffect(() => {
+    storage.getSettings().then(s => {
+      const p = s.llmProvider ?? 'claude';
+      setLlmProvider(p);
+      if (p === 'grok') setUseChannelStrategy(false);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Warn before leaving while script is generating
   useEffect(() => {
@@ -675,34 +685,38 @@ export default function NewScriptPage() {
                 const videos = analysis?.videoAnalyses?.filter(v =>
                   v.fullTranscript || v.transcriptHook || v.transcriptExcerpt
                 ) ?? [];
-                const neitherSelected = !useChannelStrategy && selectedTranscriptIds.length === 0;
+                const neitherSelected = llmProvider === 'grok'
+                  ? selectedTranscriptIds.length === 0
+                  : !useChannelStrategy && selectedTranscriptIds.length === 0;
                 return (
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium mb-1">Style Sources</label>
-                      <p className="text-xs text-[#52525b] mb-3">Choose what Claude uses to match this channel&apos;s voice. At least one is required.</p>
+                      <p className="text-xs text-[#52525b] mb-3">{llmProvider === 'grok' ? 'Select transcript blueprints for Grok to study and match the channel\'s voice.' : 'Choose what Claude uses to match this channel\'s voice. At least one is required.'}</p>
                     </div>
 
-                    {/* Channel Strategy toggle */}
-                    <button
-                      type="button"
-                      onClick={() => setUseChannelStrategy(v => !v)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left text-sm transition-colors ${
-                        useChannelStrategy
-                          ? 'border-indigo-400 bg-indigo-500/10 text-white'
-                          : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] text-[#a1a1aa]'
-                      }`}
-                    >
-                      <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[10px] transition-colors ${
-                        useChannelStrategy ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-[#555]'
-                      }`}>
-                        {useChannelStrategy ? '✓' : ''}
-                      </span>
-                      <div>
-                        <span className="font-medium">Channel Strategy</span>
-                        <span className="text-xs text-[#71717a] ml-2">hooks, narrative structure, scene formulas</span>
-                      </div>
-                    </button>
+                    {/* Channel Strategy toggle — hidden for Grok (transcripts handle style directly) */}
+                    {llmProvider !== 'grok' && (
+                      <button
+                        type="button"
+                        onClick={() => setUseChannelStrategy(v => !v)}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left text-sm transition-colors ${
+                          useChannelStrategy
+                            ? 'border-indigo-400 bg-indigo-500/10 text-white'
+                            : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a] text-[#a1a1aa]'
+                        }`}
+                      >
+                        <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center text-[10px] transition-colors ${
+                          useChannelStrategy ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-[#555]'
+                        }`}>
+                          {useChannelStrategy ? '✓' : ''}
+                        </span>
+                        <div>
+                          <span className="font-medium">Channel Strategy</span>
+                          <span className="text-xs text-[#71717a] ml-2">hooks, narrative structure, scene formulas</span>
+                        </div>
+                      </button>
+                    )}
 
                     {/* Blueprint Transcripts */}
                     {videos.length > 0 && videos.map(v => {

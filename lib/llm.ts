@@ -251,10 +251,12 @@ async function grokComplete(apiKey: string, params: LLMCompleteParams): Promise<
 
   // Only treat as truncated when the API explicitly says max_tokens was the reason.
   // data.status === 'incomplete' alone can fire for content filters, context limits, etc.
-  const stopReason = data.incomplete_details?.reason === 'max_tokens' ? 'max_tokens' : 'end_turn';
+  const incompleteReason = data.incomplete_details?.reason ?? '';
+  const isMaxTokens = incompleteReason === 'max_tokens' || incompleteReason === 'max_output_tokens';
+  const stopReason = isMaxTokens ? 'max_tokens' : 'end_turn';
 
-  if (data.status === 'incomplete' && stopReason !== 'max_tokens') {
-    throw new Error(`Grok generation stopped unexpectedly: ${data.incomplete_details?.reason ?? data.status}`);
+  if (data.status === 'incomplete' && !isMaxTokens) {
+    throw new Error(`Grok generation stopped unexpectedly: ${incompleteReason || data.status}`);
   }
 
   return {
