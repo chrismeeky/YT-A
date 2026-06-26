@@ -433,6 +433,17 @@ export default function SettingsPage() {
                     />,
                     'Find voice IDs in the Cartesia dashboard under Voices.'
                   )}
+                  {field(
+                    'Model',
+                    <input
+                      value={form.cartesiaModel ?? 'sonic-2'}
+                      onChange={e => set('cartesiaModel', e.target.value)}
+                      className={inputClass}
+                      style={inputStyle}
+                      placeholder="e.g. sonic-2"
+                    />,
+                    'Cartesia model ID. Check cartesia.ai/docs for available models.'
+                  )}
                 </div>
                 <div
                   className="rounded-xl border p-6 space-y-5"

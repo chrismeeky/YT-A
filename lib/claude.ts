@@ -716,32 +716,15 @@ Return ONLY valid JSON:
   })();
 
   // Pre-compute the Grok Pass 1 JSON schema block (avoids IIFE inside template literal)
-  const grokPass1Schema = (() => {
-    const wc = settings.targetWordCount;
-    const sections = [
-      { name: 'HOOK', pct: 0.08 },
-      { name: 'BACKGROUND', pct: 0.12 },
-      { name: 'ACT 1 — Early events', pct: 0.20 },
-      { name: 'ACT 2 — Escalation', pct: 0.20 },
-      { name: 'ACT 3 — Peak / turning point', pct: 0.20 },
-      { name: 'AFTERMATH / INVESTIGATION', pct: 0.12 },
-      { name: 'OUTRO / REFLECTION', pct: 0.08 },
-    ];
-    const sectionList = sections.map(s => `  ${s.name}: ~${Math.round(wc * s.pct)} words`).join('\n');
-    return `SECTION TARGETS — write EACH section to its word count before moving on:
-${sectionList}
-Total: AT LEAST ${wc} words. Do not combine or skip sections. Do not stop writing until all sections are complete.
-
-Return ONLY valid JSON (no scriptSlices — slicing is a separate step):
+  const grokPass1Schema = `Return ONLY valid JSON (no scriptSlices — slicing is a separate step):
 {
-  "title": "Video title following the channel's exact title formula",
+  "title": "Video title",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
-  "fullScript": "The complete narration across all 7 sections — AT LEAST ${wc} words. Begin with the hook. Use \\n\\n between paragraphs. Do NOT label sections in the script.",
+  "fullScript": "The complete narration — AT LEAST ${settings.targetWordCount} words. Write it as flowing prose, exactly as the sample scripts above are written. Do NOT stop early. Use \\n\\n between paragraphs.",
   "totalEstimatedDuration": ${settings.videoLength * 60},
   "totalWordCount": 0
 }
 (Replace totalWordCount with the actual integer word count of fullScript before returning.)`;
-  })();
 
   const result = await llmComplete(llm, {
     claudeModel: 'claude-sonnet-4-6',
@@ -766,15 +749,15 @@ CRITICAL WORD COUNT RULE: The fullScript field MUST contain AT LEAST ${settings.
     messages: [
       {
         role: 'user',
-        content: `Create a complete YouTube video script for the topic below, written in the style of the channel shown by the blueprint transcripts.
-${grokDirectorMode && blueprintTranscripts?.length ? `================================================================
-STYLE IMMERSION — read these transcripts before writing anything.
-================================================================
-Study the attached transcripts so deeply that you can write in the author's voice without a reader being able to distinguish your script from the original author's work. Not by copying — the same way James Hardley Chase does not begin or write every novel the same way, yet readers immediately recognise his technique. One story began a certain way; that does not mean you begin yours the same way verbatim. Absorb the sentence rhythm, the graphic weight of detail, the way information is withheld and released, the tone, the pacing, the compression. Then write this new story as if you are that author, fresh.
+        content: grokDirectorMode ? `${blueprintTranscripts?.length
+  ? blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t}`).join('\n\n') + '\n\n'
+  : ''}The above youtube scripts are getting massive views and high retention (AVD). Write a youtube script on ${topic} in the exact style.
 
-${blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 15000)}`).join('\n\n')}
-================================================================
-` : voicePrinciples ? `================================================================
+Topic: ${topic}
+Video length: ${settings.videoLength} minutes (${settings.targetWordCount} words at ${settings.wpm} WPM)${additionalInstructions ? `\nAdditional instructions: ${additionalInstructions}` : ''}
+
+${grokPass1Schema}` : `Create a complete YouTube video script for the topic below, written in the style of the channel shown by the blueprint transcripts.
+${voicePrinciples ? `================================================================
 AUTHOR VOICE PRINCIPLES — these are hard constraints, not suggestions.
 ================================================================
 These 9 principles define this author's voice at the craft level. Each one describes a generative mechanism extracted from their real work. Your job is to find a completely fresh expression of each mechanism using this story's material. The examples show the technique in action — do NOT echo their content, structure, or subject matter in any way.
@@ -874,7 +857,7 @@ ${isStrict ? `STRICT RULES — violation of these makes the script dangerous to 
 - VISUAL SUBJECT: sceneDescriptions and thumbnailConcept should default to the narrative lens subject${strategy.narrativeLens ? ` — ${strategy.narrativeLens.split('.')[0]}` : ''}. When the narration explicitly focuses on another person or place, the visual follows the narration. Only default to the primary subject when the narration is ambiguous.
 ${!directorMode ? '- Do NOT include image prompts or video prompts — those are generated separately on demand' : ''}
 
-${directorSection}${grokDirectorMode ? grokPass1Schema : !directorMode ? `Return ONLY valid JSON:
+${directorSection}${!directorMode ? `Return ONLY valid JSON:
 {
   "title": "Video title following the channel's exact title formula",
   "thumbnailConcept": "1-2 sentence description of what the thumbnail should look like",
@@ -952,37 +935,40 @@ async function grokSliceScript(
     // Slicing a given text needs no multi-step reasoning — the model just reads and partitions.
     maxTokens: 29000,
     grokReasoningEffort: 'none',
-    system: 'You are a visual director. Respond ONLY with valid JSON, no markdown, no prose.',
+    system: `You are a documentary film director. You read a narration script and decide exactly which visual should play under each section of it — not by counting sentences, but by thinking about what the viewer needs to see and for how long. Respond ONLY with valid JSON, no markdown, no prose.`,
     messages: [{
       role: 'user',
-      content: `Partition the following YouTube script into visual director slices.
+      content: `You are directing the visuals for the following narration script. Read it fully first, then make your directorial decisions.
 
 FULL SCRIPT:
 ${parsed.fullScript}
 
-RULES:
-- narrationExcerpt MUST be EXACT verbatim consecutive text copied character-for-character from the script above.
-- Slices MUST cover the ENTIRE script from the first word to the last. No gaps, no skipped sections.
-- The FINAL slice MUST end with this exact sentence: "${lastSentence}"
-- Each slice = 1–4 complete sentences forming one coherent visual idea. Boundaries at sentence ends only.
-- Every slice MUST have exactly 2 assets (rank 1, rank 2). No exceptions.
-- durationSeconds = round((sliceWordCount / ${settings.wpm}) × 60)
-- Target ~${estimatedSlices} slices total. Do not stop until you reach the final sentence above.
+YOUR JOB AS DIRECTOR:
+Go through the script and decide where each visual cut happens. A cut happens when the visual needs to change — because the subject shifts, the emotional register changes, a new location or person is introduced, or the current shot has done its job. Some moments need a single shot held for several sentences. Others need rapid cuts. You decide based on what serves the story visually.
+
+There is no fixed sentence count per slice. A slice can be one sentence or six. What matters is that each slice represents a single coherent visual idea — one thing the viewer is looking at while listening to that narration. When that thing needs to change, make a new slice.
+
+MANDATORY COVERAGE:
+- narrationExcerpt must be EXACT verbatim text from the script, copied character-for-character.
+- Every word of the script must appear in exactly one slice. No gaps. No overlaps.
+- The FINAL slice must end with this exact text: "${lastSentence}"
+- Work through the script from start to finish. Do not stop early.
+
+FOR EACH SLICE, assign exactly 2 assets (rank 1 = primary, rank 2 = backup):
+- "real-image"  → use when narration names a real person, place, or documented event. searchQuery = specific name/event/year.
+- "stock-video" → use for atmosphere, motion, tension, setting. searchQuery = the visual mood or environment, not the narration subject.
+- "stock-photo" → a single still: one object, one place, one face.
+- "ai-video"    → cinematic reconstruction, abstract concept, dramatic scene.
+- "ai-image"    → illustrated or stylised still.
+- searchQuery required for: stock-video, stock-photo, real-image. Omit for: ai-video, ai-image.
+- note = your director's brief for this shot, ≤5 words.
+- durationSeconds = round((word count of this slice / ${settings.wpm}) × 60)
 
 ${mixInstruction}
 
-ASSET TYPES:
-- "real-image"  → named real people, documented events, specific locations. searchQuery = specific name/event/year.
-- "stock-video" → moving B-roll evoking motion or atmosphere. searchQuery = visual mood NOT the narration subject.
-- "stock-photo" → a single still establishing place, object, or mood.
-- "ai-video"    → cinematic pans, abstract visuals, dramatic reconstructions.
-- "ai-image"    → illustrated or stylised stills for specific concepts.
-- "searchQuery" required for: stock-video, stock-photo, real-image. Omit for: ai-video, ai-image.
-- "note" ≤5 words — the director's brief for this shot.
-
-CHANNEL VISUAL DNA:
-- Production style: ${di.visualBrand?.productionStyle ?? 'not specified'}
-- Content nature: ${di.contentNature?.classification ?? 'unknown'}
+PRODUCTION CONTEXT:
+- Style: ${di.visualBrand?.productionStyle ?? 'not specified'}
+- Content: ${di.contentNature?.classification ?? 'unknown'}
 
 Return ONLY valid JSON:
 {

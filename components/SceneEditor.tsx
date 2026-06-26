@@ -610,6 +610,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             cartesiaApiKey:       settings.cartesiaApiKey,
             cartesiaVoiceId:      settings.cartesiaVoiceId,
             cartesiaSpeed:        settings.cartesiaSpeed,
+            cartesiaModel:        settings.cartesiaModel,
           }),
         }
       );

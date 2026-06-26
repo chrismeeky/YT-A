@@ -48,6 +48,19 @@ RESEARCH DEPTH REQUIREMENT (strictly enforced): Every suggested topic must have 
     const analyzedTitles = analysis.videoAnalyses.map(v => v.videoTitle).filter(Boolean);
     const analyzedSubjects = analysis.videoAnalyses.map(v => v.channelName ?? '').filter(Boolean);
 
+    // Include full transcripts so the model understands the channel's narrative depth,
+    // writing weight, and the complexity of stories it actually covers — not just strategy metadata.
+    const transcriptSamples = analysis.videoAnalyses
+      .filter(v => v.fullTranscript || v.transcriptHook || v.transcriptExcerpt)
+      .slice(0, 3)
+      .map((v, i) => {
+        const text = v.fullTranscript
+          || [v.transcriptHook, v.transcriptExcerpt, v.transcriptClimax, v.transcriptOutro]
+               .filter(Boolean).join('\n\n');
+        return `--- TRANSCRIPT ${i + 1}: "${v.videoTitle}" ---\n${text}`;
+      })
+      .join('\n\n');
+
     const channelContext = `Channel: ${analysis.channelName}
 Content nature: ${nature}${insights.contentNature?.reasoning ? ` (${insights.contentNature.reasoning})` : ''}
 Content pillars (${pillars.length} total — each topic suggestion must map to one of these):
@@ -58,7 +71,8 @@ Unique value proposition: ${insights.uniqueValueProposition ?? 'N/A'}
 Audience: ${insights.audienceProfile?.demographics ?? 'N/A'}
 Audience pain points: ${insights.audienceProfile?.painPoints?.join(', ') ?? 'N/A'}
 Patterns to replicate: ${insights.thingsToSteal?.slice(0, 3).join(', ') ?? 'N/A'}
-${analyzedTitles.length > 0 ? `\nALREADY COVERED — do NOT suggest these or any disguised variation of them:\n${analyzedTitles.map(t => `  - ${t}`).join('\n')}` : ''}`;
+${analyzedTitles.length > 0 ? `\nALREADY COVERED — do NOT suggest these or any disguised variation of them:\n${analyzedTitles.map(t => `  - ${t}`).join('\n')}` : ''}
+${transcriptSamples ? `\nNARRATIVE DEPTH REFERENCE — these are actual transcript excerpts from this channel's videos. Study them to understand the level of psychological depth, investigative detail, systemic analysis, and narrative weight this channel brings to its subjects. Every suggested topic must have enough documented complexity to sustain this same depth across a full 20–30 minute script:\n\n${transcriptSamples}` : ''}`;
 
     const prompt = body.seedTopic?.trim()
       ? `You are a YouTube video strategist. The user wants to make a video about: "${body.seedTopic}".

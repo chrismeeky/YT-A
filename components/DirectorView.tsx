@@ -150,9 +150,10 @@ function AssetCard({
     Math.round((effectiveWords / (script.settings.wpm || 150)) * 60),
   );
   const clipDurationEach = asset.durationEach ?? 8;
-  const clipCount = asset.type === 'ai-video'
+  const clipCountAuto = asset.type === 'ai-video'
     ? Math.max(1, Math.round(effectiveDurationSeconds / clipDurationEach))
     : 1;
+  const clipCount = asset.clipCountOverride ?? clipCountAuto;
 
   const sceneData = script.scenes.find(s => s.id === scene.sceneId);
 
@@ -164,8 +165,8 @@ function AssetCard({
     wpm: script.settings.wpm,
     searchQuery: asset.searchQuery,
     directorNote: asset.rationale,
-    sceneTitle: sceneData?.title ?? '',
-    sceneDescription: sceneData?.sceneDescription ?? '',
+    sceneTitle: sceneData?.title ?? segment.narrationExcerpt.slice(0, 60),
+    sceneDescription: sceneData?.sceneDescription || segment.narrationExcerpt,
     scriptTitle: script.title,
     analysis,
     visualStyle: script.visualStyle,
@@ -292,8 +293,8 @@ function AssetCard({
             narrationExcerpt: segment.narrationExcerpt,
             narrationSlice: asset.narrationSlice,
             currentRationale: asset.rationale || asset.searchQuery || (slotNarrationSlice ?? segment.narrationExcerpt),
-            sceneTitle: sceneData?.title ?? '',
-            sceneDescription: sceneData?.sceneDescription ?? '',
+            sceneTitle: sceneData?.title ?? segment.narrationExcerpt.slice(0, 60),
+            sceneDescription: sceneData?.sceneDescription || segment.narrationExcerpt,
             scriptTitle: script.title,
             analysis,
             characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
@@ -403,8 +404,31 @@ function AssetCard({
         <span className="text-xs font-medium flex-1">{ASSET_LABELS[asset.type]}</span>
 
         {asset.type === 'ai-video' && (
-          <span className="text-[10px] text-[#52525b]">
-            {clipCount}× {asset.durationEach ?? 8}s clip{clipCount > 1 ? 's' : ''}
+          <span className="flex items-center gap-0.5 text-[10px] text-[#52525b]">
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={clipCount}
+              onChange={e => {
+                const v = Math.max(1, Math.min(20, parseInt(e.target.value) || 1));
+                onUpdate({ ...asset, clipCountOverride: v });
+              }}
+              className="w-6 text-center bg-transparent border-b border-[#3f3f46] focus:border-[#71717a] outline-none text-[#a1a1aa] focus:text-white"
+            />
+            <span>×</span>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={asset.durationEach ?? 8}
+              onChange={e => {
+                const v = Math.max(1, Math.min(60, parseInt(e.target.value) || 8));
+                onUpdate({ ...asset, durationEach: v, clipCountOverride: undefined });
+              }}
+              className="w-6 text-center bg-transparent border-b border-[#3f3f46] focus:border-[#71717a] outline-none text-[#a1a1aa] focus:text-white"
+            />
+            <span>s clips</span>
           </span>
         )}
 
@@ -1142,6 +1166,7 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
             cartesiaApiKey:       settings.cartesiaApiKey,
             cartesiaVoiceId:      settings.cartesiaVoiceId,
             cartesiaSpeed:        settings.cartesiaSpeed,
+            cartesiaModel:        settings.cartesiaModel,
           }),
         }
       );

@@ -480,7 +480,8 @@ export interface DirectorAsset {
   searchQuery?: string;   // for stock-video, stock-photo, real-image
   prompts: string[];      // empty until lazily generated (ai-video / ai-image)
   clipLabels?: ('CUT' | 'CONTINUOUS' | null)[];  // parallel to prompts; null = unknown
-  durationEach?: number;  // seconds per clip for video types
+  durationEach?: number;       // seconds per clip for video types
+  clipCountOverride?: number;  // user-set clip count; overrides auto-computed value
   totalDuration: number;  // total seconds recommended for this segment
   generated: boolean;
   // Multi-shot support: when a segment is long enough for multiple distinct shots
@@ -589,6 +590,7 @@ export interface AppSettings {
   cartesiaApiKey: string;
   cartesiaVoiceId: string;
   cartesiaSpeed: number;
+  cartesiaModel: string;
   pexelsApiKey: string;
   braveApiKey: string;
   realImageProvider: 'brave' | 'duckduckgo';
@@ -611,6 +613,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cartesiaApiKey: '',
   cartesiaVoiceId: '',
   cartesiaSpeed: 1.0,
+  cartesiaModel: 'sonic-2',
   pexelsApiKey: '',
   braveApiKey: '',
   realImageProvider: 'brave',

@@ -187,6 +187,16 @@ export default function ScriptEditorPage() {
     setAudioError('');
     try {
       const settings = await storage.getSettings();
+      if (provider === 'elevenlabs' && !settings.elevenLabsVoiceId?.trim()) {
+        setAudioError('ElevenLabs Voice ID is missing — add it in Settings.');
+        setGeneratingAudio(false);
+        return;
+      }
+      if (provider === 'cartesia' && !settings.cartesiaVoiceId?.trim()) {
+        setAudioError('Cartesia Voice ID is missing — add it in Settings.');
+        setGeneratingAudio(false);
+        return;
+      }
       const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/audio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -202,6 +212,7 @@ export default function ScriptEditorPage() {
           cartesiaApiKey:       settings.cartesiaApiKey,
           cartesiaVoiceId:      settings.cartesiaVoiceId,
           cartesiaSpeed:        settings.cartesiaSpeed,
+          cartesiaModel:        settings.cartesiaModel,
         }),
       });
       if (!res.ok) { const d = await res.json(); setAudioError(d.error); return; }
@@ -311,8 +322,14 @@ export default function ScriptEditorPage() {
   const totalWords = isDirector
     ? (script.scriptSlices ?? []).reduce((sum, s) => sum + s.narrationExcerpt.trim().split(/\s+/).filter(Boolean).length, 0)
     : script.scenes.reduce((sum, s) => sum + (s.wordCount || 0), 0);
+  const scriptWpm = script.settings?.wpm ?? 149;
   const totalSeconds = isDirector
-    ? (script.scriptSlices ?? []).reduce((sum, s) => sum + s.durationSeconds, 0)
+    ? (script.scriptSlices ?? []).reduce((sum, s) => {
+        const dur = s.durationSeconds > 0
+          ? s.durationSeconds
+          : Math.round((s.narrationExcerpt.trim().split(/\s+/).filter(Boolean).length / scriptWpm) * 60);
+        return sum + (dur || 0);
+      }, 0)
     : script.scenes.reduce((sum, s) => sum + (s.estimatedDurationSeconds || 0), 0);
   const totalMinutes = Math.round(totalSeconds / 60 * 10) / 10;
 

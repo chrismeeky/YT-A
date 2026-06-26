@@ -41,6 +41,7 @@ export default function SliceModal({
 }: Props) {
   const storage = useStorage();
   const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [savingUrl, setSavingUrl] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const [videoPlayer, setVideoPlayer] = useState<{ src: string; title: string } | null>(null);
@@ -52,7 +53,10 @@ export default function SliceModal({
   const sliceRef = useRef(slice);
   sliceRef.current = slice;
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
+  }, []);
 
   useEffect(() => {
     return () => { urlRevokeRef.current.forEach(u => URL.revokeObjectURL(u)); };
@@ -156,12 +160,12 @@ export default function SliceModal({
     <>
       <div
         ref={overlayRef}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ background: 'rgba(0,0,0,0.75)' }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200"
+        style={{ background: 'rgba(0,0,0,0.75)', opacity: visible ? 1 : 0 }}
         onClick={e => { if (e.target === overlayRef.current) onClose(); }}
       >
         <div
-          className="flex flex-col rounded-xl border shadow-2xl overflow-hidden transition-colors"
+          className="flex flex-col rounded-xl border shadow-2xl overflow-hidden transition-all duration-200"
           style={{
             background: 'var(--surface)',
             borderColor: draggingOver ? '#818cf8' : 'var(--border)',
@@ -169,6 +173,8 @@ export default function SliceModal({
             maxWidth: '95vw',
             maxHeight: '88vh',
             boxShadow: draggingOver ? '0 0 0 2px #818cf8' : undefined,
+            transform: visible ? 'translateY(0) scale(1)' : 'translateY(16px) scale(0.97)',
+            opacity: visible ? 1 : 0,
           }}
           onDragOver={e => { e.preventDefault(); setDraggingOver(true); }}
           onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDraggingOver(false); }}

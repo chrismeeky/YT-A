@@ -2,7 +2,8 @@ export async function generateSpeechCartesia(
   text: string,
   apiKey: string,
   voiceId: string,
-  speed?: number
+  speed?: number,
+  model?: string
 ): Promise<Buffer> {
   const voice: Record<string, unknown> = { mode: 'id', id: voiceId };
 
@@ -21,7 +22,7 @@ export async function generateSpeechCartesia(
       Accept: 'audio/mpeg',
     },
     body: JSON.stringify({
-      model_id: 'sonic-3.5',
+      model_id: model ?? 'sonic-2',
       transcript: text,
       voice,
       language: 'en',

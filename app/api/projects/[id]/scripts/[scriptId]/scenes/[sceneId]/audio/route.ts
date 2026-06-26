@@ -22,6 +22,7 @@ export async function POST(
     cartesiaApiKey?:       string;
     cartesiaVoiceId?:      string;
     cartesiaSpeed?:        number;
+    cartesiaModel?:        string;
   };
 
   if (!body.narration?.trim()) {
@@ -45,7 +46,7 @@ export async function POST(
       if (!voiceId) {
         return NextResponse.json({ error: 'Cartesia Voice ID required. Add it in Settings.' }, { status: 400 });
       }
-      audioBuffer = await generateSpeechCartesia(body.narration, cartesiaApiKey, voiceId, body.cartesiaSpeed);
+      audioBuffer = await generateSpeechCartesia(body.narration, cartesiaApiKey, voiceId, body.cartesiaSpeed, body.cartesiaModel);
       void trackUsage({ operation: 'audio', api: 'cartesia', project_id: params.id, characters });
     } else {
       const elevenLabsApiKey = resolveKey(body.elevenLabsApiKey, 'NEXT_PUBLIC_ELEVENLABS_API_KEY');

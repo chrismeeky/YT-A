@@ -506,7 +506,7 @@ export default function NewScriptPage() {
 
                 <input
                   value={form.topic}
-                  onChange={e => setForm(f => ({ ...f, topic: e.target.value }))}
+                  onChange={e => setForm(f => ({ ...f, topic: e.target.value, additionalInstructions: '' }))}
                   required
                   className={inputClass}
                   style={inputStyle}
