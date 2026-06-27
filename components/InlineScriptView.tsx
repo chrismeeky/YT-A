@@ -62,6 +62,7 @@ export default function InlineScriptView({
   onScriptChange,
 }: Props) {
   const [openSliceIndex, setOpenSliceIndex] = useState<number | null>(null);
+  const [lastOpenedSliceIndex, setLastOpenedSliceIndex] = useState<number | null>(null);
 
   const fullScript = script.fullScript ?? '';
   const slices = script.scriptSlices ?? [];
@@ -102,14 +103,19 @@ export default function InlineScriptView({
               return (
                 <mark
                   key={i}
-                  onClick={() => setOpenSliceIndex(part.sliceIndex!)}
+                  onClick={() => { setOpenSliceIndex(part.sliceIndex!); setLastOpenedSliceIndex(part.sliceIndex!); }}
                   className="cursor-pointer rounded-sm transition-opacity hover:opacity-75 whitespace-pre-wrap"
                   title={`Slice ${num} — click to manage assets`}
                   style={{
                     background: color.bg,
                     color: 'inherit',
-                    outline: `1px solid ${color.border}`,
+                    outline: part.sliceIndex === lastOpenedSliceIndex
+                      ? `2px solid ${color.sup}`
+                      : `1px solid ${color.border}`,
                     outlineOffset: '1px',
+                    boxShadow: part.sliceIndex === lastOpenedSliceIndex
+                      ? `0 0 0 3px ${color.bg}, 0 0 8px ${color.sup}40`
+                      : undefined,
                   }}
                 >
                   {part.text}<sup style={{ fontSize: '9px', fontWeight: 700, color: color.sup, marginLeft: '2px', userSelect: 'none' }}>{num}</sup>
@@ -130,6 +136,7 @@ export default function InlineScriptView({
         <SliceModal
           slice={openSlice}
           sliceIndex={openSliceIndex}
+          totalSlices={slices.length}
           script={script}
           analysis={analysis}
           anthropicApiKey={anthropicApiKey}
@@ -140,6 +147,8 @@ export default function InlineScriptView({
           realImageProvider={realImageProvider}
           onSliceUpdate={updateSlice}
           onClose={() => setOpenSliceIndex(null)}
+          onPrev={openSliceIndex > 0 ? () => { const i = openSliceIndex - 1; setOpenSliceIndex(i); setLastOpenedSliceIndex(i); } : undefined}
+          onNext={openSliceIndex < slices.length - 1 ? () => { const i = openSliceIndex + 1; setOpenSliceIndex(i); setLastOpenedSliceIndex(i); } : undefined}
         />
       )}
     </div>

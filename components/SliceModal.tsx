@@ -9,6 +9,7 @@ import { useStorage } from '@/components/StorageProvider';
 interface Props {
   slice: DirectorSegment;
   sliceIndex: number;
+  totalSlices: number;
   script: Script;
   analysis: Analysis | null;
   anthropicApiKey: string;
@@ -19,6 +20,8 @@ interface Props {
   realImageProvider?: 'brave' | 'duckduckgo';
   onSliceUpdate: (updated: DirectorSegment) => void;
   onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
 // Fake DirectorScene — sceneId used only to look up scene metadata (title/description).
@@ -28,6 +31,7 @@ const EMPTY_SCENE: DirectorScene = { sceneId: '', segments: [] };
 export default function SliceModal({
   slice,
   sliceIndex,
+  totalSlices,
   script,
   analysis,
   anthropicApiKey,
@@ -38,6 +42,8 @@ export default function SliceModal({
   realImageProvider,
   onSliceUpdate,
   onClose,
+  onPrev,
+  onNext,
 }: Props) {
   const storage = useStorage();
   const [mounted, setMounted] = useState(false);
@@ -63,10 +69,14 @@ export default function SliceModal({
   }, []);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (lightbox || videoPlayer) { setLightbox(null); setVideoPlayer(null); } else { onClose(); } } };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { if (lightbox || videoPlayer) { setLightbox(null); setVideoPlayer(null); } else { onClose(); } }
+      if (e.key === 'ArrowLeft' && !lightbox && !videoPlayer) onPrev?.();
+      if (e.key === 'ArrowRight' && !lightbox && !videoPlayer) onNext?.();
+    };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onClose, lightbox, videoPlayer]);
+  }, [onClose, onPrev, onNext, lightbox, videoPlayer]);
 
   // Load object URLs for saved media files
   useEffect(() => {
@@ -188,7 +198,27 @@ export default function SliceModal({
               </span>
               <span className="text-xs text-[#52525b]">{words}w · ~{slice.durationSeconds}s</span>
             </div>
-            <button onClick={onClose} className="text-[#52525b] hover:text-white transition-colors text-lg leading-none">×</button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onPrev}
+                disabled={!onPrev || sliceIndex === 0}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-[#71717a] hover:text-white hover:bg-[#2a2a2a] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Previous slice (←)"
+              >
+                ← Prev
+              </button>
+              <span className="text-xs text-[#3f3f46]">{sliceIndex + 1} / {totalSlices}</span>
+              <button
+                onClick={onNext}
+                disabled={!onNext || sliceIndex === totalSlices - 1}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-[#71717a] hover:text-white hover:bg-[#2a2a2a] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Next slice (→)"
+              >
+                Next →
+              </button>
+              <div className="w-px h-4 bg-[#3f3f46] mx-1" />
+              <button onClick={onClose} className="text-[#52525b] hover:text-white transition-colors text-lg leading-none">×</button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">

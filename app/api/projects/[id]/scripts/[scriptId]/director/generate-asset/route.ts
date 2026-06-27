@@ -19,6 +19,7 @@ export async function POST(
     narrationExcerpt: string;
     durationSeconds: number;
     durationEach?: number;
+    clipCountOverride?: number;
     searchQuery?: string;
     sceneTitle: string;
     sceneDescription: string;
@@ -41,7 +42,7 @@ export async function POST(
   };
 
   const userId = await getUserIdFromRequest(request);
-  const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, siblingAssets, page = 1, wpm } = body;
+  const { assetType, narrationExcerpt, durationSeconds, durationEach, clipCountOverride, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, siblingAssets, page = 1, wpm } = body;
 
   // Build a sibling visuals list for search query generation: prefer searchQuery over rationale
   // so the context is as specific as possible (e.g. "Edmund Kemper 1973 mugshot" vs "subject portrait")
@@ -139,7 +140,7 @@ export async function POST(
     ? Math.max(1, Math.round((narrationWords / wpm) * 60))
     : durationSeconds;
   const clipDuration = durationEach ?? Math.min(8, effectiveDuration);
-  const clipCount = Math.max(1, Math.round(effectiveDuration / clipDuration));
+  const clipCount = clipCountOverride ?? Math.max(1, Math.round(effectiveDuration / clipDuration));
   const productionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
   const visualGuide = analysis.channelInsights.visualSceneGuide;
 

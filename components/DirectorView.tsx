@@ -162,6 +162,7 @@ function AssetCard({
     narrationExcerpt: slotNarrationSlice ?? segment.narrationExcerpt,
     durationSeconds: effectiveDurationSeconds,
     durationEach: asset.durationEach,
+    clipCountOverride: asset.clipCountOverride,
     wpm: script.settings.wpm,
     searchQuery: asset.searchQuery,
     directorNote: asset.rationale,
