@@ -93,36 +93,61 @@ export default function InlineScriptView({
             {fullScript}
           </p>
         ) : (
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>
-            {parts.map((part, i) => {
-              if (part.sliceIndex === undefined) {
-                return <span key={i} className="whitespace-pre-wrap">{part.text}</span>;
-              }
-              const color = SLICE_COLORS[part.sliceIndex % 2];
-              const num = part.sliceIndex! + 1;
-              return (
-                <mark
-                  key={i}
-                  onClick={() => { setOpenSliceIndex(part.sliceIndex!); setLastOpenedSliceIndex(part.sliceIndex!); }}
-                  className="cursor-pointer rounded-sm transition-opacity hover:opacity-75 whitespace-pre-wrap"
-                  title={`Slice ${num} — click to manage assets`}
-                  style={{
-                    background: color.bg,
-                    color: 'inherit',
-                    outline: part.sliceIndex === lastOpenedSliceIndex
-                      ? `2px solid ${color.sup}`
-                      : `1px solid ${color.border}`,
-                    outlineOffset: '1px',
-                    boxShadow: part.sliceIndex === lastOpenedSliceIndex
-                      ? `0 0 0 3px ${color.bg}, 0 0 8px ${color.sup}40`
-                      : undefined,
-                  }}
-                >
-                  {part.text}<sup style={{ fontSize: '9px', fontWeight: 700, color: color.sup, marginLeft: '2px', userSelect: 'none' }}>{num}</sup>
-                </mark>
-              );
-            })}
-          </p>
+          <div className="text-sm leading-relaxed space-y-4" style={{ color: 'var(--text)' }}>
+            {(() => {
+              // Split parts on paragraph boundaries (\n\n) so paragraph breaks render properly.
+              // Each "paragraph" is an array of inline nodes, separated by \n\n across parts.
+              const paragraphs: React.ReactNode[][] = [[]];
+
+              parts.forEach((part, i) => {
+                if (part.sliceIndex === undefined) {
+                  // Unsliced gap text — split on \n\n to create paragraph breaks
+                  const chunks = part.text.split(/\n\n+/);
+                  chunks.forEach((chunk, ci) => {
+                    if (ci > 0) paragraphs.push([]);
+                    if (chunk) paragraphs[paragraphs.length - 1].push(
+                      <span key={`u-${i}-${ci}`}>{chunk}</span>
+                    );
+                  });
+                } else {
+                  const color = SLICE_COLORS[part.sliceIndex % 2];
+                  const num = part.sliceIndex + 1;
+                  // Split the slice text on \n\n — each chunk stays in its own paragraph
+                  const chunks = part.text.split(/\n\n+/);
+                  chunks.forEach((chunk, ci) => {
+                    if (ci > 0) paragraphs.push([]);
+                    if (chunk) paragraphs[paragraphs.length - 1].push(
+                      <mark
+                        key={`s-${i}-${ci}`}
+                        onClick={() => { setOpenSliceIndex(part.sliceIndex!); setLastOpenedSliceIndex(part.sliceIndex!); }}
+                        className="cursor-pointer rounded-sm transition-opacity hover:opacity-75"
+                        title={`Slice ${num} — click to manage assets`}
+                        style={{
+                          background: color.bg,
+                          color: 'inherit',
+                          outline: part.sliceIndex === lastOpenedSliceIndex
+                            ? `2px solid ${color.sup}`
+                            : `1px solid ${color.border}`,
+                          outlineOffset: '1px',
+                          boxShadow: part.sliceIndex === lastOpenedSliceIndex
+                            ? `0 0 0 3px ${color.bg}, 0 0 8px ${color.sup}40`
+                            : undefined,
+                        }}
+                      >
+                        {chunk}{ci === chunks.length - 1 && <sup style={{ fontSize: '9px', fontWeight: 700, color: color.sup, marginLeft: '2px', userSelect: 'none' }}>{num}</sup>}
+                      </mark>
+                    );
+                  });
+                }
+              });
+
+              return paragraphs
+                .filter(p => p.length > 0)
+                .map((nodes, pi) => (
+                  <p key={pi} className="leading-relaxed">{nodes}</p>
+                ));
+            })()}
+          </div>
         )}
 
         {slices.length > 0 && (

@@ -751,10 +751,10 @@ CRITICAL WORD COUNT RULE: The fullScript field MUST contain AT LEAST ${settings.
         role: 'user',
         content: grokDirectorMode ? `${blueprintTranscripts?.length
   ? blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t}`).join('\n\n') + '\n\n'
-  : ''}The above youtube scripts are getting massive views and high retention (AVD). Write a youtube script on ${topic} in the exact style.
+  : ''}The above youtube scripts are getting massive views and high retention (AVD). Study them deeply — absorb the sentence rhythm, how hooks are built, how detail is selected, how tension is held and released, how information is sequenced. Then write a completely original script about the topic below using that same craft. The way James Hardley Chase writes multiple novels: the voice is immediately recognisable, but each story is entirely its own — no borrowed sentences, no shared structure, no substituted names.
 
 Topic: ${topic}
-Video length: ${settings.videoLength} minutes (${settings.targetWordCount} words at ${settings.wpm} WPM)${additionalInstructions ? `\nAdditional instructions: ${additionalInstructions}` : ''}
+Video length: ${settings.videoLength} minutes (${settings.targetWordCount} words at ${settings.wpm} WPM)${additionalInstructions ? `\nAdditional context: ${additionalInstructions}` : ''}
 
 ${grokPass1Schema}` : `Create a complete YouTube video script for the topic below, written in the style of the channel shown by the blueprint transcripts.
 ${voicePrinciples ? `================================================================
@@ -912,17 +912,12 @@ async function grokSliceScript(
   assetMixOverride?: Record<string, number>,
 ): Promise<{ scriptSlices: RawScriptSlice[]; inputTokens: number; outputTokens: number }> {
   const di = analysis.channelInsights;
-  // Base slice count on actual script length, not the target — they can differ if Pass 1
-  // generated a shorter script, and telling Grok to make 54 slices on a 700-word script
-  // causes it to stop early and leave the rest unsliced.
-  const actualWordCount = parsed.fullScript?.split(/\s+/).filter(Boolean).length ?? settings.targetWordCount;
-  const estimatedSlices = Math.max(5, Math.round(actualWordCount / 55));
   const rawMix = assetMixOverride ?? di.visualAssetMix;
   const types = rawMix
     ? (['ai-video', 'ai-image', 'stock-video', 'stock-photo', 'real-image'] as const).filter(t => (rawMix[t] ?? 0) > 0)
     : (['stock-video', 'ai-image', 'real-image'] as const);
   const mixInstruction = rawMix
-    ? `TARGET ASSET MIX — rank-1 choices must hit approximately:\n${types.map(t => `  • ${t}: ${rawMix[t]}%  → ~${Math.round(estimatedSlices * (rawMix[t] as number) / 100)} slices`).join('\n')}`
+    ? `TARGET ASSET MIX — across all slices, rank-1 choices should approximate:\n${types.map(t => `  • ${t}: ${rawMix[t]}%`).join('\n')}`
     : '';
 
   // Extract the last sentence to use as a completion anchor
@@ -946,7 +941,9 @@ ${parsed.fullScript}
 YOUR JOB AS DIRECTOR:
 Go through the script and decide where each visual cut happens. A cut happens when the visual needs to change — because the subject shifts, the emotional register changes, a new location or person is introduced, or the current shot has done its job. Some moments need a single shot held for several sentences. Others need rapid cuts. You decide based on what serves the story visually.
 
-There is no fixed sentence count per slice. A slice can be one sentence or six. What matters is that each slice represents a single coherent visual idea — one thing the viewer is looking at while listening to that narration. When that thing needs to change, make a new slice.
+CRITICAL — DO NOT split at every sentence or period. Sentences that share the same subject, setting, and emotional beat belong in the same slice. Only make a new slice when something meaningfully changes for the viewer — a new person, a new place, a new emotional register, or a new phase of the story. Splitting "School was a joke to him. He dropped out after sixth grade." into two slices is wrong — they are the same thought and should stay together.
+
+There is no fixed sentence count per slice. A slice can be one sentence or eight. Aim for slices that are at least 2–4 sentences unless a single sentence is genuinely its own complete visual moment. What matters is that each slice represents a single coherent visual idea — one thing the viewer is looking at while listening to that narration. When that thing needs to change, make a new slice.
 
 MANDATORY COVERAGE:
 - narrationExcerpt must be EXACT verbatim text from the script, copied character-for-character.
