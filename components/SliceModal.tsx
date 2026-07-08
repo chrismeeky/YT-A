@@ -15,9 +15,12 @@ interface Props {
   anthropicApiKey: string;
   xaiApiKey?: string;
   llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   onSliceUpdate: (updated: DirectorSegment) => void;
   onClose: () => void;
   onPrev?: () => void;
@@ -37,9 +40,12 @@ export default function SliceModal({
   anthropicApiKey,
   xaiApiKey,
   llmProvider,
+  claudeModelPrompts,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
+  stockFootageStyle,
+  stockFootageStyleCustom,
   onSliceUpdate,
   onClose,
   onPrev,
@@ -232,9 +238,12 @@ export default function SliceModal({
                 anthropicApiKey={anthropicApiKey}
                 xaiApiKey={xaiApiKey}
                 llmProvider={llmProvider}
+                claudeModelPrompts={claudeModelPrompts}
                 pexelsApiKey={pexelsApiKey}
                 braveApiKey={braveApiKey}
                 realImageProvider={realImageProvider}
+                stockFootageStyle={stockFootageStyle}
+                stockFootageStyleCustom={stockFootageStyleCustom}
                 savingUrl={savingUrl}
                 initialOpen={true}
                 onSegmentUpdate={onSliceUpdate}

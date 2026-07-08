@@ -25,6 +25,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -46,6 +47,7 @@ export async function POST(
       body.settings,
       body.directorMode ?? false,
       body.assetMixOverride,
+      body.claudeModel,
     );
 
     if (!refined) {

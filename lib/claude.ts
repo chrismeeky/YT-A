@@ -47,7 +47,8 @@ export async function analyzeVideo(
   llm: LLMConfig,
   video: ChannelVideo,
   transcript: string,
-  thumbnailBase64: string
+  thumbnailBase64: string,
+  claudeModelOverride?: string,
 ): Promise<{ result: VideoAnalysis; inputTokens: number; outputTokens: number }> {
   const transcriptExcerpt = transcript
     ? `${transcript.slice(0, 60000)}${transcript.length > 60000 ? '\n...[transcript truncated]' : ''}`
@@ -195,7 +196,7 @@ RULES:
   contentBlocks.push({ type: 'text', text: prompt });
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-opus-4-8',
     maxTokens: 8000,
     system:
       'You are an elite YouTube content strategy expert. Respond ONLY with valid JSON — no markdown fences, no prose. Be specific and concrete in every field. Keep each field value to 1–2 sentences max.',
@@ -248,7 +249,8 @@ RULES:
 
 export async function synthesizeChannelInsights(
   llm: LLMConfig,
-  videoAnalyses: VideoAnalysis[]
+  videoAnalyses: VideoAnalysis[],
+  claudeModelOverride?: string,
 ): Promise<{ result: ChannelInsights; inputTokens: number; outputTokens: number }> {
 
   // Slim summary — only the fields needed to identify cross-video patterns
@@ -300,7 +302,7 @@ export async function synthesizeChannelInsights(
   }));
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-opus-4-8',
     maxTokens: 16000,
     system:
       'You are a YouTube content strategy expert. Respond ONLY with valid JSON, no markdown fences, no prose.',
@@ -386,6 +388,7 @@ Return ONLY valid JSON:
   "styleFingerprint": ["Distinctive quality 1 — something a reader could identify in a blind test as belonging to this channel", "Quality 2", "Quality 3", "Quality 4"],
   "replicationFormula": "Describe the creative PROCESS — how to find the right angle, how to open the narrative tension, how to sustain it. Focus on decisions a writer makes, not sentence-level patterns.",
   "thingsToSteal": ["Principle 1: describe what makes it effective and how to apply it to a new topic — not what it looks like on the surface", "Principle 2", "Principle 3", "Principle 4", "Principle 5"],
+  "voiceInjectionPrompt": "A direct style directive (4-6 sentences) a writer can paste in front of their topic to immediately write in this channel's voice. Cover: the emotional register and tone, the hook architecture (what the first sentence must do), the narrative rhythm (sentence length, pacing, compression), the vocabulary character (word choice style), and what makes this channel's scripts immediately recognisable. Write it as imperative commands directed at the writer — 'Open with...', 'Use...', 'Never...'. Be specific to this channel's actual observable patterns, not generic YouTube advice.",
   "narrativeStructure": {
     "hookAnchorType": "What does the FIRST SENTENCE of every hook anchor on in these transcripts? Options include: a physical object or artifact, a concrete moment-in-progress, a stark ironic contrast, a pattern or trend being observed, a provocative question, a data point or statistic. Name the exact type this channel uses and explain why it works — what psychological gap does it open? Be specific to what you actually see in the transcripts.",
     "hookNameRevealTiming": "When and exactly how does the central subject's name or identity first appear? Is it in the first sentence, withheld for ~X words, or revealed via a specific formula? Quote the reveal pattern verbatim if it appears consistently (e.g. 'His name was X. And by the time...' or 'That company was [name].'). If there is no consistent pattern, describe what varies and why.",
@@ -438,7 +441,9 @@ export async function generateSearchQuery(
     channelBrollPattern?: string;
     siblingVisuals?: string[]; // other assets in the same segment, for visual cohesion
     directorNote?: string;    // selected variation concept — overrides narration as the visual anchor
+    footageStyle?: string;    // era/look bias for stock search, e.g. "vintage Super 8 film grain"
   },
+  claudeModelOverride?: string,
 ): Promise<string> {
   const characterBlock = ctx?.characters?.length
     ? `CHARACTERS: ${ctx.characters.map(c => `${c.name} — ${c.fullDescription}`).join('; ')}`
@@ -477,10 +482,12 @@ export async function generateSearchQuery(
     ctx?.contentNature     && `CONTENT NATURE: ${ctx.contentNature}`,
     ctx?.productionStyle   && `PRODUCTION STYLE: ${ctx.productionStyle}`,
     ctx?.channelBrollPattern && `BROLL PATTERN: ${ctx.channelBrollPattern}`,
+    ctx?.footageStyle && (assetType !== 'real-image')
+      && `FOOTAGE LOOK: ${ctx.footageStyle} — work terms for this look into the query so results match it.`,
   ].filter(Boolean);
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-sonnet-4-6',
     maxTokens: 30,
     system: 'You are a stock footage researcher. Output ONLY a concise search query (3–6 words) that would find footage matching what the narration describes. No explanation, no punctuation at the end, no quotes.',
     messages: [{ role: 'user', content: `${lines.join('\n')}\n\n${instruction}` }],
@@ -561,7 +568,7 @@ export async function extractVoicePrinciples(
     .join('\n\n');
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: 'claude-fable-5',
     maxTokens: 3000,
     system: 'You are a master prose analyst. Your job is to identify the generative craft principles behind a writer\'s voice — not surface patterns, but the underlying mechanisms that produce the effect. Be precise, specific, and practical. Every statement you make must be actionable by a writer.',
     messages: [{
@@ -598,14 +605,13 @@ export async function generateScript(
   llm: LLMConfig,
   analysis: Analysis,
   settings: ScriptSettings,
-  topic: string,
+  instruction: string,
   targetAudience: string,
-  additionalInstructions: string,
   directorMode = false,
   assetMixOverride?: Record<string, number>,
   blueprintTranscripts?: string[],
   useChannelStrategy = true,
-  voicePrinciples?: string,
+  claudeModelOverride?: string,
 ): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
   // Send only the strategy fields needed for scripting — not the full insights object.
   // In director mode, contentStyle/visualSceneGuide/contentNature/productionStyle are omitted
@@ -727,7 +733,7 @@ Return ONLY valid JSON:
 (Replace totalWordCount with the actual integer word count of fullScript before returning.)`;
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-fable-5',
     // Director mode: fullScript (~1× words) + scriptSlices JSON (~8× words in structure overhead).
     // Regular mode: fullScript + scenes JSON (~5× words).
     maxTokens: grokDirectorMode
@@ -735,8 +741,8 @@ Return ONLY valid JSON:
       // All 29,000 tokens go to prose — reasoning: 'high' consumes ~25k on thinking, leaving too little for text.
       ? 29000
       : directorMode
-      ? Math.min(64000, Math.max(16000, Math.round(settings.targetWordCount * 14)))
-      : Math.min(32000, Math.max(8000, Math.round(settings.targetWordCount * 10))),
+      ? Math.min(100000, Math.max(32000, Math.round(settings.targetWordCount * 30)))
+      : Math.min(60000, Math.max(8000, Math.round(settings.targetWordCount * 10))),
     // 'none' reasoning: no tokens consumed on thinking, all 29k go to prose output.
     grokReasoningEffort: 'none',
     system: `You are an expert YouTube scriptwriter. Respond ONLY with valid JSON — no markdown fences, no prose outside the JSON.
@@ -751,52 +757,26 @@ CRITICAL WORD COUNT RULE: The fullScript field MUST contain AT LEAST ${settings.
         role: 'user',
         content: grokDirectorMode ? `${blueprintTranscripts?.length
   ? blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t}`).join('\n\n') + '\n\n'
-  : ''}The above youtube scripts are getting massive views and high retention (AVD). Study them deeply — absorb the sentence rhythm, how hooks are built, how detail is selected, how tension is held and released, how information is sequenced. Then write a completely original script about the topic below using that same craft. The way James Hardley Chase writes multiple novels: the voice is immediately recognisable, but each story is entirely its own — no borrowed sentences, no shared structure, no substituted names.
+  : ''}${instruction}
 
-Topic: ${topic}
-Video length: ${settings.videoLength} minutes (${settings.targetWordCount} words at ${settings.wpm} WPM)${additionalInstructions ? `\nAdditional context: ${additionalInstructions}` : ''}
+Video length: ${settings.videoLength} minutes (${settings.targetWordCount} words at ${settings.wpm} WPM)
 
 ${grokPass1Schema}` : `Create a complete YouTube video script for the topic below, written in the style of the channel shown by the blueprint transcripts.
-${voicePrinciples ? `================================================================
-AUTHOR VOICE PRINCIPLES — these are hard constraints, not suggestions.
-================================================================
-These 9 principles define this author's voice at the craft level. Each one describes a generative mechanism extracted from their real work. Your job is to find a completely fresh expression of each mechanism using this story's material. The examples show the technique in action — do NOT echo their content, structure, or subject matter in any way.
-
-${voicePrinciples}
-
-================================================================
-MANDATORY CONSTRAINTS — these are derived from the 9 principles above. Violation makes the script wrong.
-
-SENTENCE RHYTHM: Apply the compression mechanism described in SENTENCE RHYTHM above. Every scene must contain it. The short sentence must deliver the payload, not introduce a new idea. If a scene has no compression moment, it is not finished.
-
-HOOK: Apply the entry point technique described in HOOK ARCHITECTURE above — not a generic opening, but that specific mechanism applied freshly to this topic's most charged moment. The hook must plant at least one unresolved question before the first scene ends.
-
-DETAIL SELECTION: Apply the dual-function test from DETAIL SELECTION above to every named specific before including it. If a detail does only one job, replace it. No exceptions for convenience.
-
-DIRECT ADDRESS: Apply DIRECT ADDRESS exactly as described above — the same frequency, the same emotional contexts, the same function. Do not approximate. Count your instances before finishing.
-
-SUBJECT/CONCEPT DEPTH: Apply SUBJECT PSYCHOLOGY above wherever a person, system, or idea is being introduced. The mechanism works for any subject — a person's formation, a company's culture, an idea's origin. The reader must arrive at the understanding themselves. No adjectives that do the work for them.
-
-SCENE ENTRIES: No two scenes may open with the same grammatical structure. No scene may open by restating what just happened. Every scene finds its own entry.
-
-WITHHOLDING: Before writing each scene, decide what the listener must not know yet. Apply the sequencing mechanism from WITHHOLDING above. The gap between what the listener suspects and what they are told is where tension lives — protect it.
-================================================================
-` : blueprintTranscripts?.length ? `================================================================
+${blueprintTranscripts?.length ? `================================================================
 VOICE REFERENCE TRANSCRIPTS — study the rhythm, detail selection, and sentence architecture.
 ================================================================
-${blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t.slice(0, 12000)}`).join('\n\n')}
+${blueprintTranscripts.map((t, i) => `--- TRANSCRIPT ${i + 1} ---\n${t}`).join('\n\n')}
 ================================================================
 ` : ''}
 ${useChannelStrategy ? `CHANNEL STRATEGY (structure, hooks, and narrative architecture — not writing style):
 ${directorMode ? JSON.stringify(strategy) : JSON.stringify(strategy, null, 2)}` : ''}
 
 SCRIPT PARAMETERS:
-Topic: ${topic}
+Instruction: ${instruction}
 Target Audience: ${targetAudience || analysis.channelInsights.audienceProfile.demographics}
 Video Length: ${settings.videoLength} minutes
 Narration Speed: ${settings.wpm} words per minute
 Target Word Count: ${settings.targetWordCount} words (±10%)
-Additional Instructions: ${additionalInstructions || 'None'}
 
 ${strategy.productionStyle ? `PRODUCTION MEDIUM: ${strategy.productionStyle}
 All sceneDescriptions and thumbnailConcept must be written assuming this visual medium. Do not describe scenes using language that belongs to a different medium (e.g. don't say "camera pans" for an animated channel, or "cartoon character" for a photorealistic one).
@@ -904,13 +884,12 @@ ${directorSection}${!directorMode ? `Return ONLY valid JSON:
   };
 }
 
-async function grokSliceScript(
-  llm: LLMConfig,
-  parsed: GeneratedScriptPayload,
+function buildSlicePromptAndTokens(
+  fullScript: string,
   settings: ScriptSettings,
   analysis: Analysis,
   assetMixOverride?: Record<string, number>,
-): Promise<{ scriptSlices: RawScriptSlice[]; inputTokens: number; outputTokens: number }> {
+): { userPrompt: string; maxTokens: number } {
   const di = analysis.channelInsights;
   const rawMix = assetMixOverride ?? di.visualAssetMix;
   const types = rawMix
@@ -920,30 +899,34 @@ async function grokSliceScript(
     ? `TARGET ASSET MIX — across all slices, rank-1 choices should approximate:\n${types.map(t => `  • ${t}: ${rawMix[t]}%`).join('\n')}`
     : '';
 
-  // Extract the last sentence to use as a completion anchor
-  const sentences = parsed.fullScript?.match(/[^.!?]+[.!?]+/g) ?? [];
-  const lastSentence = sentences.at(-1)?.trim() ?? parsed.fullScript?.slice(-100).trim() ?? '';
+  const sentences = fullScript.match(/[^.!?]+[.!?]+/g) ?? [];
+  const lastSentence = sentences.at(-1)?.trim() ?? fullScript.slice(-100).trim() ?? '';
 
-  const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
-    // Use 'none' reasoning: all 29k tokens go to JSON output (no reasoning overhead).
-    // Slicing a given text needs no multi-step reasoning — the model just reads and partitions.
-    maxTokens: 29000,
-    grokReasoningEffort: 'none',
-    system: `You are a documentary film director. You read a narration script and decide exactly which visual should play under each section of it — not by counting sentences, but by thinking about what the viewer needs to see and for how long. Respond ONLY with valid JSON, no markdown, no prose.`,
-    messages: [{
-      role: 'user',
-      content: `You are directing the visuals for the following narration script. Read it fully first, then make your directorial decisions.
+  const wordCount = fullScript.trim().split(/\s+/).filter(Boolean).length;
+  const totalSeconds = Math.round((wordCount / settings.wpm) * 60);
+
+  // Use channel's cut rate if available; fall back to a moderate documentary default (5 shots/min)
+  const cutRateShotsPerMinute = di.visualSceneGuide?.cutRateShotsPerMinute ?? 5;
+  const editingRhythm = di.visualSceneGuide?.editingRhythm ?? '';
+  const brollPattern = di.visualSceneGuide?.brollPattern ?? '';
+
+  // Estimated slice count from cut rate — used only for token budget, not prescribed to the model
+  const estimatedSliceCount = Math.max(10, Math.round((totalSeconds / 60) * cutRateShotsPerMinute));
+  // ~500 tokens per slice (narration + 2 assets) + 20% buffer
+  const maxTokens = Math.min(100000, Math.max(16000, Math.round(estimatedSliceCount * 500 * 1.2)));
+
+  const userPrompt = `You are directing the visuals for the following narration script. Read it fully first, then make your directorial decisions.
 
 FULL SCRIPT:
-${parsed.fullScript}
+${fullScript}
 
 YOUR JOB AS DIRECTOR:
-Go through the script and decide where each visual cut happens. A cut happens when the visual needs to change — because the subject shifts, the emotional register changes, a new location or person is introduced, or the current shot has done its job. Some moments need a single shot held for several sentences. Others need rapid cuts. You decide based on what serves the story visually.
+Read the full script, then decide where each visual cut happens. A cut is needed when the visual must change — a new person enters, the location shifts, the emotional register changes, or a new phase of the story begins. Hold a shot as long as it serves the story; cut when it no longer does.
 
-CRITICAL — DO NOT split at every sentence or period. Sentences that share the same subject, setting, and emotional beat belong in the same slice. Only make a new slice when something meaningfully changes for the viewer — a new person, a new place, a new emotional register, or a new phase of the story. Splitting "School was a joke to him. He dropped out after sixth grade." into two slices is wrong — they are the same thought and should stay together.
+CHANNEL EDITING STYLE — match this channel's established rhythm:
+- Cut rate: ~${cutRateShotsPerMinute} shots per minute${editingRhythm ? `\n- Editing rhythm: ${editingRhythm}` : ''}${brollPattern ? `\n- B-roll pattern: ${brollPattern}` : ''}
 
-There is no fixed sentence count per slice. A slice can be one sentence or eight. Aim for slices that are at least 2–4 sentences unless a single sentence is genuinely its own complete visual moment. What matters is that each slice represents a single coherent visual idea — one thing the viewer is looking at while listening to that narration. When that thing needs to change, make a new slice.
+Use that cut rate as your guide for how much narration belongs under each shot. Do not split at paragraph breaks — paragraphs are just text formatting, not visual cuts. A single visual idea may span several paragraphs; multiple short paragraphs about the same subject/scene should stay in one slice.
 
 MANDATORY COVERAGE:
 - narrationExcerpt must be EXACT verbatim text from the script, copied character-for-character.
@@ -979,8 +962,31 @@ Return ONLY valid JSON:
       ]
     }
   ]
-}`,
-    }],
+}`;
+
+  return { userPrompt, maxTokens };
+}
+
+async function grokSliceScript(
+  llm: LLMConfig,
+  parsed: GeneratedScriptPayload,
+  settings: ScriptSettings,
+  analysis: Analysis,
+  assetMixOverride?: Record<string, number>,
+): Promise<{ scriptSlices: RawScriptSlice[]; inputTokens: number; outputTokens: number }> {
+  const { userPrompt, maxTokens } = buildSlicePromptAndTokens(
+    parsed.fullScript ?? '',
+    settings,
+    analysis,
+    assetMixOverride,
+  );
+
+  const result = await llmComplete(llm, {
+    claudeModel: 'claude-fable-5',
+    maxTokens,
+    grokReasoningEffort: 'none',
+    system: `You are a documentary film director. You read a narration script and decide exactly which visual should play under each section of it — not by counting sentences, but by thinking about what the viewer needs to see and for how long. Respond ONLY with valid JSON, no markdown, no prose.`,
+    messages: [{ role: 'user', content: userPrompt }],
   });
 
   if (result.stopReason === 'max_tokens') {
@@ -990,6 +996,47 @@ Return ONLY valid JSON:
   const sliceParsed = parseScriptJSON(result.text) as unknown as { scriptSlices: RawScriptSlice[] };
   return {
     scriptSlices: sliceParsed.scriptSlices ?? [],
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+  };
+}
+
+// ─── Slice an externally-provided script (Import mode) ───────────────────────
+
+export async function sliceScript(
+  llm: LLMConfig,
+  fullScript: string,
+  settings: ScriptSettings,
+  analysis: Analysis,
+  assetMixOverride?: Record<string, number>,
+  claudeModelOverride?: string,
+): Promise<{ result: GeneratedScriptPayload; inputTokens: number; outputTokens: number }> {
+  const syntheticPayload: GeneratedScriptPayload = {
+    title: '',
+    thumbnailConcept: '',
+    fullScript,
+    totalEstimatedDuration: settings.videoLength * 60,
+    totalWordCount: settings.targetWordCount,
+  };
+
+  const resolvedModel = llm.provider === 'grok' ? 'claude-fable-5' : (claudeModelOverride ?? 'claude-opus-4-8');
+  const { userPrompt, maxTokens } = buildSlicePromptAndTokens(fullScript, settings, analysis, assetMixOverride);
+
+  const result = await llmComplete(llm, {
+    claudeModel: resolvedModel,
+    maxTokens,
+    grokReasoningEffort: 'none',
+    system: `You are a documentary film director. You read a narration script and decide exactly which visual should play under each section of it — not by counting sentences, but by thinking about what the viewer needs to see and for how long. Respond ONLY with valid JSON, no markdown, no prose.`,
+    messages: [{ role: 'user', content: userPrompt }],
+  });
+
+  if (result.stopReason === 'max_tokens') {
+    throw new Error('Slice generation was truncated — try again.');
+  }
+
+  const sliceParsed = parseScriptJSON(result.text) as unknown as { scriptSlices: RawScriptSlice[] };
+  return {
+    result: { ...syntheticPayload, scriptSlices: sliceParsed.scriptSlices ?? [] },
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
   };
@@ -1051,6 +1098,7 @@ export async function refineScriptVoice(
   settings: ScriptSettings,
   directorMode = false,
   assetMixOverride?: Record<string, number>,
+  claudeModelOverride?: string,
 ): Promise<{ result: RefinedSceneNarration[]; inputTokens: number; outputTokens: number } | null> {
   const rawBible = buildVoiceBible(analysis.videoAnalyses);
   const voiceExcerpts = analysis.channelInsights.voiceExcerpts ?? [];
@@ -1176,7 +1224,7 @@ RULES:
     })();
 
     const result = await llmComplete(llm, {
-      claudeModel: 'claude-sonnet-4-6',
+      claudeModel: claudeModelOverride ?? 'claude-opus-4-8',
       maxTokens: 64000,
       grokReasoningEffort: 'none',
       system: 'You are an expert YouTube scriptwriter and visual director. Respond ONLY with valid JSON, no markdown fences, no prose.',
@@ -1274,7 +1322,7 @@ Return ONLY valid JSON:
 
   // ── Regular mode: scene-level narration rewrite ───────────────────────────
   const result2 = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-opus-4-8',
     maxTokens: 64000,
     grokReasoningEffort: 'none',
     system: 'You are a voice editor. Respond ONLY with valid JSON, no markdown fences, no prose.',
@@ -1326,6 +1374,7 @@ export async function refineSceneVoice(
   settings: ScriptSettings,
   directorMode = false,
   assetMixOverride?: Record<string, number>,
+  claudeModelOverride?: string,
 ): Promise<{ result: RefinedSceneNarration; inputTokens: number; outputTokens: number } | null> {
   const rawBible = buildVoiceBible(analysis.videoAnalyses);
   const voiceExcerpts = analysis.channelInsights.voiceExcerpts ?? [];
@@ -1495,7 +1544,7 @@ RULES: ai-video must appear. stock-photo must appear. ai-image must not crowd ou
     })() : '';
 
     const dirResult = await llmComplete(llm, {
-      claudeModel: 'claude-sonnet-4-6',
+      claudeModel: claudeModelOverride ?? 'claude-opus-4-8',
       maxTokens: 16000,
       system: 'You are an expert YouTube scriptwriter and visual director. Respond ONLY with valid JSON, no markdown fences, no prose.',
       timeout: 100_000,
@@ -1549,7 +1598,7 @@ Return ONLY valid JSON:
 
   // ── Regular mode: narration rewrite only ──────────────────────────────────
   const regResult = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-opus-4-8',
     maxTokens: 8000,
     system: 'You are a voice editor. Respond ONLY with valid JSON, no markdown fences, no prose.',
     timeout: 100_000,
@@ -1602,7 +1651,8 @@ export async function generateSceneAssets(
   promptDetail: import('./types').PromptDetail = 'auto',
   scriptTopic?: string,
   visualStyle?: string,
-  usedFingerprints?: string[]
+  usedFingerprints?: string[],
+  claudeModelOverride?: string,
 ): Promise<{
   result: {
     imagePrompts?: string[];
@@ -1671,7 +1721,7 @@ export async function generateSceneAssets(
     .join(',\n  ');
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-sonnet-4-6',
     maxTokens: 8192,
     system: 'You are a film director building a visual sequence for a YouTube production. Your mandate is compelling variety — each shot must show the audience something they have not yet seen in this script. Respond ONLY with valid JSON, no markdown.',
     messages: [
@@ -1857,9 +1907,10 @@ export async function generateYoutubeDescription(
   title: string,
   fullScript: string,
   channelStyle?: string,
+  claudeModelOverride?: string,
 ): Promise<{ description: string; inputTokens: number; outputTokens: number }> {
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-opus-4-7',
+    claudeModel: claudeModelOverride ?? 'claude-sonnet-4-6',
     maxTokens: 1024,
     messages: [{
       role: 'user',
@@ -2094,6 +2145,7 @@ export async function* generateDirectorPlanStream(
   scenes: DirectorSceneInput[],
   analysis: Analysis,
   visualStyle?: string,
+  claudeModelOverride?: string,
 ): AsyncGenerator<{ scene: DirectorScene; index: number; total: number; inputTokens: number; outputTokens: number }> {
   const staticPrompt = buildDirectorStaticPrompt(analysis, visualStyle);
   const system = 'You are an expert YouTube video director. Respond ONLY with a JSON array — no markdown, no commentary.';
@@ -2106,7 +2158,7 @@ export async function* generateDirectorPlanStream(
     ).join('\n\n---\n\n');
 
     const batchResult = await llmComplete(llm, {
-      claudeModel: 'claude-sonnet-4-6',
+      claudeModel: claudeModelOverride ?? 'claude-sonnet-4-6',
       maxTokens: 8192,
       system,
       anthropicBeta: 'prompt-caching-2024-07-31',
@@ -2176,7 +2228,8 @@ export async function generateDirectorPrompts(
     contentNature?: string;
     directorNote?: string;
     narrativeLens?: string;
-  }
+  },
+  claudeModelOverride?: string,
 ): Promise<{ prompts: string[]; clipLabels: ('CUT' | 'CONTINUOUS' | null)[]; inputTokens: number; outputTokens: number }> {
   const { assetType, narrationExcerpt, durationEach, clipCount, sceneTitle, sceneDescription, scriptTitle, productionStyle, visualStyle, characters, channelBrollPattern, channelEditingRhythm, contentNature, directorNote, narrativeLens } = opts;
 
@@ -2216,7 +2269,7 @@ ${!isVideo ? '- STILL IMAGE ONLY: do NOT include any camera movement, zoom, pan,
 - Production-ready — no meta-commentary, no caveats, just the prompt`;
 
   const result = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: claudeModelOverride ?? 'claude-sonnet-4-6',
     maxTokens: 1200,
     anthropicBeta: 'prompt-caching-2024-07-31',
     system: `You are a visual prompt engineer for AI ${isVideo ? 'video' : 'image'} generation. Write vivid, production-ready prompts that match the channel's visual style exactly. The single most important rule: every prompt must depict exactly what the narration describes — same subject, same action, same relationships. Never substitute, invent, or reinterpret. Return ONLY the prompt text(s), no explanation.`,

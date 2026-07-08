@@ -295,6 +295,54 @@ export default function SettingsPage() {
                     'Choose which LLM powers script generation and channel analysis.'
                   )}
 
+                {(form.llmProvider ?? 'claude') !== 'grok' && (() => {
+                  const MODELS = [
+                    { id: 'claude-fable-5',    label: 'Fable 5',    tag: 'Most powerful', color: 'text-violet-300' },
+                    { id: 'claude-opus-4-8',   label: 'Opus 4.8',   tag: 'Powerful',      color: 'text-indigo-300' },
+                    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', tag: 'Fast & cheap',  color: 'text-sky-300' },
+                  ] as const;
+                  const ModelPicker = ({ settingKey, defaultModel }: { settingKey: 'claudeModelScript' | 'claudeModelAnalysis' | 'claudeModelTopics' | 'claudeModelPrompts' | 'claudeModelDescription'; defaultModel: string }) => (
+                    <div className="grid grid-cols-3 gap-2">
+                      {MODELS.map(m => {
+                        const active = (form[settingKey] ?? defaultModel) === m.id;
+                        return (
+                          <button key={m.id} type="button" onClick={() => set(settingKey, m.id)}
+                            className={`flex flex-col items-start px-3 py-2 rounded-lg border text-left transition-colors ${active ? 'border-indigo-400 bg-indigo-500/10' : 'border-[#333] hover:border-[#555] hover:bg-[#1a1a1a]'}`}>
+                            <span className={`text-xs font-medium ${active ? 'text-white' : 'text-[#a1a1aa]'}`}>{m.label}</span>
+                            <span className={`text-[10px] mt-0.5 ${m.color} opacity-80`}>{m.tag}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                  return (
+                    <div className="rounded-xl border p-4 space-y-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[#52525b]">Claude Model per Task</p>
+                      <div>
+                        <p className="text-sm font-medium mb-2">Script Writing</p>
+                        <ModelPicker settingKey="claudeModelScript" defaultModel="claude-opus-4-8" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium mb-2">Channel Analysis</p>
+                        <ModelPicker settingKey="claudeModelAnalysis" defaultModel="claude-opus-4-8" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium mb-2">Topic Suggestions</p>
+                        <ModelPicker settingKey="claudeModelTopics" defaultModel="claude-opus-4-8" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium mb-2">AI Prompts & Assets</p>
+                        <p className="text-xs text-[#52525b] mb-2">Image/video prompts, variations, character sheets</p>
+                        <ModelPicker settingKey="claudeModelPrompts" defaultModel="claude-sonnet-4-6" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium mb-2">YouTube Description</p>
+                        <ModelPicker settingKey="claudeModelDescription" defaultModel="claude-sonnet-4-6" />
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div
                   className="rounded-xl border p-6 space-y-5"
                   style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
@@ -436,11 +484,11 @@ export default function SettingsPage() {
                   {field(
                     'Model',
                     <input
-                      value={form.cartesiaModel ?? 'sonic-2'}
+                      value={form.cartesiaModel ?? 'sonic-3.5-2026-05-04'}
                       onChange={e => set('cartesiaModel', e.target.value)}
                       className={inputClass}
                       style={inputStyle}
-                      placeholder="e.g. sonic-2"
+                      placeholder="e.g. sonic-3.5-2026-05-04"
                     />,
                     'Cartesia model ID. Check cartesia.ai/docs for available models.'
                   )}
@@ -450,8 +498,8 @@ export default function SettingsPage() {
                   style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                 >
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-[#52525b]">Voice Settings</h3>
-                  {slider('cartesiaSpeed', 'Speed', 0.7, 1.2, 0.01,
-                    v => `${v.toFixed(2)}×`,
+                  {slider('cartesiaSpeed', 'Speed', 0.6, 1.5, 0.1,
+                    v => `${v.toFixed(1)}×`,
                     'Controls how fast the voice speaks. 1.0 is normal speed.'
                   )}
                 </div>
@@ -514,6 +562,39 @@ export default function SettingsPage() {
                     BETA_MODE
                       ? 'Optional — leave blank to use the shared beta key. Add your own for dedicated quota.'
                       : 'Required for Real Images per scene. Free tier: 2,000 queries/month at api.search.brave.com.'
+                  )}
+                  {field(
+                    'Stock Footage Style',
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        {(['modern', 'vintage', 'custom'] as const).map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => set('stockFootageStyle', s)}
+                            className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                              (form.stockFootageStyle ?? 'modern') === s
+                                ? 'bg-indigo-500 border-indigo-500 text-white'
+                                : 'border-[#333] text-[#a1a1aa] hover:border-[#555] hover:text-white'
+                            }`}
+                            style={(form.stockFootageStyle ?? 'modern') !== s ? { background: 'var(--surface-2)' } : {}}
+                          >
+                            {s === 'modern' ? 'Modern' : s === 'vintage' ? 'Vintage / Archival' : 'Custom'}
+                          </button>
+                        ))}
+                      </div>
+                      {form.stockFootageStyle === 'custom' && (
+                        <input
+                          type="text"
+                          value={form.stockFootageStyleCustom ?? ''}
+                          onChange={e => set('stockFootageStyleCustom', e.target.value)}
+                          placeholder="e.g. VHS home video, worn tape, 1990s camcorder look"
+                          className={inputClass}
+                          style={inputStyle}
+                        />
+                      )}
+                    </div>,
+                    'Biases stock photo/video search queries toward this look. "Vintage" adds terms like Super 8, film grain, and faded color so results better match old-footage narration.'
                   )}
                 </div>
               </>

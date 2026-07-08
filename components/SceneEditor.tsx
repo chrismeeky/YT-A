@@ -194,6 +194,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             anthropicApiKey: settings.anthropicApiKey,
             xaiApiKey: settings.xaiApiKey,
             llmProvider: settings.llmProvider,
+            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
           }),
         });
         if (qr.ok) {
@@ -413,6 +414,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             anthropicApiKey: settings.anthropicApiKey,
             xaiApiKey: settings.xaiApiKey,
             llmProvider: settings.llmProvider,
+            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
             analysis,
             siblingPrompts: type === 'image'
               ? (sceneSnap.imagePrompts ?? []).filter((_, i) => i !== idx)
@@ -506,6 +508,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             anthropicApiKey: settings.anthropicApiKey,
             xaiApiKey: settings.xaiApiKey,
             llmProvider: settings.llmProvider,
+            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
             pexelsApiKey: settings.pexelsApiKey,
             braveApiKey: settings.braveApiKey,
             realImageProvider: settings.realImageProvider,
@@ -1313,6 +1316,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                               anthropicApiKey: settings.anthropicApiKey,
                                               xaiApiKey: settings.xaiApiKey,
                                               llmProvider: settings.llmProvider,
+                                              claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
                                               previousPrompt,
                                               replaceInPlace: true,
                                             }),
@@ -1396,6 +1400,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                             anthropicApiKey: settings.anthropicApiKey,
                                             xaiApiKey: settings.xaiApiKey,
                                             llmProvider: settings.llmProvider,
+                                            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
                                           }),
                                         }
                                       );

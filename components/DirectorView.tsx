@@ -55,9 +55,12 @@ interface Props {
   anthropicApiKey: string;
   xaiApiKey?: string;
   llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   activeSceneId?: string | null;
   onActiveSceneChange?: (sceneId: string) => void;
 }
@@ -73,9 +76,12 @@ function AssetCard({
   anthropicApiKey,
   xaiApiKey,
   llmProvider,
+  claudeModelPrompts,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
+  stockFootageStyle,
+  stockFootageStyleCustom,
   visible,
   savingUrl,
   sliceMediaFiles,
@@ -93,9 +99,12 @@ function AssetCard({
   anthropicApiKey: string;
   xaiApiKey?: string;
   llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   visible: boolean;
   savingUrl: string | null;
   sliceMediaFiles?: import('@/lib/types').MediaFile[];
@@ -116,6 +125,8 @@ function AssetCard({
   const [variationsLoading, setVariationsLoading] = useState(false);
   const [variationsError, setVariationsError] = useState('');
   const [variationsPos, setVariationsPos] = useState<{ anchorTop: number; anchorBottom: number; left: number; openUpward: boolean } | null>(null);
+  const [variationHint, setVariationHint] = useState('');
+  const [extraInstructions, setExtraInstructions] = useState('');
   const generateRef = useRef<(() => void) | null>(null);
   const autoFired = useRef(false);
   const rationaleRef = useRef<HTMLParagraphElement>(null);
@@ -130,6 +141,8 @@ function AssetCard({
 
   const isAI = asset.type === 'ai-video' || asset.type === 'ai-image';
   const isSearch = asset.type === 'stock-photo' || asset.type === 'stock-video' || asset.type === 'real-image';
+  // Footage-look override applies only to Pexels stock searches (real-image is era-specific already)
+  const isStock = asset.type === 'stock-photo' || asset.type === 'stock-video';
 
   const concept = asset.rationale || (isSearch && asset.searchQuery ? asset.searchQuery : '');
   const showSearchLine = !!asset.searchQuery && !!asset.rationale;
@@ -165,7 +178,7 @@ function AssetCard({
     clipCountOverride: asset.clipCountOverride,
     wpm: script.settings.wpm,
     searchQuery: asset.searchQuery,
-    directorNote: asset.rationale,
+    directorNote: [asset.rationale, extraInstructions.trim()].filter(Boolean).join('\n\nAdditional instructions: '),
     sceneTitle: sceneData?.title ?? segment.narrationExcerpt.slice(0, 60),
     sceneDescription: sceneData?.sceneDescription || segment.narrationExcerpt,
     scriptTitle: script.title,
@@ -181,9 +194,13 @@ function AssetCard({
     anthropicApiKey,
     xaiApiKey,
     llmProvider,
+    claudeModel: claudeModelPrompts ?? 'claude-sonnet-4-6',
     pexelsApiKey,
     braveApiKey,
     realImageProvider,
+    // Per-asset footage look overrides the global default when set
+    stockFootageStyle: asset.footageStyle ?? stockFootageStyle,
+    stockFootageStyleCustom: asset.footageStyle ? asset.footageStyleCustom : stockFootageStyleCustom,
   });
 
   const generate = async () => {
@@ -299,9 +316,11 @@ function AssetCard({
             scriptTitle: script.title,
             analysis,
             characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
+            userHint: variationHint.trim() || undefined,
             anthropicApiKey,
             xaiApiKey,
             llmProvider,
+            claudeModel: claudeModelPrompts ?? 'claude-sonnet-4-6',
           }),
         }
       );
@@ -519,6 +538,31 @@ function AssetCard({
                   </button>
                 </div>
 
+                {/* User direction seed */}
+                <div className="px-3 py-2 border-b" style={{ borderColor: '#3f3f46' }}>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={variationHint}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setVariationHint(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !variationsLoading) { e.preventDefault(); e.stopPropagation(); generateVariations(); }
+                      }}
+                      placeholder="Suggest a direction, e.g. crime scene…"
+                      className="flex-1 text-[11px] bg-transparent border border-[#3f3f46] rounded px-2 py-1 text-[#a1a1aa] placeholder-[#3f3f46] focus:border-[#71717a] focus:text-white outline-none transition-colors"
+                    />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); generateVariations(); }}
+                      disabled={variationsLoading}
+                      className="text-[11px] px-2 py-1 rounded font-medium transition-colors disabled:opacity-40 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30"
+                    >
+                      Go
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#3f3f46] mt-1">The AI builds shots from your idea, grounded in the narration.</p>
+                </div>
+
                 {/* Loading state */}
                 {variationsLoading && !asset.variations?.length && (
                   <div className="px-3 py-2.5">
@@ -555,6 +599,54 @@ function AssetCard({
           <p className="text-[10px] text-[#3f3f46] mt-1 italic">Generating…</p>
         )}
         {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
+        {isAI && (
+          <input
+            type="text"
+            value={extraInstructions}
+            onChange={e => setExtraInstructions(e.target.value)}
+            placeholder="Additional instructions for next generation…"
+            className="mt-2 w-full text-[11px] bg-transparent border border-[#3f3f46] rounded px-2 py-1 text-[#a1a1aa] placeholder-[#3f3f46] focus:border-[#71717a] focus:text-white outline-none transition-colors"
+          />
+        )}
+        {isStock && (
+          <div className="mt-2 space-y-1.5">
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[#52525b] mr-1">Look:</span>
+              {(['default', 'modern', 'vintage', 'custom'] as const).map(opt => {
+                const active = (asset.footageStyle ?? 'default') === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => onUpdate({
+                      ...asset,
+                      footageStyle: opt === 'default' ? undefined : opt,
+                      ...(opt !== 'custom' && { footageStyleCustom: undefined }),
+                      // Clear the cached query so the next Search rebuilds it with this look
+                      searchQuery: undefined,
+                    })}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border ${
+                      active
+                        ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                        : 'text-[#52525b] border-[#3f3f46] hover:text-[#a1a1aa]'
+                    }`}
+                  >
+                    {opt === 'default' ? 'Default' : opt === 'modern' ? 'Modern' : opt === 'vintage' ? 'Vintage' : 'Custom'}
+                  </button>
+                );
+              })}
+            </div>
+            {asset.footageStyle === 'custom' && (
+              <input
+                type="text"
+                value={asset.footageStyleCustom ?? ''}
+                onChange={e => onUpdate({ ...asset, footageStyleCustom: e.target.value })}
+                placeholder="e.g. VHS home video, 1990s camcorder look"
+                className="w-full text-[11px] bg-transparent border border-[#3f3f46] rounded px-2 py-1 text-[#a1a1aa] placeholder-[#3f3f46] focus:border-[#71717a] focus:text-white outline-none transition-colors"
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Results */}
@@ -798,9 +890,12 @@ export function SegmentCard({
   anthropicApiKey,
   xaiApiKey,
   llmProvider,
+  claudeModelPrompts,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
+  stockFootageStyle,
+  stockFootageStyleCustom,
   savingUrl,
   initialOpen,
   onSegmentUpdate,
@@ -815,9 +910,12 @@ export function SegmentCard({
   anthropicApiKey: string;
   xaiApiKey?: string;
   llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   savingUrl: string | null;
   initialOpen?: boolean;
   onSegmentUpdate: (updated: DirectorSegment) => void;
@@ -892,7 +990,8 @@ export function SegmentCard({
 
   const commonCardProps = {
     segment, scene, script, analysis,
-    anthropicApiKey, xaiApiKey, llmProvider, pexelsApiKey, braveApiKey, realImageProvider,
+    anthropicApiKey, xaiApiKey, llmProvider, claudeModelPrompts, pexelsApiKey, braveApiKey, realImageProvider,
+    stockFootageStyle, stockFootageStyleCustom,
     savingUrl, sliceMediaFiles: segment.mediaFiles, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
   };
 
@@ -1055,7 +1154,7 @@ export function SegmentCard({
 
 // ─── Main DirectorView ────────────────────────────────────────────────────────
 
-export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, xaiApiKey, llmProvider, pexelsApiKey, braveApiKey, realImageProvider, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
+export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, xaiApiKey, llmProvider, claudeModelPrompts, pexelsApiKey, braveApiKey, realImageProvider, stockFootageStyle, stockFootageStyleCustom, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
   const storage = useStorage();
   const scriptRef = useRef(script);
   scriptRef.current = script;
@@ -1526,9 +1625,12 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
                   anthropicApiKey={anthropicApiKey}
                   xaiApiKey={xaiApiKey}
                   llmProvider={llmProvider}
+                  claudeModelPrompts={claudeModelPrompts}
                   pexelsApiKey={pexelsApiKey}
                   braveApiKey={braveApiKey}
                   realImageProvider={realImageProvider}
+                  stockFootageStyle={stockFootageStyle}
+                  stockFootageStyleCustom={stockFootageStyleCustom}
                   savingUrl={savingUrl}
                   onSegmentUpdate={seg => updateSegment(activeScene.sceneId, seg)}
                   onSaveToScene={saveToScene}

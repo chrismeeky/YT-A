@@ -15,6 +15,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -30,7 +31,7 @@ export async function POST(
   const scriptContext = body.scenes.map(s => `[${s.title}]\n${s.narration}`).join('\n\n');
 
   const response = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
     maxTokens: 2048,
     system: 'You are a character design expert for fictional stories. Respond ONLY with valid JSON, no markdown.',
     messages: [

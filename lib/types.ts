@@ -319,6 +319,7 @@ export interface ChannelInsights {
   videoLength: { typical: string; reasoning: string };
   replicationFormula: string;
   thingsToSteal: string[];
+  voiceInjectionPrompt?: string; // ready-to-inject style directive generated during synthesis; used by "Refine with channel's voice"
 }
 
 export interface Analysis {
@@ -496,6 +497,10 @@ export interface DirectorAsset {
   searchPage?: number;      // current pagination page for stock/real image search
   // Visual concept variations for this asset (alternative director briefs)
   variations?: string[];
+  // Per-asset stock footage look override (stock-photo / stock-video only).
+  // Undefined = inherit the global Settings default.
+  footageStyle?: 'modern' | 'vintage' | 'custom';
+  footageStyleCustom?: string;
 }
 
 export interface DirectorSegment {
@@ -536,6 +541,7 @@ export interface Script {
   directorMode?: boolean;
   directorPlan?: DirectorScene[];
   blueprintTranscriptIds?: string[];
+  imported?: boolean;
 }
 
 // ─── Research ──────────────────────────────────────────────────────────────
@@ -579,6 +585,11 @@ export interface ChannelBookmark {
 
 export interface AppSettings {
   llmProvider: 'claude' | 'grok';
+  claudeModelScript: string;
+  claudeModelAnalysis: string;
+  claudeModelTopics: string;
+  claudeModelPrompts: string;
+  claudeModelDescription: string;
   anthropicApiKey: string;
   xaiApiKey: string;
   elevenLabsApiKey: string;
@@ -594,6 +605,8 @@ export interface AppSettings {
   pexelsApiKey: string;
   braveApiKey: string;
   realImageProvider: 'brave' | 'duckduckgo';
+  stockFootageStyle: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom: string;
   youtubeApiKey: string;
   defaultVideoLength: number;
   defaultWpm: number;
@@ -602,6 +615,11 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   llmProvider: 'claude',
+  claudeModelScript: 'claude-opus-4-8',
+  claudeModelAnalysis: 'claude-opus-4-8',
+  claudeModelTopics: 'claude-opus-4-8',
+  claudeModelPrompts: 'claude-sonnet-4-6',
+  claudeModelDescription: 'claude-sonnet-4-6',
   anthropicApiKey: '',
   xaiApiKey: '',
   elevenLabsApiKey: '',
@@ -613,10 +631,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cartesiaApiKey: '',
   cartesiaVoiceId: '',
   cartesiaSpeed: 1.0,
-  cartesiaModel: 'sonic-2',
+  cartesiaModel: 'sonic-3.5-2026-05-04',
   pexelsApiKey: '',
   braveApiKey: '',
   realImageProvider: 'brave',
+  stockFootageStyle: 'modern',
+  stockFootageStyleCustom: '',
   youtubeApiKey: '',
   defaultVideoLength: 5,
   defaultWpm: 150,

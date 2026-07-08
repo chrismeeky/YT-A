@@ -17,6 +17,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -33,7 +34,7 @@ export async function POST(
     ]);
 
     const { result, inputTokens, outputTokens } = await analyzeVideo(
-      llm, body.video, transcript, thumbnail.data,
+      llm, body.video, transcript, thumbnail.data, body.claudeModel,
     );
 
     // Capture transcript sections for voice bible + full transcript for synthesis

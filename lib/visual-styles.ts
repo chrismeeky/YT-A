@@ -67,6 +67,22 @@ export function resolvePromptLock(visualStyle: string | undefined): string | nul
   return preset ? preset.promptLock : visualStyle; // fall back to raw custom text
 }
 
+const STOCK_FOOTAGE_STYLE_TEXT: Record<'modern' | 'vintage', string> = {
+  modern: '',
+  vintage:
+    'vintage Super 8 / 8mm home movie footage, visible film grain, faded and slightly desaturated color, soft focus, light leaks, subtle camera shake — 1960s-1980s era look',
+};
+
+/** Resolve a stock footage style setting into search-query bias text. Empty string means no bias (modern/default). */
+export function resolveStockFootageStyle(
+  style: 'modern' | 'vintage' | 'custom' | undefined,
+  custom: string | undefined,
+): string {
+  if (style === 'custom') return custom?.trim() ?? '';
+  if (style === 'vintage') return STOCK_FOOTAGE_STYLE_TEXT.vintage;
+  return '';
+}
+
 /** Infer the closest preset tag from a free-text production style description. */
 export function inferPresetTag(productionStyle: string): string | undefined {
   const s = productionStyle.toLowerCase();

@@ -44,9 +44,13 @@ export default function ScriptEditorPage() {
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const [xaiApiKey, setXaiApiKey] = useState('');
   const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
+  const [claudeModelPrompts, setClaudeModelPrompts] = useState('claude-sonnet-4-6');
+  const [claudeModelDescription, setClaudeModelDescription] = useState('claude-sonnet-4-6');
   const [pexelsApiKey, setPexelsApiKey] = useState('');
   const [braveApiKey, setBraveApiKey] = useState('');
   const [realImageProvider, setRealImageProvider] = useState<'brave' | 'duckduckgo'>('brave');
+  const [stockFootageStyle, setStockFootageStyle] = useState<'modern' | 'vintage' | 'custom'>('modern');
+  const [stockFootageStyleCustom, setStockFootageStyleCustom] = useState('');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -85,9 +89,13 @@ export default function ScriptEditorPage() {
       setAnthropicApiKey(s.anthropicApiKey ?? '');
       setXaiApiKey(s.xaiApiKey ?? '');
       setLlmProvider((s.llmProvider as 'claude' | 'grok') ?? 'claude');
+      setClaudeModelPrompts(s.claudeModelPrompts ?? 'claude-sonnet-4-6');
+      setClaudeModelDescription(s.claudeModelDescription ?? 'claude-sonnet-4-6');
       setPexelsApiKey(s.pexelsApiKey ?? '');
       setBraveApiKey(s.braveApiKey ?? '');
       setRealImageProvider((s.realImageProvider as 'brave' | 'duckduckgo') ?? 'brave');
+      setStockFootageStyle((s.stockFootageStyle as 'modern' | 'vintage' | 'custom') ?? 'modern');
+      setStockFootageStyleCustom(s.stockFootageStyleCustom ?? '');
     });
   }, [id, scriptId, storage]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -167,6 +175,7 @@ export default function ScriptEditorPage() {
           anthropicApiKey: settings.anthropicApiKey,
           xaiApiKey: settings.xaiApiKey,
           llmProvider: settings.llmProvider,
+          claudeModel: settings.claudeModelDescription ?? 'claude-sonnet-4-6',
         }),
       });
       const data = await res.json();
@@ -637,9 +646,12 @@ export default function ScriptEditorPage() {
               anthropicApiKey={anthropicApiKey}
               xaiApiKey={xaiApiKey || undefined}
               llmProvider={llmProvider}
+              claudeModelPrompts={claudeModelPrompts}
               pexelsApiKey={pexelsApiKey || undefined}
               braveApiKey={braveApiKey || undefined}
               realImageProvider={realImageProvider}
+              stockFootageStyle={stockFootageStyle}
+              stockFootageStyleCustom={stockFootageStyleCustom}
               onScriptChange={handleScriptChange}
             />
           ) : (
@@ -650,9 +662,12 @@ export default function ScriptEditorPage() {
               anthropicApiKey={anthropicApiKey}
               xaiApiKey={xaiApiKey || undefined}
               llmProvider={llmProvider}
+              claudeModelPrompts={claudeModelPrompts}
               pexelsApiKey={pexelsApiKey || undefined}
               braveApiKey={braveApiKey || undefined}
               realImageProvider={realImageProvider}
+              stockFootageStyle={stockFootageStyle}
+              stockFootageStyleCustom={stockFootageStyleCustom}
               onScriptChange={handleScriptChange}
             />
           )}
@@ -684,6 +699,7 @@ export default function ScriptEditorPage() {
           anthropicApiKey={anthropicApiKey}
           xaiApiKey={xaiApiKey}
           llmProvider={llmProvider}
+          claudeModelPrompts={claudeModelPrompts}
           visualStyle={script.visualStyle}
           initialSelectedName={characterModalInitialName}
           onClose={() => { setCharacterModalOpen(false); setCharacterModalInitialName(null); }}

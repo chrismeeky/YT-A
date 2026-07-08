@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateDirectorPrompts, generateSearchQuery } from '@/lib/claude';
 import { searchPexels, searchBraveImages, searchDuckDuckGoImages, searchPexelsVideos } from '@/lib/image-search';
+import { resolveStockFootageStyle } from '@/lib/visual-styles';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
 import { trackUsage, calcLLMCost } from '@/lib/usage';
 import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
@@ -35,10 +36,13 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
     wpm?: number;
+    stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+    stockFootageStyleCustom?: string;
   };
 
   const userId = await getUserIdFromRequest(request);
@@ -57,6 +61,7 @@ export async function POST(
   const queryContentNature  = analysis.channelInsights.contentNature?.classification;
   const queryProductionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
   const queryBrollPattern   = analysis.channelInsights.visualSceneGuide?.brollPattern;
+  const footageStyle = resolveStockFootageStyle(body.stockFootageStyle, body.stockFootageStyleCustom);
 
   const resolveQuery = async (type: 'stock-photo' | 'stock-video' | 'real-image'): Promise<string> => {
     if (searchQuery) return searchQuery;
@@ -77,6 +82,7 @@ export async function POST(
       characters,
       contentNature:       queryContentNature,
       productionStyle:     queryProductionStyle,
+      footageStyle,
       channelBrollPattern: queryBrollPattern,
       siblingVisuals,
       directorNote:        directorNote || undefined,
@@ -167,7 +173,7 @@ export async function POST(
         scriptTitle && `Story: ${scriptTitle}.`,
         characters?.length && `Key subjects: ${characters.map(c => c.name).join(', ')}.`,
       ].filter(Boolean).join(' ') || undefined,
-    });
+    }, body.claudeModel);
 
     const { cost: directorCost, api: directorApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({

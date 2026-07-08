@@ -289,7 +289,7 @@ export default function AnalyzePage() {
           res = await fetch(`/api/projects/${id}/analyze/video`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider }),
+            body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider, claudeModel: settings.claudeModelAnalysis ?? 'claude-opus-4-8' }),
             signal: abort.signal,
           });
         } catch (e) {
@@ -333,7 +333,7 @@ export default function AnalyzePage() {
         synthRes = await fetch(`/api/projects/${id}/analyze/synthesize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider }),
+          body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider, claudeModel: settings.claudeModelAnalysis ?? 'claude-opus-4-8' }),
           signal: abort.signal,
         });
       } catch (e) {

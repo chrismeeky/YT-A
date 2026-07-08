@@ -22,9 +22,11 @@ export async function POST(
     scriptTitle: string;
     analysis: Analysis;
     characters?: Array<{ name: string; fullDescription: string }>;
+    userHint?: string;   // optional user-supplied direction, e.g. "crime scene"
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -35,7 +37,8 @@ export async function POST(
   if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   const userId = await getUserIdFromRequest(request);
-  const { assetType, narrationExcerpt, narrationSlice, currentRationale, sceneTitle, sceneDescription, scriptTitle, analysis, characters } = body;
+  const { assetType, narrationExcerpt, narrationSlice, currentRationale, sceneTitle, sceneDescription, scriptTitle, analysis, characters, userHint } = body;
+  const hint = userHint?.trim();
 
   const assetDescriptions: Record<DirectorAssetType, string> = {
     'ai-video':    'cinematic AI-generated video clip',
@@ -61,7 +64,7 @@ export async function POST(
     : '';
 
   const response = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
     maxTokens: 512,
     system: 'You are a visual director generating concise shot concepts. Respond ONLY with valid JSON, no markdown fences, no prose.',
     messages: [{
@@ -76,7 +79,7 @@ NARRATION SEGMENT: "${narrationExcerpt}"${narrationSlice && narrationSlice !== n
 VISUAL TO BE REPLACED: "${currentRationale}"
 
 CHANNEL STYLE: ${contentNature}${productionStyle ? ` — ${productionStyle}` : ''}${brollPattern ? `\nBroll pattern: ${brollPattern}` : ''}
-
+${hint ? `\nUSER DIRECTION (REQUIRED): The user wants this visual to be about "${hint}". All 4 variations MUST interpret this direction, grounded in the narration above. Take "${hint}" as the creative seed and develop 4 distinct concrete shots that realise it in the context of what the narration describes.\n` : ''}
 Rules:
 - Each variation is a director's brief: 3–6 words, lowercase, highly specific
 ${isStock ? `- STOCK FOOTAGE RULE: Generate GENERIC, searchable B-roll concepts (mood, atmosphere, environment, motion, textures, lighting, time of day). NEVER include specific people names, character names, or story-specific events/locations — stock libraries do not have them. Think like a documentary editor cutting generic illustrative footage.` : `- Use the actual named subjects, locations, and events from the narration when they are the visual focus — not generic stand-ins`}

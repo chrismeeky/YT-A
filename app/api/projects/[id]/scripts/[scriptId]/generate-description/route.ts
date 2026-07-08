@@ -17,6 +17,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -32,6 +33,7 @@ export async function POST(
       body.title,
       body.fullScript,
       body.channelStyle,
+      body.claudeModel,
     );
 
     const { cost: descCost, api: descApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);

@@ -14,6 +14,7 @@ export async function POST(
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
     seedTopic?: string;
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -103,7 +104,7 @@ Respond with a raw JSON array only. No markdown, no code fences, no explanation.
 [{"topic": "...", "context": "...", "isFactual": ${nature !== 'fictional'}}, ...]`;
 
     const response = await llmComplete(llm, {
-      claudeModel: 'claude-sonnet-4-6',
+      claudeModel: body.claudeModel ?? 'claude-opus-4-8',
       maxTokens: 4096,
       system: 'You are a JSON API. Always respond with valid raw JSON only. Never use markdown or code fences.',
       messages: [{ role: 'user', content: prompt }],

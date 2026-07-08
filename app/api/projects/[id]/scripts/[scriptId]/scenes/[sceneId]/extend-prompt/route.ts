@@ -16,6 +16,7 @@ export async function POST(
     replaceInPlace?: boolean;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -81,7 +82,7 @@ Return ONLY valid JSON:
   let response: Awaited<ReturnType<typeof llmComplete>>;
   try {
     response = await llmComplete(llm, {
-      claudeModel: 'claude-sonnet-4-6',
+      claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
       maxTokens: 1024,
       system: 'You are an expert video director specialising in AI video generation prompts for tools like Sora, Runway, and Kling. Respond ONLY with valid JSON, no markdown.',
       messages: [{ role: 'user', content: userContent }],

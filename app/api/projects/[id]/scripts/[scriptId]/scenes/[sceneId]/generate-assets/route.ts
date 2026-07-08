@@ -23,6 +23,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
@@ -67,6 +68,7 @@ export async function POST(
       body.scriptTopic,
       body.visualStyle,
       body.usedFingerprints,
+      body.claudeModel,
     );
 
     const { cost: assetsCost, api: assetsApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);

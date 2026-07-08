@@ -22,6 +22,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
     analysis?: Analysis;
     siblingPrompts?: string[];
     usedFingerprints?: string[];
@@ -86,7 +87,7 @@ ${isImage ? '- Prompt must end with --ar 16:9' : '- Describe motion and camera m
 - fingerprint format: one of [extreme_close/close/medium/wide/aerial] | primary subject + action | location | dominant color + mood (max 15 tokens)`;
 
   const response = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
     maxTokens: 600,
     system: 'You are a film director crafting visual prompts for a YouTube production. Return ONLY valid JSON: { "prompt": "...", "fingerprint": "..." }',
     messages: [{ role: 'user', content: userPrompt }],

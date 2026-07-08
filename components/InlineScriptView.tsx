@@ -16,9 +16,12 @@ interface Props {
   anthropicApiKey: string;
   xaiApiKey?: string;
   llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   onScriptChange: (s: Script) => void;
 }
 
@@ -56,9 +59,12 @@ export default function InlineScriptView({
   anthropicApiKey,
   xaiApiKey,
   llmProvider,
+  claudeModelPrompts,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
+  stockFootageStyle,
+  stockFootageStyleCustom,
   onScriptChange,
 }: Props) {
   const [openSliceIndex, setOpenSliceIndex] = useState<number | null>(null);
@@ -167,9 +173,12 @@ export default function InlineScriptView({
           anthropicApiKey={anthropicApiKey}
           xaiApiKey={xaiApiKey}
           llmProvider={llmProvider}
+          claudeModelPrompts={claudeModelPrompts}
           pexelsApiKey={pexelsApiKey}
           braveApiKey={braveApiKey}
           realImageProvider={realImageProvider}
+          stockFootageStyle={stockFootageStyle}
+          stockFootageStyleCustom={stockFootageStyleCustom}
           onSliceUpdate={updateSlice}
           onClose={() => setOpenSliceIndex(null)}
           onPrev={openSliceIndex > 0 ? () => { const i = openSliceIndex - 1; setOpenSliceIndex(i); setLastOpenedSliceIndex(i); } : undefined}

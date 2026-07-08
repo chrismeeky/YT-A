@@ -101,7 +101,7 @@ export async function llmComplete(config: LLMConfig, params: LLMCompleteParams):
 
 async function claudeComplete(apiKey: string, params: LLMCompleteParams): Promise<LLMResult> {
   const ai = new Anthropic({ apiKey });
-  const model = params.claudeModel ?? 'claude-sonnet-4-6';
+  const model = params.claudeModel ?? 'claude-fable-5';
 
   const messages = params.messages as Anthropic.MessageParam[];
 
@@ -137,6 +137,11 @@ async function claudeComplete(apiKey: string, params: LLMCompleteParams): Promis
     // unreachable — loop always returns or throws
     return createMsg();
   })();
+
+  // claude-fable-5 may return stop_reason: 'refusal' with empty content
+  if ((response.stop_reason as string) === 'refusal') {
+    throw new Error('Claude declined this request (content policy). Try rephrasing or use a fallback model.');
+  }
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
   return {

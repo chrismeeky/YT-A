@@ -16,6 +16,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -31,7 +32,7 @@ export async function POST(
 
   try {
     const { result, inputTokens, outputTokens } = await synthesizeChannelInsights(
-      llm, body.videoAnalyses,
+      llm, body.videoAnalyses, body.claudeModel,
     );
 
     const { cost: synthCost, api: synthApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);

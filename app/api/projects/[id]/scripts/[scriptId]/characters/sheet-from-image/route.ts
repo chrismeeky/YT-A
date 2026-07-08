@@ -15,6 +15,7 @@ export async function POST(
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
   const llm = makeLLMConfig(
@@ -31,7 +32,7 @@ export async function POST(
   }
 
   const response = await llmComplete(llm, {
-    claudeModel: 'claude-sonnet-4-6',
+    claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
     maxTokens: 2048,
     system: 'You are a character design expert. Analyze images and extract precise visual character descriptions. Respond ONLY with valid JSON, no markdown.',
     messages: [
