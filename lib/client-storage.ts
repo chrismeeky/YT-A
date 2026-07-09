@@ -159,12 +159,12 @@ interface OwnerFile { userId: string; email: string; }
 // ─── ClientStorage class ───────────────────────────────────────────────────
 
 export class ClientStorage {
-  private db:   IDBDatabase | null = null;
-  private root: FileSystemDirectoryHandle | null = null;
-  private _mode:   'fsaa' | 'idb' = 'idb';
-  private _ready = false;
-  private _userId    = '';
-  private _idbPrefix = '';  // userId + '/'
+  protected db:   IDBDatabase | null = null;
+  protected root: FileSystemDirectoryHandle | null = null;
+  protected _mode:   'fsaa' | 'idb' = 'idb';
+  protected _ready = false;
+  protected _userId    = '';
+  protected _idbPrefix = '';  // userId + '/'
 
   get isReady()      { return this._ready; }
   get mode()         { return this._mode; }
