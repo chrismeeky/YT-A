@@ -48,6 +48,21 @@ export function StorageProvider({ children }: { children: ReactNode }) {
       // One-time migration check: has this account already been moved?
       if (localStorage.getItem(migratedKey(userId))) return;
 
+      // The localStorage flag is per-device, so it can be missing even after a
+      // successful migration (different browser/device, cleared site data, or a
+      // migration that failed before writing the flag). Before offering to move
+      // legacy on-device data again, check the source of truth: if the cloud
+      // account already has projects, migration has effectively happened — mark
+      // it done and never re-prompt.
+      try {
+        const cloudProjects = await cloudStorage.listProjects();
+        if (cancelled) return;
+        if (cloudProjects.length > 0) {
+          localStorage.setItem(migratedKey(userId), '1');
+          return;
+        }
+      } catch { /* cloud check failed — fall through and offer local migration */ }
+
       // Look for existing on-device data to offer moving up.
       const local = new ClientStorage();
       const localReady = await local.init(userId);
