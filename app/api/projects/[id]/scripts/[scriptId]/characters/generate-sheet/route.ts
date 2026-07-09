@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 
 export async function POST(
   request: NextRequest,
@@ -13,22 +13,26 @@ export async function POST(
     scriptTopic: string;
     visualStyle?: string;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
-  const apiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!apiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
   if (!body.characterName?.trim()) {
     return NextResponse.json({ error: 'characterName is required.' }, { status: 400 });
   }
 
   const scriptContext = body.scenes.map(s => `[${s.title}]\n${s.narration}`).join('\n\n');
 
-  const ai = new Anthropic({ apiKey });
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
+  const response = await llmComplete(llm, {
+    claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
+    maxTokens: 2048,
     system: 'You are a character design expert for fictional stories. Respond ONLY with valid JSON, no markdown.',
     messages: [
       {
@@ -62,16 +66,17 @@ Return JSON with this exact structure:
     ],
   });
 
+  const { cost: sheetCost, api: sheetApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
   void trackUsage({
     operation: 'generate-character-sheet',
-    api: 'anthropic',
+    api: sheetApi,
     project_id: params.id,
-    input_tokens: response.usage.input_tokens,
-    output_tokens: response.usage.output_tokens,
-    estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
+    input_tokens: response.inputTokens,
+    output_tokens: response.outputTokens,
+    estimated_cost_usd: sheetCost,
   });
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text : '{}';
+  const raw = response.text || '{}';
   let cleaned = raw.trim();
   // Strip markdown fences
   if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();

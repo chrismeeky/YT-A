@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateYoutubeDescription } from '@/lib/claude';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 
 export const maxDuration = 60;
 
@@ -14,28 +15,35 @@ export async function POST(
     fullScript: string;
     channelStyle?: string;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   try {
     const { description, inputTokens, outputTokens } = await generateYoutubeDescription(
-      anthropicApiKey,
+      llm,
       body.title,
       body.fullScript,
       body.channelStyle,
+      body.claudeModel,
     );
 
+    const { cost: descCost, api: descApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({
       operation: 'generate-description',
-      api: 'anthropic',
+      api: descApi,
       project_id: params.id,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+      estimated_cost_usd: descCost,
     });
 
     return NextResponse.json({ description });

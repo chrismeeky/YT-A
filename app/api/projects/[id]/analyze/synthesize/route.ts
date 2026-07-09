@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { synthesizeChannelInsights } from '@/lib/claude';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import type { VideoAnalysis } from '@/lib/types';
 
 export const maxDuration = 300;
@@ -13,12 +14,17 @@ export async function POST(
   const body = (await request.json()) as {
     videoAnalyses: VideoAnalysis[];
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   if (!body.videoAnalyses?.length) {
     return NextResponse.json({ error: 'No video analyses provided' }, { status: 400 });
@@ -26,16 +32,17 @@ export async function POST(
 
   try {
     const { result, inputTokens, outputTokens } = await synthesizeChannelInsights(
-      anthropicApiKey, body.videoAnalyses,
+      llm, body.videoAnalyses, body.claudeModel,
     );
 
+    const { cost: synthCost, api: synthApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({
       operation: 'analyze',
-      api: 'anthropic',
+      api: synthApi,
       project_id: params.id,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+      estimated_cost_usd: synthCost,
     });
 
     return NextResponse.json({ result });

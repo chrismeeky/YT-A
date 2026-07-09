@@ -197,10 +197,10 @@ function VideoDeepDive({ v }: { v: VideoAnalysis }) {
             <span className="text-xs text-[#71717a]">Rhetorical Devices</span>
             <Tags items={v.scriptAndLanguage?.rhetoricalDevices} />
           </div>
-          {v.scriptAndLanguage?.standoutPhrases?.length > 0 && (
+          {(v.scriptAndLanguage?.standoutPhrases?.length ?? 0) > 0 && (
             <div>
               <p className="text-xs text-[#71717a] mb-1">Standout Phrases</p>
-              {v.scriptAndLanguage.standoutPhrases.map((p, i) => (
+              {v.scriptAndLanguage?.standoutPhrases?.map((p, i) => (
                 <p key={i} className="text-xs italic text-[#a1a1aa] border-l-2 border-indigo-400 pl-2 mb-1">&ldquo;{p}&rdquo;</p>
               ))}
             </div>
@@ -680,7 +680,7 @@ ${videoSections}
                   className="rounded-lg object-cover flex-shrink-0"
                   unoptimized
                 />
-                <div>
+                <div className="flex-1 min-w-0">
                   <h2 className="font-semibold text-sm">{video.videoTitle}</h2>
                   <a
                     href={video.videoUrl}
@@ -691,6 +691,23 @@ ${videoSections}
                     Watch on YouTube ↗
                   </a>
                 </div>
+                {video.fullTranscript && (
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([video.fullTranscript!], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${video.videoTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-transcript.txt`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                    style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)' }}
+                  >
+                    ⬇ Transcript
+                  </button>
+                )}
               </div>
               <VideoDeepDive v={video} />
             </div>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 import type { Analysis } from '@/lib/types';
 
 export async function POST(
@@ -11,13 +11,18 @@ export async function POST(
   const body = (await request.json()) as {
     analysis: Analysis;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
     seedTopic?: string;
+    claudeModel?: string;
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   if (!body.analysis?.id) {
     return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
@@ -25,7 +30,6 @@ export async function POST(
 
   try {
     const analysis = body.analysis;
-    const ai = new Anthropic({ apiKey: anthropicApiKey });
 
     const insights = analysis.channelInsights;
     const nature = insights.contentNature?.classification ?? 'non-fictional';
@@ -36,12 +40,27 @@ export async function POST(
       ? `For each topic, write a short story context (2–4 sentences) with the creative premise: the world, the central character or conflict, the dramatic question, and the emotional arc. Invent freely — specific names, places, and details are encouraged. ${noPlaceholders}`
       : nature === 'mixed'
       ? `For each topic, indicate whether it is fictional or based on real events. For real-world topics, use real documented names and cases you are confident about; describe the situation and note the writer must verify all facts. For fictional topics, invent freely. ${noPlaceholders}`
-      : `For each topic, use a real documented case, person, or event you are confident about — this channel's format is built around real named subjects. Include the real name in the topic title when you know it. In the context field, describe the real situation in broad strokes (what happened, what makes it compelling) and note that the writer must verify all details independently. If you are not confident of a real name for a particular angle, phrase the title descriptively instead of using a placeholder. ${noPlaceholders}`;
+      : `For each topic, use a real documented case, person, or event you are confident about — this channel's format is built around real named subjects. Include the real name in the topic title when you know it. In the context field, describe the real situation in broad strokes (what happened, what makes it compelling) and note that the writer must verify all details independently. If you are not confident of a real name for a particular angle, phrase the title descriptively instead of using a placeholder. ${noPlaceholders}
+
+RESEARCH DEPTH REQUIREMENT (strictly enforced): Every suggested topic must have sufficient publicly documented record to support a 20–30 minute deep-dive script. Before finalising each topic, mentally verify: Are there multiple named sources (books, court records, journalism, documentaries, academic papers)? Are the key facts — dates, locations, people, sequence of events, investigation details — well established in the public record? Is there enough documented complexity (motive, investigation, trial, psychological profile, or systemic failure) to sustain extended narrative analysis? If the answer to any of these is "uncertain" or "no", replace the topic with one that clears all three. Do NOT suggest obscure cases where the documented record is thin, disputed without resolution, or relies on a single source.`;
 
     const pillars = insights.contentPillars ?? [];
     const formulas = insights.titleFormulas ?? [];
     const analyzedTitles = analysis.videoAnalyses.map(v => v.videoTitle).filter(Boolean);
     const analyzedSubjects = analysis.videoAnalyses.map(v => v.channelName ?? '').filter(Boolean);
+
+    // Include full transcripts so the model understands the channel's narrative depth,
+    // writing weight, and the complexity of stories it actually covers — not just strategy metadata.
+    const transcriptSamples = analysis.videoAnalyses
+      .filter(v => v.fullTranscript || v.transcriptHook || v.transcriptExcerpt)
+      .slice(0, 3)
+      .map((v, i) => {
+        const text = v.fullTranscript
+          || [v.transcriptHook, v.transcriptExcerpt, v.transcriptClimax, v.transcriptOutro]
+               .filter(Boolean).join('\n\n');
+        return `--- TRANSCRIPT ${i + 1}: "${v.videoTitle}" ---\n${text}`;
+      })
+      .join('\n\n');
 
     const channelContext = `Channel: ${analysis.channelName}
 Content nature: ${nature}${insights.contentNature?.reasoning ? ` (${insights.contentNature.reasoning})` : ''}
@@ -53,7 +72,8 @@ Unique value proposition: ${insights.uniqueValueProposition ?? 'N/A'}
 Audience: ${insights.audienceProfile?.demographics ?? 'N/A'}
 Audience pain points: ${insights.audienceProfile?.painPoints?.join(', ') ?? 'N/A'}
 Patterns to replicate: ${insights.thingsToSteal?.slice(0, 3).join(', ') ?? 'N/A'}
-${analyzedTitles.length > 0 ? `\nALREADY COVERED — do NOT suggest these or any disguised variation of them:\n${analyzedTitles.map(t => `  - ${t}`).join('\n')}` : ''}`;
+${analyzedTitles.length > 0 ? `\nALREADY COVERED — do NOT suggest these or any disguised variation of them:\n${analyzedTitles.map(t => `  - ${t}`).join('\n')}` : ''}
+${transcriptSamples ? `\nNARRATIVE DEPTH REFERENCE — these are actual transcript excerpts from this channel's videos. Study them to understand the level of psychological depth, investigative detail, systemic analysis, and narrative weight this channel brings to its subjects. Every suggested topic must have enough documented complexity to sustain this same depth across a full 20–30 minute script:\n\n${transcriptSamples}` : ''}`;
 
     const prompt = body.seedTopic?.trim()
       ? `You are a YouTube video strategist. The user wants to make a video about: "${body.seedTopic}".
@@ -83,27 +103,28 @@ ${contextInstruction}
 Respond with a raw JSON array only. No markdown, no code fences, no explanation.
 [{"topic": "...", "context": "...", "isFactual": ${nature !== 'fictional'}}, ...]`;
 
-    const response = await ai.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+    const response = await llmComplete(llm, {
+      claudeModel: body.claudeModel ?? 'claude-opus-4-8',
+      maxTokens: 4096,
       system: 'You are a JSON API. Always respond with valid raw JSON only. Never use markdown or code fences.',
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    const text = response.text.trim();
     const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const arrayMatch = stripped.match(/\[[\s\S]*\]/);
     const raw = arrayMatch ? arrayMatch[0] : stripped;
 
     const suggestions = JSON.parse(raw) as { topic: string; context: string; isFactual: boolean }[];
 
+    const { cost: topicsCost, api: topicsApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
     void trackUsage({
       operation: 'suggest-topics',
-      api: 'anthropic',
+      api: topicsApi,
       project_id: params.id,
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens,
-      estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
+      input_tokens: response.inputTokens,
+      output_tokens: response.outputTokens,
+      estimated_cost_usd: topicsCost,
     });
 
     return NextResponse.json({ suggestions });

@@ -1,4 +1,11 @@
 import type { ChannelVideo } from './types';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+
+const execFileAsync = promisify(execFile);
 
 const YT = 'https://www.googleapis.com/youtube/v3';
 
@@ -46,46 +53,47 @@ export async function getChannelVideos(
   return { videos, nextPageToken, uploadsPlaylistId: uploadsId };
 }
 
-// Transcript and thumbnail fetches are plain HTTP — no API key needed.
+// Transcript fetch via yt-dlp (falls back to empty string on failure).
 export async function getVideoTranscript(videoId: string): Promise<string> {
-  const timeout = (ms: number) => AbortSignal.timeout(ms);
+  const tmpDir = os.tmpdir();
+  const outTemplate = path.join(tmpDir, `yt_transcript_${videoId}`);
+  const vttPath = `${outTemplate}.en.vtt`;
+
   try {
-    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      signal: timeout(15000),
-      headers: {
-        'Accept-Language': 'en-US,en;q=0.9',
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
-    const html = await response.text();
+    await execFileAsync('yt-dlp', [
+      '--write-auto-sub',
+      '--skip-download',
+      '--sub-format', 'vtt',
+      '--output', outTemplate,
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ], { timeout: 60000 });
 
-    const match = html.match(/"captionTracks":\[([^\]]*)\]/);
-    if (!match) return '';
-
-    const raw = match[1].replace(/\\"/g, '"').replace(/\\u0026/g, '&');
-    const baseUrlMatch = raw.match(/"baseUrl":"([^"]+)"/);
-    if (!baseUrlMatch) return '';
-
-    const captionResponse = await fetch(`${baseUrlMatch[1]}&fmt=json3`, { signal: timeout(10000) });
-    if (!captionResponse.ok) return '';
-
-    const captionData = (await captionResponse.json()) as {
-      events?: { segs?: { utf8?: string }[] }[];
-    };
-
-    const text = captionData.events
-      ?.filter(e => e.segs)
-      .map(e => e.segs!.map(s => s.utf8 ?? '').join(''))
-      .join(' ')
-      .replace(/\n/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return text || '';
+    const raw = await fs.readFile(vttPath, 'utf-8');
+    await fs.unlink(vttPath).catch(() => {});
+    return parseVtt(raw);
   } catch {
     return '';
   }
+}
+
+function parseVtt(content: string): string {
+  const lines = content
+    .replace(/WEBVTT[\s\S]*?\n\n/, '')
+    .replace(/\d{2}:\d{2}:\d{2}\.\d{3} --> [^\n]+\n/g, '')
+    .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, '')
+    .replace(/<[^>]+>/g, '')
+    .split('\n');
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      unique.push(trimmed);
+    }
+  }
+  return unique.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 export async function getThumbnailBase64(

@@ -10,9 +10,27 @@ export function calcAnthropicCost(inputTokens: number, outputTokens: number, mod
   return inputTokens * p.input + outputTokens * p.output;
 }
 
+// Grok-4.3 pricing (same tier as Claude Sonnet — update when xAI publishes exact figures)
+export function calcGrokCost(inputTokens: number, outputTokens: number): number {
+  return inputTokens * (3 / 1_000_000) + outputTokens * (15 / 1_000_000);
+}
+
+/** Returns cost + api label for any provider. */
+export function calcLLMCost(
+  provider: 'claude' | 'grok',
+  inputTokens: number,
+  outputTokens: number,
+  claudeModel?: string,
+): { cost: number; api: 'anthropic' | 'grok' } {
+  if (provider === 'grok') {
+    return { cost: calcGrokCost(inputTokens, outputTokens), api: 'grok' };
+  }
+  return { cost: calcAnthropicCost(inputTokens, outputTokens, claudeModel), api: 'anthropic' };
+}
+
 export interface UsageRecord {
   operation: string;
-  api: 'anthropic' | 'elevenlabs' | 'cartesia' | 'youtube' | 'pexels';
+  api: 'anthropic' | 'grok' | 'elevenlabs' | 'cartesia' | 'youtube' | 'pexels';
   project_id?: string;
   user_id?: string;
   // Anthropic

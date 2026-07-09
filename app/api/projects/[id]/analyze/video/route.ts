@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getVideoTranscript, getThumbnailBase64 } from '@/lib/youtube';
 import { analyzeVideo } from '@/lib/claude';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import type { ChannelVideo } from '@/lib/types';
 
 export const maxDuration = 300;
@@ -14,12 +15,17 @@ export async function POST(
   const body = (await request.json()) as {
     video: ChannelVideo;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   try {
     const [transcript, thumbnail] = await Promise.all([
@@ -28,7 +34,7 @@ export async function POST(
     ]);
 
     const { result, inputTokens, outputTokens } = await analyzeVideo(
-      anthropicApiKey, body.video, transcript, thumbnail.data,
+      llm, body.video, transcript, thumbnail.data, body.claudeModel,
     );
 
     // Capture transcript sections for voice bible + full transcript for synthesis
@@ -43,13 +49,14 @@ export async function POST(
       result.transcriptOutro   = transcript.slice(Math.max(0, len - 600)).trim();
     }
 
+    const { cost: videoCost, api: videoApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({
       operation: 'analyze',
-      api: 'anthropic',
+      api: videoApi,
       project_id: params.id,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+      estimated_cost_usd: videoCost,
     });
 
     return NextResponse.json({ result });

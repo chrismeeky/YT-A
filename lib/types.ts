@@ -90,8 +90,8 @@ export interface VideoAnalysis {
     retentionStrengths: string[];
   };
 
-  // 7. Script & Language
-  scriptAndLanguage: {
+  // 7. Script & Language (optional — new analyses omit this; raw transcripts replace it)
+  scriptAndLanguage?: {
     sentenceStyle: string;
     technicalDepth: string;
     directnessLevel: string;
@@ -134,8 +134,8 @@ export interface VideoAnalysis {
     pacingScore: number;
   };
 
-  // 12. Call-to-Action
-  callToAction: {
+  // 12. Call-to-Action (optional — new analyses omit this)
+  callToAction?: {
     ctaPlacements: string[];
     ctaTypes: string[];
     frictionLevel: string;
@@ -150,8 +150,8 @@ export interface VideoAnalysis {
     communityIdentityMarkers: string[];
   };
 
-  // 14. Engagement Signals
-  engagementSignals: {
+  // 14. Engagement Signals (optional — new analyses omit this)
+  engagementSignals?: {
     predictedCommentTypes: string[];
     shareabilityFactors: string[];
     communityBuildingElements: string[];
@@ -166,15 +166,15 @@ export interface VideoAnalysis {
     algorithmScore: number;
   };
 
-  // 16. Monetization Strategy
-  monetizationStrategy: {
+  // 16. Monetization Strategy (optional — new analyses omit this)
+  monetizationStrategy?: {
     directMonetization: string[];
     indirectMonetization: string[];
     revenueModelAssessment: string;
   };
 
-  // 17. Consistency & Channel Strategy
-  channelConsistency: {
+  // 17. Consistency & Channel Strategy (optional — new analyses omit this)
+  channelConsistency?: {
     formatRepeatability: string;
     seriesOrEpisodicNature: string;
     uploadFrequencyImplication: string;
@@ -319,6 +319,7 @@ export interface ChannelInsights {
   videoLength: { typical: string; reasoning: string };
   replicationFormula: string;
   thingsToSteal: string[];
+  voiceInjectionPrompt?: string; // ready-to-inject style directive generated during synthesis; used by "Refine with channel's voice"
 }
 
 export interface Analysis {
@@ -330,6 +331,7 @@ export interface Analysis {
   channelName: string;
   videoAnalyses: VideoAnalysis[];
   channelInsights: ChannelInsights;
+  llmProvider?: 'claude' | 'grok';
 }
 
 // ─── Scripts ───────────────────────────────────────────────────────────────
@@ -479,7 +481,8 @@ export interface DirectorAsset {
   searchQuery?: string;   // for stock-video, stock-photo, real-image
   prompts: string[];      // empty until lazily generated (ai-video / ai-image)
   clipLabels?: ('CUT' | 'CONTINUOUS' | null)[];  // parallel to prompts; null = unknown
-  durationEach?: number;  // seconds per clip for video types
+  durationEach?: number;       // seconds per clip for video types
+  clipCountOverride?: number;  // user-set clip count; overrides auto-computed value
   totalDuration: number;  // total seconds recommended for this segment
   generated: boolean;
   // Multi-shot support: when a segment is long enough for multiple distinct shots
@@ -489,8 +492,15 @@ export interface DirectorAsset {
   stockPhotos?: StockPhoto[];
   stockVideos?: StockVideo[];
   realImages?: RealImage[];
+  ddgVqd?: string;          // DDG session token — reused for "Load more" pagination
+  ddgNext?: string;         // DDG next-page token from previous response
+  searchPage?: number;      // current pagination page for stock/real image search
   // Visual concept variations for this asset (alternative director briefs)
   variations?: string[];
+  // Per-asset stock footage look override (stock-photo / stock-video only).
+  // Undefined = inherit the global Settings default.
+  footageStyle?: 'modern' | 'vintage' | 'custom';
+  footageStyleCustom?: string;
 }
 
 export interface DirectorSegment {
@@ -498,6 +508,7 @@ export interface DirectorSegment {
   narrationExcerpt: string;
   durationSeconds: number;
   assets: DirectorAsset[];
+  mediaFiles?: MediaFile[];
 }
 
 export interface DirectorScene {
@@ -514,6 +525,9 @@ export interface Script {
   targetAudience: string;
   additionalInstructions: string;
   thumbnailConcept: string;
+  fullScript?: string;
+  scriptSlices?: DirectorSegment[];
+  audioFile?: string;
   youtubeDescription?: string;
   createdAt: string;
   updatedAt: string;
@@ -523,8 +537,11 @@ export interface Script {
   detectedCharacters?: DetectedCharacter[];
   visualStyle?: string; // preset tag or custom text — injected into every prompt
   savedToDisk: boolean;
+  llmProvider?: 'claude' | 'grok';
   directorMode?: boolean;
   directorPlan?: DirectorScene[];
+  blueprintTranscriptIds?: string[];
+  imported?: boolean;
 }
 
 // ─── Research ──────────────────────────────────────────────────────────────
@@ -567,7 +584,14 @@ export interface ChannelBookmark {
 // ─── App Settings ──────────────────────────────────────────────────────────
 
 export interface AppSettings {
+  llmProvider: 'claude' | 'grok';
+  claudeModelScript: string;
+  claudeModelAnalysis: string;
+  claudeModelTopics: string;
+  claudeModelPrompts: string;
+  claudeModelDescription: string;
   anthropicApiKey: string;
+  xaiApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   elevenLabsSpeed: number;
@@ -577,9 +601,12 @@ export interface AppSettings {
   cartesiaApiKey: string;
   cartesiaVoiceId: string;
   cartesiaSpeed: number;
+  cartesiaModel: string;
   pexelsApiKey: string;
   braveApiKey: string;
   realImageProvider: 'brave' | 'duckduckgo';
+  stockFootageStyle: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom: string;
   youtubeApiKey: string;
   defaultVideoLength: number;
   defaultWpm: number;
@@ -587,7 +614,14 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  llmProvider: 'claude',
+  claudeModelScript: 'claude-opus-4-8',
+  claudeModelAnalysis: 'claude-opus-4-8',
+  claudeModelTopics: 'claude-opus-4-8',
+  claudeModelPrompts: 'claude-sonnet-4-6',
+  claudeModelDescription: 'claude-sonnet-4-6',
   anthropicApiKey: '',
+  xaiApiKey: '',
   elevenLabsApiKey: '',
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
   elevenLabsSpeed: 1.0,
@@ -597,9 +631,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cartesiaApiKey: '',
   cartesiaVoiceId: '',
   cartesiaSpeed: 1.0,
+  cartesiaModel: 'sonic-3.5-2026-05-04',
   pexelsApiKey: '',
   braveApiKey: '',
   realImageProvider: 'brave',
+  stockFootageStyle: 'modern',
+  stockFootageStyleCustom: '',
   youtubeApiKey: '',
   defaultVideoLength: 5,
   defaultWpm: 150,

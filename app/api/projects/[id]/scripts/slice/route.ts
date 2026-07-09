@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
-import { generateScript } from '@/lib/claude';
+import { sliceScript } from '@/lib/claude';
+import { llmComplete } from '@/lib/llm';
 import { sseEmit } from '@/lib/sse';
 import { resolveKey } from '@/lib/beta';
 import { trackUsage, calcLLMCost } from '@/lib/usage';
@@ -15,21 +16,18 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const body = (await request.json()) as {
+    fullScript: string;
     analysis: Analysis;
-    instruction: string;
-    targetAudience?: string;
-    detailLevel?: string;
     videoLength?: number;
     wpm?: number;
+    assetMixOverride?: Record<string, number>;
     anthropicApiKey?: string;
     xaiApiKey?: string;
     llmProvider?: 'claude' | 'grok';
-    directorMode?: boolean;
-    assetMixOverride?: Record<string, number>;
-    blueprintTranscriptIds?: string[];
-    useChannelStrategy?: boolean;
     claudeModel?: string;
+    title?: string;
   };
+
   const userId = await getUserIdFromRequest(request);
 
   const llm = makeLLMConfig(
@@ -43,10 +41,14 @@ export async function POST(
     return NextResponse.json({ error: 'Analysis object required.' }, { status: 400 });
   }
 
-  const directorMode = body.directorMode ?? false;
-  const videoLength = body.videoLength ?? 5;
-  const wpm        = body.wpm        ?? 150;
-  const targetWordCount = Math.round(videoLength * wpm);
+  if (!body.fullScript?.trim()) {
+    return NextResponse.json({ error: 'fullScript is required.' }, { status: 400 });
+  }
+
+  const wpm = body.wpm ?? 150;
+  const actualWordCount = body.fullScript.trim().split(/\s+/).filter(Boolean).length;
+  const videoLength = body.videoLength ?? Math.max(1, Math.round(actualWordCount / wpm));
+  const targetWordCount = actualWordCount;
   const scriptSettings: ScriptSettings = { videoLength, wpm, targetWordCount };
 
   const encoder = new TextEncoder();
@@ -54,58 +56,54 @@ export async function POST(
     async start(controller) {
       const emit = (payload: object) => sseEmit(controller, encoder, payload);
       try {
-        emit({ message: `Building prompt from channel analysis…` });
-
-        const modeLabel = directorMode ? ' with director segments' : '';
         const providerLabel = llm.provider === 'grok' ? 'Grok' : 'Claude';
-        emit({ message: `Generating ~${targetWordCount.toLocaleString()} word script${modeLabel} with ${providerLabel}… (this may take up to 90 seconds)` });
+        emit({ message: `Slicing script into director segments with ${providerLabel}… (this may take up to 60 seconds)` });
 
         const keepalive = setInterval(() => {
-          try { emit({ message: 'Still generating…' }); } catch { /* stream closed */ }
+          try { emit({ message: 'Still slicing…' }); } catch { /* stream closed */ }
         }, 15_000);
 
-        // Resolve blueprint transcript text from the analysis's video analyses.
-        // Fall back to stitched partial excerpts if fullTranscript is missing (older analyses).
-        const blueprintTranscripts = (body.blueprintTranscriptIds ?? [])
-          .map(id => {
-            const v = body.analysis.videoAnalyses.find(v => v.videoId === id);
-            if (!v) return null;
-            return v.fullTranscript
-              || [v.transcriptHook, v.transcriptExcerpt, v.transcriptClimax, v.transcriptOutro]
-                   .filter(Boolean).join('\n\n') || null;
-          })
-          .filter((t): t is string => !!t);
-
-        let generated: Awaited<ReturnType<typeof generateScript>>['result'];
+        let generated: Awaited<ReturnType<typeof sliceScript>>['result'];
         let inputTokens: number;
         let outputTokens: number;
         try {
-          const instruction = [
-            body.instruction,
-            body.detailLevel ? `Story detail level — ${body.detailLevel}` : null,
-          ].filter(Boolean).join('\n\n');
-          ({ result: generated, inputTokens, outputTokens } = await generateScript(
+          ({ result: generated, inputTokens, outputTokens } = await sliceScript(
             llm,
-            body.analysis,
+            body.fullScript,
             scriptSettings,
-            instruction,
-            body.targetAudience ?? '',
-            directorMode,
+            body.analysis,
             body.assetMixOverride,
-            blueprintTranscripts.length ? blueprintTranscripts : undefined,
-            body.useChannelStrategy ?? true,
             body.claudeModel,
           ));
         } finally {
           clearInterval(keepalive);
         }
 
-        // Director mode: parse flat scriptSlices; regular mode: parse scenes array
-        let scenes: Scene[] = [];
+        // Generate a title from the first ~300 words of the script
+        emit({ message: 'Generating title…' });
+        let generatedTitle = body.title || '';
+        if (!generatedTitle) {
+          try {
+            const excerpt = body.fullScript.trim().split(/\s+/).slice(0, 300).join(' ');
+            const titleRes = await llmComplete(llm, {
+              claudeModel: 'claude-haiku-4-5-20251001',
+              maxTokens: 60,
+              grokReasoningEffort: 'none',
+              system: 'You generate concise YouTube video titles. Respond with ONLY the title — no quotes, no punctuation at the end, no explanation.',
+              messages: [{ role: 'user', content: `Based on the opening of this script, write a compelling YouTube title (max 10 words):\n\n${excerpt}` }],
+            });
+            generatedTitle = titleRes.text.trim().replace(/^["']|["']$/g, '');
+          } catch {
+            generatedTitle = 'Imported Script';
+          }
+        }
+
+        const scenes: Scene[] = [];
         let scriptSlices: DirectorSegment[] | undefined;
 
-        if (directorMode && generated.scriptSlices?.length) {
+        if (generated.scriptSlices?.length) {
           emit({ message: `Parsing ${generated.scriptSlices.length} visual slices…` });
+
           scriptSlices = generated.scriptSlices.map(s => ({
             id: uuid(),
             narrationExcerpt: s.narrationExcerpt,
@@ -121,50 +119,32 @@ export async function POST(
               generated: false,
             })),
           }));
-        } else if (generated.scenes?.length) {
-          emit({ message: `Parsing ${generated.scenes.length} scenes…` });
-          scenes = generated.scenes.map(s => ({
-            id: uuid(),
-            number: s.number,
-            title: s.title,
-            narration: s.narration ?? '',
-            sceneDescription: s.sceneDescription,
-            estimatedDurationSeconds: s.estimatedDurationSeconds,
-            wordCount: s.wordCount,
-            includeImagePrompt: true,
-            includeVideoPrompt: true,
-            includeStockUrl: false,
-            includeStockPhotos: false,
-            includeRealImages: false,
-            includeStockVideos: false,
-            mediaFiles: [],
-          }));
         }
 
         const script: Script = {
           id: uuid(),
           projectId: params.id,
           analysisId: body.analysis.id,
-          title: generated.title,
-          topic: body.instruction,
-          targetAudience:         body.targetAudience ?? '',
+          title: generatedTitle,
+          topic: generatedTitle,
+          imported: true,
+          targetAudience: '',
           additionalInstructions: '',
-          thumbnailConcept: generated.thumbnailConcept,
-          fullScript: generated.fullScript,
+          thumbnailConcept: '',
+          fullScript: body.fullScript,
           scriptSlices,
-          createdAt:  new Date().toISOString(),
-          updatedAt:  new Date().toISOString(),
-          settings:   scriptSettings,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          settings: scriptSettings,
           scenes,
           savedToDisk: false,
           llmProvider: llm.provider,
-          directorMode,
-          blueprintTranscriptIds: body.blueprintTranscriptIds,
+          directorMode: true,
         };
 
         const { cost: scriptCost, api: scriptApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
         void trackUsage({
-          operation: 'generate-script',
+          operation: 'slice-script',
           api: scriptApi,
           project_id: params.id,
           user_id: userId,
@@ -175,7 +155,7 @@ export async function POST(
 
         emit({ done: true, result: script });
       } catch (err: unknown) {
-        emit({ error: err instanceof Error ? err.message : 'Script generation failed' });
+        emit({ error: err instanceof Error ? err.message : 'Script slicing failed' });
       } finally {
         controller.close();
       }

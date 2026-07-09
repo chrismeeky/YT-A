@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateDirectorPrompts, generateSearchQuery } from '@/lib/claude';
 import { searchPexels, searchBraveImages, searchDuckDuckGoImages, searchPexelsVideos } from '@/lib/image-search';
+import { resolveStockFootageStyle } from '@/lib/visual-styles';
 import { resolveKey, resolveKeyWithFallback } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
+import { makeLLMConfig, llmErrorMessage } from '@/lib/llm';
 import { getUserIdFromRequest } from '@/lib/supabase';
 import type { Analysis, DirectorAssetType } from '@/lib/types';
 
@@ -18,6 +20,7 @@ export async function POST(
     narrationExcerpt: string;
     durationSeconds: number;
     durationEach?: number;
+    clipCountOverride?: number;
     searchQuery?: string;
     sceneTitle: string;
     sceneDescription: string;
@@ -28,15 +31,22 @@ export async function POST(
     characters?: Array<{ name: string; fullDescription: string }>;
     siblingAssets?: Array<{ rationale: string; searchQuery?: string }>;
     page?: number;
+    ddgVqd?: string;
+    ddgNext?: string;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
     pexelsApiKey?: string;
     braveApiKey?: string;
     realImageProvider?: 'brave' | 'duckduckgo';
     wpm?: number;
+    stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+    stockFootageStyleCustom?: string;
   };
 
   const userId = await getUserIdFromRequest(request);
-  const { assetType, narrationExcerpt, durationSeconds, durationEach, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, siblingAssets, page = 1, wpm } = body;
+  const { assetType, narrationExcerpt, durationSeconds, durationEach, clipCountOverride, searchQuery, directorNote, sceneTitle, sceneDescription, scriptTitle, analysis, visualStyle, characters, siblingAssets, page = 1, wpm } = body;
 
   // Build a sibling visuals list for search query generation: prefer searchQuery over rationale
   // so the context is as specific as possible (e.g. "Edmund Kemper 1973 mugshot" vs "subject portrait")
@@ -51,22 +61,28 @@ export async function POST(
   const queryContentNature  = analysis.channelInsights.contentNature?.classification;
   const queryProductionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
   const queryBrollPattern   = analysis.channelInsights.visualSceneGuide?.brollPattern;
+  const footageStyle = resolveStockFootageStyle(body.stockFootageStyle, body.stockFootageStyleCustom);
 
   const resolveQuery = async (type: 'stock-photo' | 'stock-video' | 'real-image'): Promise<string> => {
     if (searchQuery) return searchQuery;
-    const anthropicKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-    if (!anthropicKey) {
+    const queryLlm = makeLLMConfig(
+      body.llmProvider,
+      resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+      resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+    );
+    if (!queryLlm) {
       return characters?.length
         ? `${characters[0].name} ${sceneTitle}`.trim()
         : sceneTitle || narrationExcerpt.slice(0, 40);
     }
-    return generateSearchQuery(anthropicKey, narrationExcerpt, type, {
+    return generateSearchQuery(queryLlm, narrationExcerpt, type, {
       scriptTitle,
       sceneTitle,
       sceneDescription,
       characters,
       contentNature:       queryContentNature,
       productionStyle:     queryProductionStyle,
+      footageStyle,
       channelBrollPattern: queryBrollPattern,
       siblingVisuals,
       directorNote:        directorNote || undefined,
@@ -103,15 +119,25 @@ export async function POST(
       return NextResponse.json({ images, autoSearchQuery: query });
     }
     if (provider === 'duckduckgo') {
-      const images = await searchDuckDuckGoImages(query, 6, undefined, offset);
-      return NextResponse.json({ images, autoSearchQuery: query });
+      try {
+        const { images, vqd, next } = await searchDuckDuckGoImages(query, 6, undefined, offset, body.ddgVqd, body.ddgNext);
+        console.log('[DDG route] page:', page, 'offset:', offset, 'vqd:', vqd?.slice(0, 20), 'next:', next?.slice(0, 60) ?? 'null', 'images:', images.length);
+        return NextResponse.json({ images, autoSearchQuery: query, ddgVqd: vqd, ddgNext: next });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'DuckDuckGo search failed';
+        return NextResponse.json({ error: msg }, { status: 502 });
+      }
     }
     return NextResponse.json({ images: [], autoSearchQuery: query });
   }
 
   // ── AI prompt generation ──────────────────────────────────────────────────
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) return NextResponse.json({ error: 'Anthropic API key required.' }, { status: 400 });
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
 
   // Derive the effective duration from narration text × WPM (accurate to the actual TTS read time).
   // Falls back to the pre-computed durationSeconds if WPM is not provided.
@@ -120,12 +146,12 @@ export async function POST(
     ? Math.max(1, Math.round((narrationWords / wpm) * 60))
     : durationSeconds;
   const clipDuration = durationEach ?? Math.min(8, effectiveDuration);
-  const clipCount = Math.max(1, Math.round(effectiveDuration / clipDuration));
+  const clipCount = clipCountOverride ?? Math.max(1, Math.round(effectiveDuration / clipDuration));
   const productionStyle = analysis.channelInsights.visualBrand?.productionStyle ?? '';
   const visualGuide = analysis.channelInsights.visualSceneGuide;
 
   try {
-    const { prompts, clipLabels, inputTokens, outputTokens } = await generateDirectorPrompts(anthropicApiKey, {
+    const { prompts, clipLabels, inputTokens, outputTokens } = await generateDirectorPrompts(llm, {
       assetType,
       narrationExcerpt,
       durationEach: clipDuration,
@@ -147,16 +173,17 @@ export async function POST(
         scriptTitle && `Story: ${scriptTitle}.`,
         characters?.length && `Key subjects: ${characters.map(c => c.name).join(', ')}.`,
       ].filter(Boolean).join(' ') || undefined,
-    });
+    }, body.claudeModel);
 
+    const { cost: directorCost, api: directorApi } = calcLLMCost(llm.provider, inputTokens, outputTokens);
     void trackUsage({
       operation: 'director-prompts',
-      api: 'anthropic',
+      api: directorApi,
       project_id: params.id,
       user_id: userId,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      estimated_cost_usd: calcAnthropicCost(inputTokens, outputTokens),
+      estimated_cost_usd: directorCost,
     });
 
     return NextResponse.json({ prompts, clipLabels });

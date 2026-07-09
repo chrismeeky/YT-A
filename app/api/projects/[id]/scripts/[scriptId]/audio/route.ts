@@ -6,13 +6,11 @@ import { trackUsage } from '@/lib/usage';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string; scriptId: string; sceneId: string } }
+  { params }: { params: { id: string; scriptId: string } }
 ) {
-  void params;
   const body = await request.json().catch(() => ({} as Record<string, unknown>)) as {
     provider?:             'elevenlabs' | 'cartesia';
     narration?:            string;
-    sceneNumber?:          number;
     elevenLabsApiKey?:     string;
     elevenLabsVoiceId?:    string;
     elevenLabsSpeed?:      number;
@@ -26,12 +24,11 @@ export async function POST(
   };
 
   if (!body.narration?.trim()) {
-    return NextResponse.json({ error: 'Scene has no narration text.' }, { status: 400 });
+    return NextResponse.json({ error: 'Script has no narration text.' }, { status: 400 });
   }
 
   const provider   = body.provider ?? 'elevenlabs';
-  const sceneNum   = body.sceneNumber ?? 0;
-  const filename   = `audio_scene_${String(sceneNum).padStart(3, '0')}.mp3`;
+  const filename   = `audio_script_${params.scriptId.slice(0, 8)}.mp3`;
   const characters = body.narration.trim().length;
 
   try {
@@ -39,20 +36,14 @@ export async function POST(
 
     if (provider === 'cartesia') {
       const cartesiaApiKey = resolveKey(body.cartesiaApiKey, 'NEXT_PUBLIC_CARTESIA_API_KEY');
-      if (!cartesiaApiKey) {
-        return NextResponse.json({ error: 'Cartesia API key required. Add it in Settings.' }, { status: 400 });
-      }
+      if (!cartesiaApiKey) return NextResponse.json({ error: 'Cartesia API key required.' }, { status: 400 });
       const voiceId = resolveKeyWithFallback(body.cartesiaVoiceId, 'NEXT_PUBLIC_CARTESIA_VOICE_ID');
-      if (!voiceId) {
-        return NextResponse.json({ error: 'Cartesia Voice ID required. Add it in Settings.' }, { status: 400 });
-      }
+      if (!voiceId) return NextResponse.json({ error: 'Cartesia Voice ID required.' }, { status: 400 });
       audioBuffer = await generateSpeechCartesia(body.narration, cartesiaApiKey, voiceId, body.cartesiaSpeed, body.cartesiaModel);
       void trackUsage({ operation: 'audio', api: 'cartesia', project_id: params.id, characters });
     } else {
       const elevenLabsApiKey = resolveKey(body.elevenLabsApiKey, 'NEXT_PUBLIC_ELEVENLABS_API_KEY');
-      if (!elevenLabsApiKey) {
-        return NextResponse.json({ error: 'ElevenLabs API key required. Add it in Settings.' }, { status: 400 });
-      }
+      if (!elevenLabsApiKey) return NextResponse.json({ error: 'ElevenLabs API key required.' }, { status: 400 });
       const voiceId = resolveKeyWithFallback(body.elevenLabsVoiceId, 'NEXT_PUBLIC_ELEVENLABS_VOICE_ID') || '21m00Tcm4TlvDq8ikWAM';
       audioBuffer = await generateSpeech(body.narration, elevenLabsApiKey, voiceId, {
         speed:      body.elevenLabsSpeed,

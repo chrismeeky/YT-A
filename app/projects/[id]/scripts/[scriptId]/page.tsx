@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { v4 as uuid } from 'uuid';
 import type { Script, Scene, Analysis, CharacterSheet } from '@/lib/types';
 import SceneEditor from '@/components/SceneEditor';
-import DirectorView from '@/components/DirectorView';
+import InlineScriptView from '@/components/InlineScriptView';
+import AudioConfirmModal from '@/components/AudioConfirmModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import CharacterConsistencyModal from '@/components/CharacterConsistencyModal';
 import { useStorage } from '@/components/StorageProvider';
@@ -35,10 +36,21 @@ export default function ScriptEditorPage() {
   const [characterModalInitialName, setCharacterModalInitialName] = useState<string | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'regular' | 'director'>('regular');
+  const [productionPanelOpen, setProductionPanelOpen] = useState(false);
+  const [audioModalOpen, setAudioModalOpen] = useState(false);
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+  const [audioError, setAudioError] = useState('');
+  const [audioObjectUrl, setAudioObjectUrl] = useState<string | null>(null);
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [xaiApiKey, setXaiApiKey] = useState('');
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
+  const [claudeModelPrompts, setClaudeModelPrompts] = useState('claude-sonnet-4-6');
+  const [claudeModelDescription, setClaudeModelDescription] = useState('claude-sonnet-4-6');
   const [pexelsApiKey, setPexelsApiKey] = useState('');
   const [braveApiKey, setBraveApiKey] = useState('');
   const [realImageProvider, setRealImageProvider] = useState<'brave' | 'duckduckgo'>('brave');
+  const [stockFootageStyle, setStockFootageStyle] = useState<'modern' | 'vintage' | 'custom'>('modern');
+  const [stockFootageStyleCustom, setStockFootageStyleCustom] = useState('');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -65,14 +77,25 @@ export default function ScriptEditorPage() {
           storage.saveScript(id, prefilled);
         }
       }
+      if (data.audioFile) {
+        storage.getAudioObjectUrl(id, scriptId, scriptId, data.audioFile).then(url => {
+          if (url) setAudioObjectUrl(url);
+        });
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
 
     storage.getSettings().then(s => {
       setAnthropicApiKey(s.anthropicApiKey ?? '');
+      setXaiApiKey(s.xaiApiKey ?? '');
+      setLlmProvider((s.llmProvider as 'claude' | 'grok') ?? 'claude');
+      setClaudeModelPrompts(s.claudeModelPrompts ?? 'claude-sonnet-4-6');
+      setClaudeModelDescription(s.claudeModelDescription ?? 'claude-sonnet-4-6');
       setPexelsApiKey(s.pexelsApiKey ?? '');
       setBraveApiKey(s.braveApiKey ?? '');
       setRealImageProvider((s.realImageProvider as 'brave' | 'duckduckgo') ?? 'brave');
+      setStockFootageStyle((s.stockFootageStyle as 'modern' | 'vintage' | 'custom') ?? 'modern');
+      setStockFootageStyleCustom(s.stockFootageStyleCustom ?? '');
     });
   }, [id, scriptId, storage]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -89,6 +112,8 @@ export default function ScriptEditorPage() {
           body: JSON.stringify({
             scenes: script.scenes.map((s: Scene) => ({ narration: s.narration, title: s.title })),
             anthropicApiKey: apiKey,
+            xaiApiKey: settings.xaiApiKey,
+            llmProvider: settings.llmProvider,
           }),
         });
         const data = await res.json();
@@ -140,7 +165,7 @@ export default function ScriptEditorPage() {
     setDescOpen(true);
     try {
       const settings = await storage.getSettings();
-      const fullScript = script.scenes.map(s => s.narration).join('\n\n');
+      const fullScript = script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n');
       const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/generate-description`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,6 +173,9 @@ export default function ScriptEditorPage() {
           title: script.title,
           fullScript,
           anthropicApiKey: settings.anthropicApiKey,
+          xaiApiKey: settings.xaiApiKey,
+          llmProvider: settings.llmProvider,
+          claudeModel: settings.claudeModelDescription ?? 'claude-sonnet-4-6',
         }),
       });
       const data = await res.json();
@@ -159,6 +187,58 @@ export default function ScriptEditorPage() {
       setGeneratingDesc(false);
     }
   };
+
+  const generateFullAudio = async (provider: 'elevenlabs' | 'cartesia') => {
+    if (!script) return;
+    const narration = script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n');
+    if (!narration.trim()) return;
+    setGeneratingAudio(true);
+    setAudioError('');
+    try {
+      const settings = await storage.getSettings();
+      if (provider === 'elevenlabs' && !settings.elevenLabsVoiceId?.trim()) {
+        setAudioError('ElevenLabs Voice ID is missing — add it in Settings.');
+        setGeneratingAudio(false);
+        return;
+      }
+      if (provider === 'cartesia' && !settings.cartesiaVoiceId?.trim()) {
+        setAudioError('Cartesia Voice ID is missing — add it in Settings.');
+        setGeneratingAudio(false);
+        return;
+      }
+      const res = await fetch(`/api/projects/${id}/scripts/${scriptId}/audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          narration,
+          elevenLabsApiKey:     settings.elevenLabsApiKey,
+          elevenLabsVoiceId:    settings.elevenLabsVoiceId,
+          elevenLabsSpeed:      settings.elevenLabsSpeed,
+          elevenLabsStability:  settings.elevenLabsStability,
+          elevenLabsSimilarity: settings.elevenLabsSimilarity,
+          elevenLabsStyle:      settings.elevenLabsStyle,
+          cartesiaApiKey:       settings.cartesiaApiKey,
+          cartesiaVoiceId:      settings.cartesiaVoiceId,
+          cartesiaSpeed:        settings.cartesiaSpeed,
+          cartesiaModel:        settings.cartesiaModel,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); setAudioError(d.error); return; }
+      const filename = res.headers.get('X-Filename') ?? `audio_script_${scriptId.slice(0, 8)}.mp3`;
+      const buffer = await res.arrayBuffer();
+      // Reuse scene audio storage keyed on a pseudo scene ID = scriptId
+      await storage.saveAudioFile(id, scriptId, scriptId, filename, buffer);
+      handleScriptChange({ ...script, audioFile: filename });
+      const blob = new Blob([buffer], { type: 'audio/mpeg' });
+      setAudioObjectUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
+    } catch {
+      setAudioError('Audio generation failed');
+    } finally {
+      setGeneratingAudio(false);
+    }
+  };
+
 
   const saveNow = async () => {
     if (!script) return;
@@ -247,8 +327,19 @@ export default function ScriptEditorPage() {
     );
   }
 
-  const totalWords = script.scenes.reduce((sum, s) => sum + (s.wordCount || 0), 0);
-  const totalSeconds = script.scenes.reduce((sum, s) => sum + (s.estimatedDurationSeconds || 0), 0);
+  const isDirector = script.directorMode && (script.scriptSlices?.length ?? 0) > 0;
+  const totalWords = isDirector
+    ? (script.scriptSlices ?? []).reduce((sum, s) => sum + s.narrationExcerpt.trim().split(/\s+/).filter(Boolean).length, 0)
+    : script.scenes.reduce((sum, s) => sum + (s.wordCount || 0), 0);
+  const scriptWpm = script.settings?.wpm ?? 149;
+  const totalSeconds = isDirector
+    ? (script.scriptSlices ?? []).reduce((sum, s) => {
+        const dur = s.durationSeconds > 0
+          ? s.durationSeconds
+          : Math.round((s.narrationExcerpt.trim().split(/\s+/).filter(Boolean).length / scriptWpm) * 60);
+        return sum + (dur || 0);
+      }, 0)
+    : script.scenes.reduce((sum, s) => sum + (s.estimatedDurationSeconds || 0), 0);
   const totalMinutes = Math.round(totalSeconds / 60 * 10) / 10;
 
   return (
@@ -269,29 +360,41 @@ export default function ScriptEditorPage() {
           />
         </div>
         <div className="flex items-center gap-3 text-xs text-[#52525b] flex-shrink-0">
+          <span
+            className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+            style={isDirector
+              ? { background: 'rgba(99,102,241,0.18)', color: '#818cf8' }
+              : { background: 'rgba(113,113,122,0.18)', color: '#a1a1aa' }}
+          >
+            {isDirector ? 'Director' : 'Regular'}
+          </span>
           <span>{totalWords.toLocaleString()} words</span>
           <span>·</span>
           <span>~{totalMinutes} min</span>
-          <span>·</span>
-          <span>{script.scenes.length} scenes</span>
+          {isDirector && <><span>·</span><span>{script.scriptSlices?.length} slices</span></>}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {script.directorMode && (
-            <div className="flex items-center rounded-md border overflow-hidden text-xs" style={{ borderColor: 'var(--border)' }}>
-              <button
-                onClick={() => setViewMode('regular')}
-                className={`px-2.5 py-1.5 transition-colors ${viewMode === 'regular' ? 'bg-[#27272a] text-white' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
-              >
-                Regular
-              </button>
-              <button
-                onClick={() => setViewMode('director')}
-                className={`px-2.5 py-1.5 transition-colors flex items-center gap-1 ${viewMode === 'director' ? 'bg-indigo-500/20 text-indigo-300' : 'text-[#71717a] hover:text-[#a1a1aa]'}`}
-              >
-                🎬 Director
-              </button>
+          <button
+            onClick={() => setAudioModalOpen(true)}
+            disabled={generatingAudio}
+            className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            {generatingAudio ? <><span className="animate-pulse">🎵</span> Generating…</> : <>🎵 Generate Audio</>}
+          </button>
+          {audioObjectUrl && (
+            <div className="flex items-center gap-1.5">
+              <audio controls src={audioObjectUrl} className="h-7" style={{ colorScheme: 'dark' }} />
+              <a
+                href={audioObjectUrl}
+                download={script.audioFile ?? 'audio.mp3'}
+                className="px-2 py-1 rounded text-xs border text-[#a1a1aa] hover:text-white hover:border-[#444] transition-colors"
+                style={{ borderColor: 'var(--border)' }}
+                title="Download audio"
+              >↓</a>
             </div>
           )}
+          {audioError && <span className="text-xs text-red-400">{audioError}</span>}
           {saveMsg && (
             <span className="text-xs text-green-400">{saveMsg}</span>
           )}
@@ -302,6 +405,24 @@ export default function ScriptEditorPage() {
             style={{ borderColor: 'var(--border)' }}
           >
             {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={() => {
+              const text = script.fullScript
+                ?? script.scenes.map(s => `== Scene ${s.number}: ${s.title} ==\n\n${s.narration}`).join('\n\n\n');
+              const blob = new Blob([text], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${script.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.txt`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444]"
+            style={{ borderColor: 'var(--border)' }}
+            title="Download full script as plain text"
+          >
+            ⬇ Download
           </button>
           <button
             onClick={() => setCharacterModalOpen(true)}
@@ -321,7 +442,7 @@ export default function ScriptEditorPage() {
             disabled={generatingDesc}
             className="px-3 py-1.5 rounded-md text-xs border transition-colors text-[#a1a1aa] hover:text-white hover:border-[#444] disabled:opacity-40 flex items-center gap-1.5"
             style={{ borderColor: 'var(--border)' }}
-            title="Generate YouTube description with Claude"
+            title={`Generate YouTube description with ${llmProvider === 'grok' ? 'Grok' : 'Claude'}`}
           >
             {generatingDesc ? <><span className="animate-pulse">✍️</span> Writing…</> : <>✍️ Description</>}
           </button>
@@ -514,82 +635,54 @@ export default function ScriptEditorPage() {
 
       {/* Main content: scene list + editor */}
       <div className="flex flex-1 overflow-hidden">
-        {viewMode === 'director' && script.directorMode ? (
-          <DirectorView
-            script={script}
-            analysis={analysis}
-            onScriptChange={handleScriptChange}
-            anthropicApiKey={anthropicApiKey}
-            pexelsApiKey={pexelsApiKey || undefined}
-            braveApiKey={braveApiKey || undefined}
-            realImageProvider={realImageProvider}
-            activeSceneId={activeSceneId}
-            onActiveSceneChange={setActiveSceneId}
-          />
-        ) : (
-          <>
-            {/* Scene sidebar */}
-            <div
-              className="w-52 flex-shrink-0 border-r flex flex-col overflow-hidden"
-              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-            >
-              <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
-                <span className="text-xs font-medium text-[#71717a] uppercase tracking-wider">Scenes</span>
-              </div>
-              <div className="flex-1 overflow-y-auto py-1">
-                {script.scenes.map(scene => (
-                  <button
-                    key={scene.id}
-                    onClick={() => setActiveSceneId(scene.id)}
-                    className={`w-full text-left px-3 py-2.5 group flex items-start gap-2 transition-colors ${
-                      activeSceneId === scene.id
-                        ? 'bg-indigo-500/15 border-l-2 border-indigo-400'
-                        : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
-                    }`}
-                  >
-                    <span className="text-xs text-[#52525b] w-5 flex-shrink-0 pt-0.5">{scene.number}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">{scene.title || 'Untitled'}</p>
-                      <p className="text-[10px] text-[#52525b] mt-0.5">
-                        ~{scene.estimatedDurationSeconds}s · {scene.wordCount}w
-                        {scene.audioFile && <span className="ml-1 text-green-500">🎵</span>}
-                        {scene.mediaFiles?.length > 0 && <span className="ml-1 text-blue-400">📁</span>}
-                      </p>
-                    </div>
-                    <button
-                      onClick={e => { e.stopPropagation(); deleteScene(scene.id); }}
-                      className="opacity-0 group-hover:opacity-100 text-[#333] hover:text-red-400 transition-all text-xs flex-shrink-0 pt-0.5"
-                    >
-                      ×
-                    </button>
-                  </button>
-                ))}
-              </div>
-              <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                <button
-                  onClick={addScene}
-                  className="w-full py-2 rounded-md text-xs border transition-colors text-[#71717a] hover:text-white hover:border-[#444]"
-                  style={{ borderColor: 'var(--border)' }}
-                >
-                  + Add Scene
-                </button>
-              </div>
-            </div>
 
-            {/* Scene editor */}
-            <SceneEditor
-              projectId={id}
+        {/* Right panel */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {isDirector ? (
+            // Director mode: inline script with highlighted slices
+            <InlineScriptView
               script={script}
               analysis={analysis}
-              activeSceneId={activeSceneId}
+              anthropicApiKey={anthropicApiKey}
+              xaiApiKey={xaiApiKey || undefined}
+              llmProvider={llmProvider}
+              claudeModelPrompts={claudeModelPrompts}
+              pexelsApiKey={pexelsApiKey || undefined}
+              braveApiKey={braveApiKey || undefined}
+              realImageProvider={realImageProvider}
+              stockFootageStyle={stockFootageStyle}
+              stockFootageStyleCustom={stockFootageStyleCustom}
               onScriptChange={handleScriptChange}
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-              onOpenCharacter={(name) => { setCharacterModalInitialName(name); setCharacterModalOpen(true); }}
             />
-          </>
-        )}
+          ) : (
+            // Regular mode: plain continuous script (no slices)
+            <InlineScriptView
+              script={script}
+              analysis={analysis}
+              anthropicApiKey={anthropicApiKey}
+              xaiApiKey={xaiApiKey || undefined}
+              llmProvider={llmProvider}
+              claudeModelPrompts={claudeModelPrompts}
+              pexelsApiKey={pexelsApiKey || undefined}
+              braveApiKey={braveApiKey || undefined}
+              realImageProvider={realImageProvider}
+              stockFootageStyle={stockFootageStyle}
+              stockFootageStyleCustom={stockFootageStyleCustom}
+              onScriptChange={handleScriptChange}
+            />
+          )}
+        </div>
       </div>
+
+      {audioModalOpen && (
+        <AudioConfirmModal
+          fullScript={script.fullScript ?? script.scenes.map(s => s.narration).join('\n\n')}
+          totalWords={totalWords}
+          totalSeconds={totalSeconds}
+          onConfirm={generateFullAudio}
+          onClose={() => setAudioModalOpen(false)}
+        />
+      )}
 
       {confirmDeleteSceneId && (
         <ConfirmModal
@@ -604,6 +697,9 @@ export default function ScriptEditorPage() {
           script={script}
           projectId={id}
           anthropicApiKey={anthropicApiKey}
+          xaiApiKey={xaiApiKey}
+          llmProvider={llmProvider}
+          claudeModelPrompts={claudeModelPrompts}
           visualStyle={script.visualStyle}
           initialSelectedName={characterModalInitialName}
           onClose={() => { setCharacterModalOpen(false); setCharacterModalInitialName(null); }}

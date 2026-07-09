@@ -73,6 +73,7 @@ export default function AnalyzePage() {
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'popular'>(() => draft?.sortBy ?? 'newest');
   const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -81,6 +82,7 @@ export default function AnalyzePage() {
 
   useEffect(() => {
     storage.listBookmarks().then(setBookmarks);
+    storage.getSettings().then(s => setLlmProvider(s.llmProvider ?? 'claude'));
   }, [storage]);
 
   // Persist to in-memory cache on every meaningful state change
@@ -171,7 +173,7 @@ export default function AnalyzePage() {
     return () => observer.disconnect();
   }, [loadMore, nextPageToken]);
 
-  const MAX_VIDEOS = 3;
+  const MAX_VIDEOS = 5;
 
   // Warn before leaving while analysis is in progress (reload / tab close)
   useEffect(() => {
@@ -263,7 +265,7 @@ export default function AnalyzePage() {
         label: `Analysing video ${i + 1} of ${selectedVideos.length}: "${v.title.length > 50 ? v.title.slice(0, 47) + '…' : v.title}"`,
         status: 'pending' as const,
       })),
-      { id: 'synthesize', label: 'Synthesising channel insights with Claude', status: 'pending' },
+      { id: 'synthesize', label: `Synthesising channel insights with ${llmProvider === 'grok' ? 'Grok' : 'Claude'}`, status: 'pending' },
       { id: 'save', label: 'Saving analysis', status: 'pending' },
     ];
 
@@ -273,6 +275,7 @@ export default function AnalyzePage() {
 
     try {
       const videoAnalyses: VideoAnalysis[] = [];
+      let lastVideoError = '';
 
       for (let i = 0; i < selectedVideos.length; i++) {
         if (cancelledRef.current) return;
@@ -286,7 +289,7 @@ export default function AnalyzePage() {
           res = await fetch(`/api/projects/${id}/analyze/video`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey }),
+            body: JSON.stringify({ video, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider, claudeModel: settings.claudeModelAnalysis ?? 'claude-opus-4-8' }),
             signal: abort.signal,
           });
         } catch (e) {
@@ -306,6 +309,7 @@ export default function AnalyzePage() {
 
         if (!res.ok || data.error) {
           updateStep(stepId, 'error');
+          lastVideoError = data.error ?? `HTTP ${res.status}`;
           continue;
         }
 
@@ -316,7 +320,9 @@ export default function AnalyzePage() {
       if (cancelledRef.current) return;
 
       if (videoAnalyses.length === 0) {
-        setAnalyzeError('All selected videos were declined or failed. Please choose different videos.');
+        setAnalyzeError(lastVideoError
+          ? `Analysis failed: ${lastVideoError}`
+          : 'All selected videos failed to analyse. Please try again or select different videos.');
         setStep('select');
         return;
       }
@@ -327,7 +333,7 @@ export default function AnalyzePage() {
         synthRes = await fetch(`/api/projects/${id}/analyze/synthesize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey }),
+          body: JSON.stringify({ videoAnalyses, anthropicApiKey: settings.anthropicApiKey, xaiApiKey: settings.xaiApiKey, llmProvider: settings.llmProvider, claudeModel: settings.claudeModelAnalysis ?? 'claude-opus-4-8' }),
           signal: abort.signal,
         });
       } catch (e) {
@@ -362,6 +368,7 @@ export default function AnalyzePage() {
         videoAnalyses,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         channelInsights: synthData.result as any,
+        llmProvider,
       };
       await storage.saveAnalysis(id, analysis);
       updateStep('save', 'done');
@@ -386,7 +393,7 @@ export default function AnalyzePage() {
       </div>
 
       <h1 className="text-2xl font-semibold mb-1">Analyse a YouTube Channel</h1>
-      <p className="text-[#71717a] text-sm mb-8">Paste a channel URL, pick up to {MAX_VIDEOS} videos, and let Claude do the rest.</p>
+      <p className="text-[#71717a] text-sm mb-8">Paste a channel URL, pick up to {MAX_VIDEOS} videos, and let {llmProvider === 'grok' ? 'Grok' : 'Claude'} do the rest.</p>
 
       {/* Step 1 — Input */}
       {(step === 'input' || step === 'select') && (

@@ -192,6 +192,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             storyTopic: script.topic || script.title,
             segmentContext: segment?.narrationExcerpt || segment?.query,
             anthropicApiKey: settings.anthropicApiKey,
+            xaiApiKey: settings.xaiApiKey,
+            llmProvider: settings.llmProvider,
+            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
           }),
         });
         if (qr.ok) {
@@ -409,6 +412,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             promptDetail: sceneSnap.promptDetail ?? 'auto',
             scriptTopic: sc.topic || sc.title,
             anthropicApiKey: settings.anthropicApiKey,
+            xaiApiKey: settings.xaiApiKey,
+            llmProvider: settings.llmProvider,
+            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
             analysis,
             siblingPrompts: type === 'image'
               ? (sceneSnap.imagePrompts ?? []).filter((_, i) => i !== idx)
@@ -500,6 +506,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             scene,
             analysis,
             anthropicApiKey: settings.anthropicApiKey,
+            xaiApiKey: settings.xaiApiKey,
+            llmProvider: settings.llmProvider,
+            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
             pexelsApiKey: settings.pexelsApiKey,
             braveApiKey: settings.braveApiKey,
             realImageProvider: settings.realImageProvider,
@@ -604,6 +613,7 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
             cartesiaApiKey:       settings.cartesiaApiKey,
             cartesiaVoiceId:      settings.cartesiaVoiceId,
             cartesiaSpeed:        settings.cartesiaSpeed,
+            cartesiaModel:        settings.cartesiaModel,
           }),
         }
       );
@@ -1304,6 +1314,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                               narrationExcerpt: scene.videoPromptExcerpts?.[i],
                                               durationSeconds: scene.estimatedDurationSeconds ?? 6,
                                               anthropicApiKey: settings.anthropicApiKey,
+                                              xaiApiKey: settings.xaiApiKey,
+                                              llmProvider: settings.llmProvider,
+                                              claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
                                               previousPrompt,
                                               replaceInPlace: true,
                                             }),
@@ -1385,6 +1398,9 @@ export default function SceneEditor({ projectId, script, analysis, activeSceneId
                                             narrationExcerpt: scene.videoPromptExcerpts?.[i],
                                             durationSeconds: ext.duration ?? 6,
                                             anthropicApiKey: settings.anthropicApiKey,
+                                            xaiApiKey: settings.xaiApiKey,
+                                            llmProvider: settings.llmProvider,
+                                            claudeModel: settings.claudeModelPrompts ?? 'claude-sonnet-4-6',
                                           }),
                                         }
                                       );

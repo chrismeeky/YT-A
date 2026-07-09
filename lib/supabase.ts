@@ -15,12 +15,16 @@ export function getSupabase(): SupabaseClient | null {
   return _server;
 }
 
-// Browser singleton — for auth in client components
+// Browser singleton — for auth AND per-user cloud storage in client components.
+// Persist + auto-refresh the session so long editing sessions and Storage
+// uploads keep a valid JWT (RLS depends on it).
 let _browser: SupabaseClient | null = null;
 export function getBrowserSupabase(): SupabaseClient | null {
   if (typeof window === 'undefined') return null;
   if (!url || !anonKey) return null;
-  if (!_browser) _browser = createClient(url, anonKey, { auth: { autoRefreshToken: false } });
+  if (!_browser) _browser = createClient(url, anonKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
   return _browser;
 }
 

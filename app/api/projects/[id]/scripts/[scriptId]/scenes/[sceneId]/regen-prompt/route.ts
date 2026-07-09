@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { makeLLMConfig, llmErrorMessage, llmComplete } from '@/lib/llm';
 import { resolveKey } from '@/lib/beta';
-import { trackUsage, calcAnthropicCost } from '@/lib/usage';
+import { trackUsage, calcLLMCost } from '@/lib/usage';
 import { resolvePromptLock } from '@/lib/visual-styles';
 import type { Analysis, CharacterSheet, PromptDetail } from '@/lib/types';
 
@@ -20,20 +20,24 @@ export async function POST(
     promptDetail?: PromptDetail;
     scriptTopic?: string;
     anthropicApiKey?: string;
+    xaiApiKey?: string;
+    llmProvider?: 'claude' | 'grok';
+    claudeModel?: string;
     analysis?: Analysis;
     siblingPrompts?: string[];
     usedFingerprints?: string[];
   };
 
-  const anthropicApiKey = resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY');
-  if (!anthropicApiKey) {
-    return NextResponse.json({ error: 'Anthropic API key required. Add it in Settings.' }, { status: 400 });
-  }
+  const llm = makeLLMConfig(
+    body.llmProvider,
+    resolveKey(body.anthropicApiKey, 'NEXT_PUBLIC_ANTHROPIC_API_KEY'),
+    resolveKey(body.xaiApiKey, 'NEXT_PUBLIC_XAI_API_KEY'),
+  );
+  if (!llm) return NextResponse.json({ error: llmErrorMessage(body.llmProvider ?? 'claude') }, { status: 400 });
   if (!body.excerpt?.trim()) {
     return NextResponse.json({ error: 'Excerpt is required.' }, { status: 400 });
   }
 
-  const ai = new Anthropic({ apiKey: anthropicApiKey });
   const insights = body.analysis?.channelInsights;
   const lock = resolvePromptLock(body.visualStyle) || insights?.visualBrand?.productionStyle;
   const isImage = body.type === 'image';
@@ -82,23 +86,24 @@ RULES:
 ${isImage ? '- Prompt must end with --ar 16:9' : '- Describe motion and camera movement naturally'}
 - fingerprint format: one of [extreme_close/close/medium/wide/aerial] | primary subject + action | location | dominant color + mood (max 15 tokens)`;
 
-  const response = await ai.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 600,
+  const response = await llmComplete(llm, {
+    claudeModel: body.claudeModel ?? 'claude-sonnet-4-6',
+    maxTokens: 600,
     system: 'You are a film director crafting visual prompts for a YouTube production. Return ONLY valid JSON: { "prompt": "...", "fingerprint": "..." }',
     messages: [{ role: 'user', content: userPrompt }],
   });
 
+  const { cost: regenCost, api: regenApi } = calcLLMCost(llm.provider, response.inputTokens, response.outputTokens);
   void trackUsage({
     operation: 'regen-prompt',
-    api: 'anthropic',
+    api: regenApi,
     project_id: params.id,
-    input_tokens: response.usage.input_tokens,
-    output_tokens: response.usage.output_tokens,
-    estimated_cost_usd: calcAnthropicCost(response.usage.input_tokens, response.usage.output_tokens),
+    input_tokens: response.inputTokens,
+    output_tokens: response.outputTokens,
+    estimated_cost_usd: regenCost,
   });
 
-  const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : '{}';
+  const raw = response.text.trim() || '{}';
   let cleaned = raw;
   if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
   if (!cleaned.startsWith('{')) { const m = cleaned.match(/\{[\s\S]*\}/); if (m) cleaned = m[0]; }

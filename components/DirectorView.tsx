@@ -53,9 +53,14 @@ interface Props {
   analysis: Analysis | null;
   onScriptChange: (s: Script) => void;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   activeSceneId?: string | null;
   onActiveSceneChange?: (sceneId: string) => void;
 }
@@ -69,11 +74,17 @@ function AssetCard({
   script,
   analysis,
   anthropicApiKey,
+  xaiApiKey,
+  llmProvider,
+  claudeModelPrompts,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
+  stockFootageStyle,
+  stockFootageStyleCustom,
   visible,
   savingUrl,
+  sliceMediaFiles,
   onUpdate,
   onDelete,
   onSaveToScene,
@@ -86,11 +97,17 @@ function AssetCard({
   script: Script;
   analysis: Analysis | null;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   visible: boolean;
   savingUrl: string | null;
+  sliceMediaFiles?: import('@/lib/types').MediaFile[];
   onUpdate: (updated: DirectorAsset) => void;
   onDelete: () => void;
   onSaveToScene: (url: string, name: string, sceneId: string) => Promise<void>;
@@ -101,22 +118,31 @@ function AssetCard({
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const currentPage = asset.searchPage ?? 1;
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState('');
   const [variationsOpen, setVariationsOpen] = useState(false);
   const [variationsLoading, setVariationsLoading] = useState(false);
   const [variationsError, setVariationsError] = useState('');
   const [variationsPos, setVariationsPos] = useState<{ anchorTop: number; anchorBottom: number; left: number; openUpward: boolean } | null>(null);
+  const [variationHint, setVariationHint] = useState('');
+  const [extraInstructions, setExtraInstructions] = useState('');
   const generateRef = useRef<(() => void) | null>(null);
   const autoFired = useRef(false);
   const rationaleRef = useRef<HTMLParagraphElement>(null);
   const variationsRef = useRef<HTMLDivElement>(null);
 
   const targetScene = script.scenes.find(s => s.id === scene.sceneId);
-  const savedNames = new Set(targetScene?.directorMediaFiles?.map(f => f.originalName) ?? []);
+  const savedNames = new Set(
+    sliceMediaFiles
+      ? sliceMediaFiles.map(f => f.originalName)
+      : (targetScene?.directorMediaFiles?.map(f => f.originalName) ?? [])
+  );
 
   const isAI = asset.type === 'ai-video' || asset.type === 'ai-image';
   const isSearch = asset.type === 'stock-photo' || asset.type === 'stock-video' || asset.type === 'real-image';
+  // Footage-look override applies only to Pexels stock searches (real-image is era-specific already)
+  const isStock = asset.type === 'stock-photo' || asset.type === 'stock-video';
 
   const concept = asset.rationale || (isSearch && asset.searchQuery ? asset.searchQuery : '');
   const showSearchLine = !!asset.searchQuery && !!asset.rationale;
@@ -137,9 +163,10 @@ function AssetCard({
     Math.round((effectiveWords / (script.settings.wpm || 150)) * 60),
   );
   const clipDurationEach = asset.durationEach ?? 8;
-  const clipCount = asset.type === 'ai-video'
+  const clipCountAuto = asset.type === 'ai-video'
     ? Math.max(1, Math.round(effectiveDurationSeconds / clipDurationEach))
     : 1;
+  const clipCount = asset.clipCountOverride ?? clipCountAuto;
 
   const sceneData = script.scenes.find(s => s.id === scene.sceneId);
 
@@ -148,11 +175,12 @@ function AssetCard({
     narrationExcerpt: slotNarrationSlice ?? segment.narrationExcerpt,
     durationSeconds: effectiveDurationSeconds,
     durationEach: asset.durationEach,
+    clipCountOverride: asset.clipCountOverride,
     wpm: script.settings.wpm,
     searchQuery: asset.searchQuery,
-    directorNote: asset.rationale,
-    sceneTitle: sceneData?.title ?? '',
-    sceneDescription: sceneData?.sceneDescription ?? '',
+    directorNote: [asset.rationale, extraInstructions.trim()].filter(Boolean).join('\n\nAdditional instructions: '),
+    sceneTitle: sceneData?.title ?? segment.narrationExcerpt.slice(0, 60),
+    sceneDescription: sceneData?.sceneDescription || segment.narrationExcerpt,
     scriptTitle: script.title,
     analysis,
     visualStyle: script.visualStyle,
@@ -161,17 +189,24 @@ function AssetCard({
       .filter(a => a.id !== asset.id)
       .map(a => ({ rationale: a.rationale, searchQuery: a.searchQuery })),
     page,
+    ...(asset.ddgVqd && page > 1 && { ddgVqd: asset.ddgVqd }),
+    ...(asset.ddgNext && page > 1 && { ddgNext: asset.ddgNext }),
     anthropicApiKey,
+    xaiApiKey,
+    llmProvider,
+    claudeModel: claudeModelPrompts ?? 'claude-sonnet-4-6',
     pexelsApiKey,
     braveApiKey,
     realImageProvider,
+    // Per-asset footage look overrides the global default when set
+    stockFootageStyle: asset.footageStyle ?? stockFootageStyle,
+    stockFootageStyleCustom: asset.footageStyle ? asset.footageStyleCustom : stockFootageStyleCustom,
   });
 
   const generate = async () => {
     if (!analysis) return;
     setLoading(true);
     setError('');
-    setCurrentPage(1);
     try {
       const res = await fetch(
         `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-asset`,
@@ -184,16 +219,19 @@ function AssetCard({
         videos?: StockVideo[];
         images?: RealImage[];
         autoSearchQuery?: string;
+        ddgVqd?: string;
+        ddgNext?: string;
         error?: string;
       };
       if (!res.ok || data.error) { setError(data.error ?? 'Generation failed'); return; }
 
       // Derive a concept label for manually-added assets (rationale === '') from the
       // narration slice so the label slot isn't blank after generation.
-      const derivedRationale = asset.rationale === '' && slotNarrationSlice
-        ? slotNarrationSlice.length > 72
-          ? slotNarrationSlice.slice(0, 69).trimEnd() + '…'
-          : slotNarrationSlice
+      const labelSource = slotNarrationSlice ?? segment.narrationExcerpt;
+      const derivedRationale = asset.rationale === '' && labelSource
+        ? labelSource.length > 72
+          ? labelSource.slice(0, 69).trimEnd() + '…'
+          : labelSource
         : undefined;
 
       onUpdate({
@@ -205,7 +243,10 @@ function AssetCard({
         stockVideos: data.videos ?? asset.stockVideos,
         realImages: data.images ?? asset.realImages,
         ...(data.autoSearchQuery && { searchQuery: data.autoSearchQuery }),
+        ...(data.ddgVqd && { ddgVqd: data.ddgVqd }),
+        ...(data.ddgNext !== undefined && { ddgNext: data.ddgNext ?? undefined }),
         ...(derivedRationale && { rationale: derivedRationale }),
+        searchPage: 1,
       });
       setExpanded(true);
     } catch {
@@ -219,6 +260,7 @@ function AssetCard({
     if (!analysis || loadingMore) return;
     const nextPage = currentPage + 1;
     setLoadingMore(true);
+    setLoadMoreError('');
     try {
       const res = await fetch(
         `/api/projects/${script.projectId}/scripts/${script.id}/director/generate-asset`,
@@ -228,19 +270,24 @@ function AssetCard({
         photos?: StockPhoto[];
         videos?: StockVideo[];
         images?: RealImage[];
+        ddgNext?: string;
         error?: string;
       };
-      if (!res.ok || data.error) return;
+      if (!res.ok || data.error) {
+        setLoadMoreError(data.error ?? 'Search blocked — try editing the search query and regenerating.');
+        return;
+      }
 
       onUpdate({
         ...asset,
         stockPhotos: data.photos ? [...(asset.stockPhotos ?? []), ...data.photos] : asset.stockPhotos,
         stockVideos: data.videos ? [...(asset.stockVideos ?? []), ...data.videos] : asset.stockVideos,
         realImages: data.images ? [...(asset.realImages ?? []), ...data.images] : asset.realImages,
+        ...(data.ddgNext !== undefined && { ddgNext: data.ddgNext ?? undefined }),
+        searchPage: nextPage,
       });
-      setCurrentPage(nextPage);
     } catch {
-      // silently ignore load-more failures
+      setLoadMoreError('Request failed — check your connection.');
     } finally {
       setLoadingMore(false);
     }
@@ -263,13 +310,17 @@ function AssetCard({
             assetType: asset.type,
             narrationExcerpt: segment.narrationExcerpt,
             narrationSlice: asset.narrationSlice,
-            currentRationale: asset.rationale || asset.searchQuery || '',
-            sceneTitle: sceneData?.title ?? '',
-            sceneDescription: sceneData?.sceneDescription ?? '',
+            currentRationale: asset.rationale || asset.searchQuery || (slotNarrationSlice ?? segment.narrationExcerpt),
+            sceneTitle: sceneData?.title ?? segment.narrationExcerpt.slice(0, 60),
+            sceneDescription: sceneData?.sceneDescription || segment.narrationExcerpt,
             scriptTitle: script.title,
             analysis,
             characters: script.characters?.map(c => ({ name: c.name, fullDescription: c.fullDescription })),
+            userHint: variationHint.trim() || undefined,
             anthropicApiKey,
+            xaiApiKey,
+            llmProvider,
+            claudeModel: claudeModelPrompts ?? 'claude-sonnet-4-6',
           }),
         }
       );
@@ -373,8 +424,31 @@ function AssetCard({
         <span className="text-xs font-medium flex-1">{ASSET_LABELS[asset.type]}</span>
 
         {asset.type === 'ai-video' && (
-          <span className="text-[10px] text-[#52525b]">
-            {clipCount}× {asset.durationEach ?? 8}s clip{clipCount > 1 ? 's' : ''}
+          <span className="flex items-center gap-0.5 text-[10px] text-[#52525b]">
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={clipCount}
+              onChange={e => {
+                const v = Math.max(1, Math.min(20, parseInt(e.target.value) || 1));
+                onUpdate({ ...asset, clipCountOverride: v });
+              }}
+              className="w-6 text-center bg-transparent border-b border-[#3f3f46] focus:border-[#71717a] outline-none text-[#a1a1aa] focus:text-white"
+            />
+            <span>×</span>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={asset.durationEach ?? 8}
+              onChange={e => {
+                const v = Math.max(1, Math.min(60, parseInt(e.target.value) || 8));
+                onUpdate({ ...asset, durationEach: v, clipCountOverride: undefined });
+              }}
+              className="w-6 text-center bg-transparent border-b border-[#3f3f46] focus:border-[#71717a] outline-none text-[#a1a1aa] focus:text-white"
+            />
+            <span>s clips</span>
           </span>
         )}
 
@@ -425,7 +499,7 @@ function AssetCard({
 
       {/* Rationale / search concept + search query */}
       <div className="px-3 pb-2">
-        {concept && (
+        {(concept || !asset.generated) && (
           <>
             <p
               ref={rationaleRef}
@@ -433,7 +507,7 @@ function AssetCard({
               className="text-[11px] text-[#52525b] leading-relaxed cursor-pointer hover:text-[#a1a1aa] transition-colors select-none"
               title="Click to see visual variations"
             >
-              {asset.rationale ? asset.rationale : `Search: ${concept}`}
+              {asset.rationale ? asset.rationale : concept ? `Search: ${concept}` : 'Click to get visual ideas…'}
             </p>
 
             {variationsOpen && variationsPos && typeof document !== 'undefined' && createPortal(
@@ -462,6 +536,31 @@ function AssetCard({
                       ? <><span className="animate-spin inline-block">⚡</span> Generating…</>
                       : '↺ Regenerate'}
                   </button>
+                </div>
+
+                {/* User direction seed */}
+                <div className="px-3 py-2 border-b" style={{ borderColor: '#3f3f46' }}>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={variationHint}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setVariationHint(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !variationsLoading) { e.preventDefault(); e.stopPropagation(); generateVariations(); }
+                      }}
+                      placeholder="Suggest a direction, e.g. crime scene…"
+                      className="flex-1 text-[11px] bg-transparent border border-[#3f3f46] rounded px-2 py-1 text-[#a1a1aa] placeholder-[#3f3f46] focus:border-[#71717a] focus:text-white outline-none transition-colors"
+                    />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); generateVariations(); }}
+                      disabled={variationsLoading}
+                      className="text-[11px] px-2 py-1 rounded font-medium transition-colors disabled:opacity-40 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30"
+                    >
+                      Go
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#3f3f46] mt-1">The AI builds shots from your idea, grounded in the narration.</p>
                 </div>
 
                 {/* Loading state */}
@@ -500,6 +599,54 @@ function AssetCard({
           <p className="text-[10px] text-[#3f3f46] mt-1 italic">Generating…</p>
         )}
         {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
+        {isAI && (
+          <input
+            type="text"
+            value={extraInstructions}
+            onChange={e => setExtraInstructions(e.target.value)}
+            placeholder="Additional instructions for next generation…"
+            className="mt-2 w-full text-[11px] bg-transparent border border-[#3f3f46] rounded px-2 py-1 text-[#a1a1aa] placeholder-[#3f3f46] focus:border-[#71717a] focus:text-white outline-none transition-colors"
+          />
+        )}
+        {isStock && (
+          <div className="mt-2 space-y-1.5">
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[#52525b] mr-1">Look:</span>
+              {(['default', 'modern', 'vintage', 'custom'] as const).map(opt => {
+                const active = (asset.footageStyle ?? 'default') === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => onUpdate({
+                      ...asset,
+                      footageStyle: opt === 'default' ? undefined : opt,
+                      ...(opt !== 'custom' && { footageStyleCustom: undefined }),
+                      // Clear the cached query so the next Search rebuilds it with this look
+                      searchQuery: undefined,
+                    })}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border ${
+                      active
+                        ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                        : 'text-[#52525b] border-[#3f3f46] hover:text-[#a1a1aa]'
+                    }`}
+                  >
+                    {opt === 'default' ? 'Default' : opt === 'modern' ? 'Modern' : opt === 'vintage' ? 'Vintage' : 'Custom'}
+                  </button>
+                );
+              })}
+            </div>
+            {asset.footageStyle === 'custom' && (
+              <input
+                type="text"
+                value={asset.footageStyleCustom ?? ''}
+                onChange={e => onUpdate({ ...asset, footageStyleCustom: e.target.value })}
+                placeholder="e.g. VHS home video, 1990s camcorder look"
+                className="w-full text-[11px] bg-transparent border border-[#3f3f46] rounded px-2 py-1 text-[#a1a1aa] placeholder-[#3f3f46] focus:border-[#71717a] focus:text-white outline-none transition-colors"
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Results */}
@@ -644,14 +791,19 @@ function AssetCard({
 
           {/* Load more */}
           {isSearch && hasResults && (
-            <button
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="w-full py-1.5 rounded text-[11px] transition-colors disabled:opacity-40"
-              style={{ background: 'var(--surface)', color: '#71717a', border: '1px solid #3f3f46' }}
-            >
-              {loadingMore ? 'Loading…' : '+ Load more'}
-            </button>
+            <>
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full py-1.5 rounded text-[11px] transition-colors disabled:opacity-40"
+                style={{ background: 'var(--surface)', color: '#71717a', border: '1px solid #3f3f46' }}
+              >
+                {loadingMore ? 'Loading…' : '+ Load more'}
+              </button>
+              {loadMoreError && (
+                <p className="text-xs text-red-400 mt-1 text-center">{loadMoreError}</p>
+              )}
+            </>
           )}
         </div>
       )}
@@ -728,16 +880,24 @@ function HighlightedNarration({
 
 // ─── Segment card ─────────────────────────────────────────────────────────────
 
-function SegmentCard({
+export { ASSET_LABELS, ASSET_ICONS, ASSET_COLORS, ALL_TYPES, fmtDuration };
+
+export function SegmentCard({
   segment,
   scene,
   script,
   analysis,
   anthropicApiKey,
+  xaiApiKey,
+  llmProvider,
+  claudeModelPrompts,
   pexelsApiKey,
   braveApiKey,
   realImageProvider,
+  stockFootageStyle,
+  stockFootageStyleCustom,
   savingUrl,
+  initialOpen,
   onSegmentUpdate,
   onSaveToScene,
   onLightbox,
@@ -748,16 +908,22 @@ function SegmentCard({
   script: Script;
   analysis: Analysis | null;
   anthropicApiKey: string;
+  xaiApiKey?: string;
+  llmProvider?: 'claude' | 'grok';
+  claudeModelPrompts?: string;
   pexelsApiKey?: string;
   braveApiKey?: string;
   realImageProvider?: 'brave' | 'duckduckgo';
+  stockFootageStyle?: 'modern' | 'vintage' | 'custom';
+  stockFootageStyleCustom?: string;
   savingUrl: string | null;
+  initialOpen?: boolean;
   onSegmentUpdate: (updated: DirectorSegment) => void;
   onSaveToScene: (url: string, name: string, sceneId: string) => Promise<void>;
   onLightbox: (src: string, alt: string) => void;
   onVideoPlayer: (src: string, title: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen ?? false);
   // null = closed; 'single' = open for single-slot segment; number = open for that slot index
   const [addPickerSlot, setAddPickerSlot] = useState<number | 'single' | null>(null);
   const [highlightedSlot, setHighlightedSlot] = useState<number | null>(null);
@@ -824,8 +990,9 @@ function SegmentCard({
 
   const commonCardProps = {
     segment, scene, script, analysis,
-    anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider,
-    savingUrl, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
+    anthropicApiKey, xaiApiKey, llmProvider, claudeModelPrompts, pexelsApiKey, braveApiKey, realImageProvider,
+    stockFootageStyle, stockFootageStyleCustom,
+    savingUrl, sliceMediaFiles: segment.mediaFiles, onUpdate: updateAsset, onSaveToScene, onLightbox, onVideoPlayer,
   };
 
   return (
@@ -987,7 +1154,7 @@ function SegmentCard({
 
 // ─── Main DirectorView ────────────────────────────────────────────────────────
 
-export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, pexelsApiKey, braveApiKey, realImageProvider, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
+export default function DirectorView({ script, analysis, onScriptChange, anthropicApiKey, xaiApiKey, llmProvider, claudeModelPrompts, pexelsApiKey, braveApiKey, realImageProvider, stockFootageStyle, stockFootageStyleCustom, activeSceneId: activeSceneIdProp, onActiveSceneChange }: Props) {
   const storage = useStorage();
   const scriptRef = useRef(script);
   scriptRef.current = script;
@@ -1099,6 +1266,7 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
             cartesiaApiKey:       settings.cartesiaApiKey,
             cartesiaVoiceId:      settings.cartesiaVoiceId,
             cartesiaSpeed:        settings.cartesiaSpeed,
+            cartesiaModel:        settings.cartesiaModel,
           }),
         }
       );
@@ -1455,9 +1623,14 @@ export default function DirectorView({ script, analysis, onScriptChange, anthrop
                   script={script}
                   analysis={analysis}
                   anthropicApiKey={anthropicApiKey}
+                  xaiApiKey={xaiApiKey}
+                  llmProvider={llmProvider}
+                  claudeModelPrompts={claudeModelPrompts}
                   pexelsApiKey={pexelsApiKey}
                   braveApiKey={braveApiKey}
                   realImageProvider={realImageProvider}
+                  stockFootageStyle={stockFootageStyle}
+                  stockFootageStyleCustom={stockFootageStyleCustom}
                   savingUrl={savingUrl}
                   onSegmentUpdate={seg => updateSegment(activeScene.sceneId, seg)}
                   onSaveToScene={saveToScene}
